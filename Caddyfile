@@ -1,0 +1,45 @@
+# Caddy auto-provisions HTTPS (Let's Encrypt in prod; self-signed local CA on localhost).
+# HTTPS is mandatory: Service Workers and navigator.geolocation refuse to run without it.
+#
+# For a real VPS, replace `localhost` with your domain, e.g. `app.example.com`.
+
+localhost {
+	encode gzip
+
+	# API + webhook + heartbeat -> backend
+	handle /api/* {
+		reverse_proxy backend:3000
+	}
+
+	# WebSocket real-time layer -> backend (Caddy proxies the upgrade automatically)
+	handle /ws {
+		reverse_proxy backend:3000
+	}
+
+	# Shared assets (stylesheet) reachable from all three PWAs.
+	handle /shared/* {
+		root * /srv/frontend
+		file_server
+	}
+
+	# Driver PWA
+	handle_path /driver/* {
+		root * /srv/frontend/driver
+		file_server
+		try_files {path} /index.html
+	}
+
+	# Operator PWA
+	handle_path /operator/* {
+		root * /srv/frontend/operator
+		file_server
+		try_files {path} /index.html
+	}
+
+	# User PWA (default)
+	handle {
+		root * /srv/frontend/user
+		file_server
+		try_files {path} /index.html
+	}
+}

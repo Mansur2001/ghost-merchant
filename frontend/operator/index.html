@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#000000" />
+  <link rel="stylesheet" href="/shared/styles.css" />
+  <script src="/shared/theme.js"></script>
+  <title>Ghost Merchant — Operator</title>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <span class="dot" id="liveDot"></span>
+      <h1>Operator / Dispatch</h1>
+      <span class="badge pending" id="oracleBadge" style="margin-left:auto;">Oracle: ?</span>
+      <a class="linkbtn" href="/" title="Go to the home page" style="margin-left:8px;">Home</a>
+      <button class="linkbtn" id="themeToggle" type="button" title="Toggle theme" style="margin-left:8px;">☀️</button>
+      <button class="linkbtn hidden" id="logoutBtn" type="button" style="margin-left:8px;">Log out</button>
+    </header>
+    <!-- Status bar shown once the operator is signed in: live feed of system updates. -->
+    <div class="statusbar hidden" id="statusbar">
+      <span class="sb-dot"></span>
+      <span class="sb-text" id="sbText">Log in to begin monitoring.</span>
+      <span class="sb-time" id="sbTime"></span>
+    </div>
+    <main>
+      <section id="loginView" class="card">
+        <label for="password">Operator password</label>
+        <input id="password" type="password" placeholder="••••••••" />
+        <button id="loginBtn" type="button">Log in</button>
+      </section>
+
+      <section id="dash" class="hidden">
+        <div class="card">
+          <h3 style="margin:0 0 8px;">Active orders</h3>
+          <div id="orders" class="scroll-list"></div>
+        </div>
+
+        <div class="card">
+          <h3 style="margin:0 0 8px;">Unmatched receipts (reconcile)</h3>
+          <div id="unmatched" class="scroll-list"></div>
+        </div>
+
+        <div class="card">
+          <h3 style="margin:0 0 8px;">Drivers</h3>
+          <div id="drivers" class="scroll-list"></div>
+        </div>
+
+        <div class="card">
+          <h3 style="margin:0 0 8px;">Add driver</h3>
+          <div class="row"><input id="dName" placeholder="Name" /><input id="dMsisdn" placeholder="61 234 5678" /></div>
+          <div class="phone-hint muted" id="phoneHint"></div>
+          <input id="dPin" placeholder="PIN" inputmode="numeric" style="margin-top:10px;" />
+          <button id="addDriver" type="button">Create driver</button>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/shared/phone.js"></script>
+  <script src="/operator/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('/operator/sw.js'));
+    }
+  </script>
+</body>
+</html>

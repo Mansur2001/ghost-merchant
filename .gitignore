@@ -1,0 +1,10 @@
+.env
+CREDENTIALS.md
+node_modules/
+backend/node_modules/
+*.log
+.DS_Store
+caddy_data/
+caddy_config/
+postgres_data/
+minio_data/

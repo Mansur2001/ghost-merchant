@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" href="/icon.svg" />
+  <link rel="stylesheet" href="/shared/styles.css" />
+  <script src="/shared/theme.js"></script>
+  <title>Ghost Merchant</title>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <span class="dot" id="liveDot" title="realtime connection"></span>
+      <h1>Ghost Merchant</h1>
+      <button class="linkbtn" id="navHome" type="button" style="margin-left:auto;">Home</button>
+      <button class="linkbtn" id="faqBtn" type="button">FAQ</button>
+      <button class="linkbtn" id="themeToggle" type="button" title="Toggle theme">☀️</button>
+    </header>
+    <main>
+      <!-- Home: what Ghost Merchant is + role entry points ("sign up" tabs). Shown first;
+           auto-hidden when we resume an existing order. -->
+      <section id="landingView" class="card landing">
+        <div class="hero">
+          <h2>Order anything from the market — pay from your own phone.</h2>
+          <p class="muted">
+            Ghost Merchant is a sovereign, local-first delivery service. You pay a driver
+            directly with EVC&nbsp;Plus / eDahab — no bank account, no app store account, no
+            foreign servers. Just your phone number and a landmark.
+          </p>
+        </div>
+
+        <div class="roles">
+          <button class="role" id="asCustomer" type="button">
+            <span class="role-icon">🛒</span>
+            <span class="role-title">I'm a customer</span>
+            <span class="role-sub muted">Place an order &amp; track it live</span>
+          </button>
+          <a class="role" href="/driver/">
+            <span class="role-icon">🏍️</span>
+            <span class="role-title">I'm a driver</span>
+            <span class="role-sub muted">Sign in with your PIN, pick up jobs</span>
+          </a>
+          <a class="role" href="/operator/">
+            <span class="role-icon">🛡️</span>
+            <span class="role-title">I'm an operator</span>
+            <span class="role-sub muted">Coordinate orders &amp; payments</span>
+          </a>
+        </div>
+
+        <ul class="how muted">
+          <li><strong>1.</strong> Tell us what you need and your landmark.</li>
+          <li><strong>2.</strong> Tap to pay — your dialer opens with the code pre-filled.</li>
+          <li><strong>3.</strong> Watch your order go from paid → dispatched → delivered.</li>
+        </ul>
+      </section>
+
+      <!-- Step 1: identify + describe the need (chat-first coordination) -->
+      <section id="startView" class="card hidden">
+        <button class="secondary" id="homeBtn" type="button" style="max-width:110px;margin:0 0 12px;">← Home</button>
+        <label for="phone">Your phone number (this is your identity)</label>
+        <input id="phone" type="tel" inputmode="tel" placeholder="61 234 5678" autocomplete="tel" />
+        <div class="phone-hint muted" id="phoneHint">Enter your mobile number</div>
+        <button class="secondary" id="resumeBtn" type="button">Resume a previous order</button>
+
+        <label for="request">What do you need? Describe it in your own words.</label>
+        <textarea id="request" placeholder="e.g. 2kg rice, cooking oil, and 6 eggs from the market near me"></textarea>
+
+        <label for="amount">Agreed total (USD)</label>
+        <input id="amount" type="number" step="0.01" min="0" placeholder="5.50" />
+
+        <div id="locStatus" class="muted">Location not set.</div>
+        <button class="secondary" id="locBtn" type="button">Set my delivery location</button>
+
+        <label for="landmark">Nearest landmark (required — drivers navigate by this)</label>
+        <input id="landmark" type="text" placeholder="Green house next to the yellow pharmacy" />
+
+        <label for="refPhoto">Reference photo (optional — helps the driver find the item)</label>
+        <input id="refPhoto" type="file" accept="image/*" capture="environment" />
+
+        <button id="submitBtn" type="button">Create order &amp; get payment code</button>
+      </section>
+
+      <!-- Step 2: pay + track -->
+      <section id="orderView" class="card hidden">
+        <div class="row" style="align-items:center;">
+          <div>
+            <div class="muted">Order #<span id="orderId"></span></div>
+            <div>Total: $<span id="orderTotal"></span></div>
+          </div>
+          <div style="text-align:right;">
+            <span class="badge pending" id="statusBadge">PENDING_PAYMENT</span>
+          </div>
+        </div>
+
+        <a id="payLink" href="#"><button id="payBtn" type="button">Pay now (EVC&nbsp;Plus)</button></a>
+        <p class="muted">Tapping opens your dialer with the USSD code pre-filled. Approve the transfer on your phone — this page updates automatically when payment is confirmed.</p>
+
+        <h3 style="margin:18px 0 8px;">Progress</h3>
+        <ul class="timeline" id="timeline"></ul>
+
+        <h3 style="margin:18px 0 8px;">Photos</h3>
+        <div class="photos" id="photos"><span class="muted">No photos yet.</span></div>
+
+        <h3 style="margin:18px 0 8px;">Chat</h3>
+        <div class="thread" id="thread"></div>
+        <div class="row" style="margin-top:10px;">
+          <input id="chatInput" type="text" placeholder="Message the driver / operator…" />
+          <button id="chatSend" type="button" style="max-width:96px;margin-top:0;">Send</button>
+        </div>
+      </section>
+      <!-- Resume: list of the customer's orders looked up by phone -->
+      <section id="resumeView" class="card hidden">
+        <div class="row" style="align-items:center;">
+          <h3 style="margin:0;">Your orders</h3>
+          <button class="secondary" id="resumeBack" type="button" style="max-width:90px;margin:0;">← Back</button>
+        </div>
+        <div id="resumeList" class="scroll-list"></div>
+      </section>
+
+      <!-- FAQ: how the service works, in plain language. -->
+      <section id="faqView" class="card hidden">
+        <div class="row" style="align-items:center;">
+          <h3 style="margin:0;">FAQ</h3>
+          <button class="secondary" id="faqBack" type="button" style="max-width:90px;margin:0;">← Back</button>
+        </div>
+        <details open><summary>What is Ghost Merchant?</summary>
+          <p class="muted">A local-first way to order goods from the market and have a driver bring them to you. You pay the driver directly from your own phone — no bank account or foreign app needed.</p></details>
+        <details><summary>How do I pay?</summary>
+          <p class="muted">After you create an order, tap <strong>Pay now</strong>. Your phone's dialer opens with the EVC&nbsp;Plus / eDahab code pre-filled. Approve the transfer and this page updates automatically once payment is confirmed.</p></details>
+        <details><summary>Is my phone number safe?</summary>
+          <p class="muted">Your number is your identity here — it isn't shared with advertisers or foreign servers. Everything runs on self-hosted infrastructure.</p></details>
+        <details><summary>Why do you need a landmark?</summary>
+          <p class="muted">Street addresses are unreliable, so drivers navigate by a nearby landmark (e.g. "green house next to the yellow pharmacy"). A reference photo helps too.</p></details>
+        <details><summary>How do I track my order?</summary>
+          <p class="muted">The progress timeline and chat update live as the driver accepts, shops, and delivers. You'll also see a delivery-proof photo when it arrives.</p></details>
+      </section>
+    </main>
+  </div>
+
+  <script src="/shared/phone.js"></script>
+  <script src="/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
+    }
+  </script>
+</body>
+</html>

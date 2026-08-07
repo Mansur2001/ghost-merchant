@@ -1,0 +1,157 @@
+/* Shared, tiny stylesheet for all three PWAs. Kept lean to respect the 1.5MB budget.
+   Theme model: only the background/text flip between black (dark) and white (light).
+   Gold (--gold) is the constant trim/border/accent across BOTH themes and every PWA. */
+:root, :root[data-theme="dark"] {
+  --bg: #000000;
+  --panel: #0d0d0d;
+  --panel-2: #1a1a1a;
+  --text: #ffffff;
+  --muted: #a8a8a8;
+  --gold: #d4af37;
+  --line: var(--gold);      /* all trim/borders are gold */
+  --accent: var(--gold);    /* primary actions are gold */
+  --accent-2: #e6c65c;      /* lighter gold for highlights/chat */
+  --warn: #f59e0b;          /* semantic status colors kept for meaning */
+  --danger: #ef4444;
+  --on-gold: #1a1400;       /* readable text on a gold fill */
+}
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --panel-2: #f4f4f4;
+  --text: #000000;
+  --muted: #5a5a5a;
+  --gold: #c99700;          /* slightly deeper gold reads better on white */
+  --line: var(--gold);
+  --accent: var(--gold);
+  --accent-2: #a87c00;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; height: 100%;
+  background: var(--bg); color: var(--text);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+/* Dynamic sizing: fluid full-width on mobile, centered + capped on PC. Horizontal padding
+   scales with the viewport (clamp) so there's breathing room on phones and desktops alike. */
+.app {
+  width: 100%; max-width: 720px; margin: 0 auto;
+  min-height: 100%; display: flex; flex-direction: column;
+}
+/* Reusable wide container per the project sizing standard (used for full-bleed sections). */
+.container { max-width: 1200px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 24px); }
+header {
+  padding: 14px clamp(16px, 4vw, 24px); border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 10px; position: sticky; top: 0; background: var(--bg); z-index: 5;
+}
+header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+header .dot.on { background: var(--accent); }
+main { flex: 1; padding: clamp(16px, 4vw, 24px); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+input, textarea, select {
+  width: 100%; padding: 11px 12px; border-radius: 9px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font: inherit;
+}
+textarea { resize: vertical; min-height: 70px; }
+button {
+  width: 100%; padding: 12px; border: 0; border-radius: 9px; font: inherit; font-weight: 600;
+  background: var(--accent); color: var(--on-gold); cursor: pointer; margin-top: 12px;
+}
+button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); }
+button.warn { background: var(--warn); color: #241a02; }
+button.danger { background: var(--danger); color: #fff; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+/* Compact header button (logout/reset) — overrides the full-width default. */
+.linkbtn {
+  width: auto; margin: 0; padding: 6px 12px; font-size: 13px; font-weight: 600;
+  background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 8px;
+}
+.linkbtn:hover { color: var(--text); border-color: var(--muted); }
+.muted { color: var(--muted); font-size: 13px; }
+.row { display: flex; gap: 10px; }
+.row > * { flex: 1; }
+.hidden { display: none !important; }
+
+/* Chat + timeline */
+.thread { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow-y: auto; padding-right: 4px; }
+.msg { padding: 9px 12px; border-radius: 12px; max-width: 82%; font-size: 14px; }
+.msg.user { align-self: flex-end; background: var(--accent-2); color: var(--on-gold); }
+.msg.system { align-self: center; background: transparent; color: var(--muted); font-size: 12px; text-align: center; }
+.msg.driver, .msg.operator { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--line); }
+
+.timeline { list-style: none; padding: 0; margin: 0; }
+.timeline li { position: relative; padding: 0 0 16px 22px; }
+.timeline li::before { content: ""; position: absolute; left: 4px; top: 4px; width: 10px; height: 10px; border-radius: 50%; background: var(--line); }
+.timeline li.done::before { background: var(--accent); }
+.timeline li.active::before { background: var(--accent-2); box-shadow: 0 0 0 4px rgba(212,175,55,.25); }
+.timeline li:not(:last-child)::after { content: ""; position: absolute; left: 8px; top: 14px; bottom: 0; width: 2px; background: var(--line); }
+.timeline .label { font-size: 14px; }
+.timeline .when { font-size: 12px; color: var(--muted); }
+
+.badge { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.badge.paid { background: rgba(34,197,94,.15); color: var(--accent); }
+.badge.pending { background: rgba(245,158,11,.15); color: var(--warn); }
+.badge.fail { background: rgba(239,68,68,.15); color: var(--danger); }
+.toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line); padding: 10px 16px; border-radius: 999px; font-size: 14px; }
+
+/* Persistent status bar (always on for operator; on the active order for user/driver) */
+.statusbar {
+  position: sticky; top: 49px; z-index: 4;
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px clamp(16px, 4vw, 24px); font-size: 13px;
+  background: var(--panel-2); border-bottom: 1px solid var(--line);
+}
+.statusbar .sb-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+.statusbar.ok .sb-dot { background: var(--accent); }
+.statusbar.info .sb-dot { background: var(--accent-2); }
+.statusbar.warn .sb-dot { background: var(--warn); }
+.statusbar.down .sb-dot { background: var(--danger); }
+.statusbar .sb-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.statusbar .sb-time { color: var(--muted); font-size: 12px; flex: 0 0 auto; }
+.phone-hint { font-size: 13px; margin-top: 4px; min-height: 18px; }
+
+/* Landing / home — role selection ("sign up" entry points for each user type) */
+.landing .hero h2 { font-size: 20px; line-height: 1.3; margin: 0 0 8px; }
+.landing .hero p { margin: 0 0 4px; }
+.roles { display: flex; flex-direction: column; gap: 10px; margin: 16px 0; }
+.role {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  text-align: left; text-decoration: none;
+  width: 100%; margin: 0; padding: 14px;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 12px; cursor: pointer;
+}
+.role:hover { border-color: var(--accent); }
+.role .role-icon { font-size: 22px; }
+.role .role-title { font-weight: 600; font-size: 15px; }
+.role .role-sub { font-weight: 400; }
+.how { list-style: none; padding: 0; margin: 4px 0 0; display: flex; flex-direction: column; gap: 6px; }
+.how strong { color: var(--accent); }
+
+/* Photo gallery (customer reference + driver delivery proof) */
+.photos { display: flex; flex-wrap: wrap; gap: 10px; }
+.photo { margin: 0; width: 120px; }
+.photo img {
+  width: 120px; height: 120px; object-fit: cover;
+  border-radius: 10px; border: 1px solid var(--line); display: block;
+}
+.photo figcaption { margin-top: 4px; text-align: center; }
+
+/* Paginated/scrollable list container: dozens of rows scroll INSIDE this, not the page. */
+.scroll-list {
+  max-height: 60vh; overflow-y: auto; padding-right: 4px;
+  -webkit-overflow-scrolling: touch;      /* momentum scroll on iOS */
+  overscroll-behavior: contain;           /* don't chain scroll to the page */
+}
+.scroll-list > .card:last-child { margin-bottom: 0; }
+/* Thin gold scrollbar so the container reads as its own pane. */
+.scroll-list::-webkit-scrollbar { width: 8px; }
+.scroll-list::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; }
+.scroll-list { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+
+/* FAQ accordion */
+details { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-top: 10px; }
+details summary { cursor: pointer; font-weight: 600; }
+details p { margin: 8px 0 2px; }

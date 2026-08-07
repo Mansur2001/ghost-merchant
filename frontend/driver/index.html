@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
+  <link rel="stylesheet" href="/shared/styles.css" />
+  <script src="/shared/theme.js"></script>
+  <title>Ghost Merchant — Driver</title>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <span class="dot" id="liveDot"></span>
+      <h1>Driver</h1>
+      <a class="linkbtn" href="/" title="Go to the home page" style="margin-left:auto;">Home</a>
+      <button class="linkbtn" id="themeToggle" type="button" title="Toggle theme">☀️</button>
+      <button class="linkbtn hidden" id="logoutBtn" type="button">Log out</button>
+    </header>
+    <div class="statusbar hidden" id="statusbar">
+      <span class="sb-dot"></span>
+      <span class="sb-text" id="sbText"></span>
+      <span class="sb-time" id="sbTime"></span>
+    </div>
+    <main>
+      <!-- Login -->
+      <section id="loginView" class="card">
+        <label for="msisdn">Driver phone number</label>
+        <input id="msisdn" type="tel" placeholder="61 234 5678" />
+        <div class="phone-hint muted" id="phoneHint"></div>
+        <label for="pin">PIN</label>
+        <input id="pin" type="password" inputmode="numeric" placeholder="••••" />
+        <button id="loginBtn" type="button">Log in</button>
+      </section>
+
+      <!-- Queue -->
+      <section id="queueView" class="card hidden">
+        <div class="row" style="align-items:center;">
+          <h3 style="margin:0;">Orders</h3>
+          <button class="secondary" id="refreshBtn" type="button" style="max-width:110px;margin:0;">Refresh</button>
+        </div>
+        <div id="queue" class="scroll-list"></div>
+      </section>
+
+      <!-- Order detail / shopping list -->
+      <section id="detailView" class="card hidden">
+        <button class="secondary" id="backBtn" type="button" style="margin:0 0 12px;">← Back</button>
+        <div class="row" style="align-items:center;">
+          <div class="muted">Order #<span id="dOrderId"></span></div>
+          <span class="badge pending" id="dStatus"></span>
+        </div>
+
+        <h3 style="margin:14px 0 6px;">Shopping list &amp; budget</h3>
+        <div id="dItems"></div>
+        <div class="muted">Budget (customer paid): $<span id="dBudget"></span></div>
+
+        <h3 style="margin:16px 0 6px;">Delivery</h3>
+        <div class="card" style="background:var(--panel-2);">
+          <div><strong>Landmark:</strong> <span id="dLandmark"></span></div>
+          <a id="navLink" href="#"><button class="secondary" type="button">Open directions (native map)</button></a>
+          <a id="callLink" href="#"><button class="secondary" type="button">Call customer</button></a>
+        </div>
+
+        <h3 style="margin:16px 0 6px;">Update stock / price</h3>
+        <textarea id="adjustNote" placeholder="e.g. Sugar out of stock, replaced with jaggery. Oil price +0.50."></textarea>
+        <button class="warn" id="adjustBtn" type="button">Send adjustment to customer</button>
+
+        <h3 style="margin:16px 0 6px;">Photos</h3>
+        <div class="photos" id="dPhotos"><span class="muted">No photos yet.</span></div>
+        <input id="proofPhoto" type="file" accept="image/*" capture="environment" style="margin-top:10px;" />
+        <button class="secondary" id="proofBtn" type="button">Upload delivery photo</button>
+
+        <h3 style="margin:16px 0 6px;">Actions</h3>
+        <div id="actions"></div>
+      </section>
+    </main>
+  </div>
+  <script src="/shared/phone.js"></script>
+  <script src="/driver/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('/driver/sw.js'));
+    }
+  </script>
+</body>
+</html>
