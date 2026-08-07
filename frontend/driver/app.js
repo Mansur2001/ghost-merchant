@@ -152,10 +152,12 @@ $('proofBtn').addEventListener('click', async () => {
 function renderActions() {
   const s = current.status;
   const btns = [];
-  if (s === 'PAID_UNASSIGNED') btns.push(['Accept order', 'accept', '']);
+  // No "Accept" button: dispatch is operator-driven, so a driver never self-claims an order.
+  // A PAID_UNASSIGNED order can't reach this screen anyway — the queue only returns orders
+  // already assigned to this driver.
   if (s === 'DISPATCHED') btns.push(['Items secured — heading to customer', 'secured', '']);
   if (s === 'IN_TRANSIT') btns.push(['Mark delivered', 'delivered', '']);
-  if (['PAID_UNASSIGNED', 'DISPATCHED', 'IN_TRANSIT'].includes(s))
+  if (['DISPATCHED', 'IN_TRANSIT'].includes(s))
     btns.push(['Report failure / refund', 'failed', 'danger']);
   $('actions').innerHTML = btns
     .map(([label, action, cls]) => `<button class="${cls}" data-action="${action}">${label}</button>`)
@@ -194,10 +196,24 @@ function connectSocket() {
   if (ws) return;
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws`);
-  ws.onopen = () => { $('liveDot').classList.add('on'); ws.send(JSON.stringify({ type: 'subscribe_operator' })); };
-  ws.onclose = () => { $('liveDot').classList.remove('on'); ws = null; setTimeout(connectSocket, 2500); };
+  // The token goes in the first frame (a browser can't set handshake headers, and a token in
+  // the query string lands in every access log). Subscribing happens only once the server
+  // has confirmed the session.
+  ws.onopen = () => { $('liveDot').classList.add('on'); ws.send(JSON.stringify({ type: 'auth', token })); };
+  ws.onclose = () => { $('liveDot').classList.remove('on'); ws = null; if (token) setTimeout(connectSocket, 2500); };
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
+    if (m.type === 'authenticated') {
+      // A driver's own feed — events for the orders assigned to THIS driver. Replaces the
+      // old subscribe_operator, which handed every driver the whole system's traffic.
+      ws.send(JSON.stringify({ type: 'subscribe_driver' }));
+      return;
+    }
+    if (m.type === 'auth_error') {
+      sessionStorage.removeItem('driverToken');
+      token = null;
+      return location.reload();
+    }
     // Live-update the status bar for the order the driver is currently working.
     if (m.type === 'order_state' && current && String(m.orderId) === String(current.id)) {
       current.status = m.to;

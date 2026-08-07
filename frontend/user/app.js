@@ -1,9 +1,47 @@
 // User PWA logic. Vanilla JS, no framework (keeps the bundle tiny per the data budget).
-// Flow: describe need -> geolocate + landmark -> create order -> tel: USSD pay ->
-// subscribe over WebSocket -> live timeline + chat until DELIVERED.
+// Flow: verify phone by SMS code -> describe need -> geolocate + landmark -> create order ->
+// tel: USSD pay -> subscribe over WebSocket -> live timeline + chat until DELIVERED.
 
 const $ = (id) => document.getElementById(id);
-const api = (path, opts) => fetch(`/api${path}`, opts).then((r) => r.json());
+
+// ── Session ──
+// The token is the proof that this handset holds the phone number every order is authorized
+// against. localStorage (not sessionStorage) on purpose: re-verifying costs a real SMS, and
+// the customer is on one personal device. Cleared on sign-out or on any 401.
+const TOKEN_KEY = 'gm_token';
+const PHONE_KEY = 'gm_phone';
+let token = localStorage.getItem(TOKEN_KEY);
+let myPhone = localStorage.getItem(PHONE_KEY);
+
+function setSession(newToken, phone) {
+  token = newToken;
+  myPhone = phone;
+  localStorage.setItem(TOKEN_KEY, newToken);
+  localStorage.setItem(PHONE_KEY, phone);
+}
+function clearSession() {
+  token = null;
+  myPhone = null;
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(PHONE_KEY);
+  localStorage.removeItem('gm_last');
+}
+
+// Every request carries the bearer token. A 401 means the session died (expired, or the
+// server's SESSION_SECRET was rotated) — drop it and send the user back to sign-in rather
+// than leaving the UI in a half-broken state.
+async function api(path, opts = {}) {
+  const headers = { ...(opts.headers || {}) };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`/api${path}`, { ...opts, headers });
+  if (res.status === 401 && token) {
+    clearSession();
+    showView('authView');
+    toast('Your session expired. Please sign in again.');
+    return { error: 'session expired' };
+  }
+  return res.json().catch(() => ({ error: 'unexpected server response' }));
+}
 
 const STATES = [
   'PENDING_PAYMENT',
@@ -36,14 +74,90 @@ SomPhone.attach({
 });
 
 // ── Home / role selection ──
-// The landing is the default first screen; "I'm a customer" reveals the order flow.
+// The landing is the default first screen; "I'm a customer" reveals sign-in, or jumps
+// straight to the order form if this handset is already verified.
 $('asCustomer').addEventListener('click', () => {
-  $('landingView').classList.add('hidden');
-  $('startView').classList.remove('hidden');
+  showView(token ? 'startView' : 'authView');
+  if (token) $('signedInAs').textContent = myPhone || '';
 });
-$('homeBtn').addEventListener('click', () => {
-  $('startView').classList.add('hidden');
-  $('landingView').classList.remove('hidden');
+$('homeBtn').addEventListener('click', () => showView('landingView'));
+$('authHome').addEventListener('click', () => showView('landingView'));
+
+// ── Sign-in: request a code, then verify it ──
+async function requestCode() {
+  if (!phoneValid) return toast('Enter a valid Somali mobile number.');
+  $('sendCodeBtn').disabled = true;
+  $('resendBtn').disabled = true;
+  $('otpStatus').textContent = 'Sending code…';
+  const res = await api('/auth/otp/request', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone: phoneE164 }),
+  });
+  $('sendCodeBtn').disabled = false;
+  if (res.error) {
+    // 429 carries retryAfter — tell them exactly how long, don't just fail.
+    $('otpStatus').textContent = res.retryAfter
+      ? `${res.error}. Try again in ${res.retryAfter}s.`
+      : res.error;
+    $('resendBtn').disabled = false;
+    return;
+  }
+  $('codeStep').classList.remove('hidden');
+  $('codeInput').focus();
+  // devCode is only ever present with the log transport in a non-production backend.
+  $('otpStatus').textContent = res.devCode
+    ? `Dev mode — your code is ${res.devCode}`
+    : `Code sent to ${res.phone}. It expires in ${Math.round(res.expiresInSeconds / 60)} minutes.`;
+  startResendCountdown();
+}
+
+// The server enforces a 60s cooldown; mirror it in the UI so the button isn't a lie.
+function startResendCountdown(seconds = 60) {
+  let left = seconds;
+  $('resendBtn').disabled = true;
+  const tick = () => {
+    $('resendBtn').textContent = left > 0 ? `Send a new code (${left}s)` : 'Send a new code';
+    if (left <= 0) { $('resendBtn').disabled = false; clearInterval(timer); }
+    left -= 1;
+  };
+  const timer = setInterval(tick, 1000);
+  tick();
+}
+
+async function verifyCode() {
+  const code = $('codeInput').value.trim();
+  if (!/^\d{6}$/.test(code)) return toast('Enter the 6-digit code.');
+  $('verifyBtn').disabled = true;
+  const res = await api('/auth/otp/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone: phoneE164, code }),
+  });
+  $('verifyBtn').disabled = false;
+  if (res.error || !res.token) {
+    $('otpStatus').textContent = res.error || 'Could not verify that code.';
+    return;
+  }
+  setSession(res.token, res.phone);
+  $('codeInput').value = '';
+  $('otpStatus').textContent = '';
+  $('codeStep').classList.add('hidden');
+  $('signedInAs').textContent = res.phone;
+  showView('startView');
+  toast('Phone verified ✓');
+}
+
+$('sendCodeBtn').addEventListener('click', requestCode);
+$('resendBtn').addEventListener('click', requestCode);
+$('verifyBtn').addEventListener('click', verifyCode);
+$('codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') verifyCode(); });
+$('signOutBtn').addEventListener('click', () => {
+  if (ws) { try { ws.close(); } catch { /* already closed */ } ws = null; }
+  order = null;
+  clearSession();
+  showView('landingView');
+  toast('Signed out.');
 });
 
 // Status bar was removed from the customer PWA (kept only for signed-in operator/driver).
@@ -79,13 +193,14 @@ $('locBtn').addEventListener('click', () => {
 });
 
 // ── Create order ──
+// The owning phone is no longer sent: the server takes it from the verified session, so an
+// order can only ever be created under the number this handset proved it holds.
 $('submitBtn').addEventListener('click', async () => {
   const request = $('request').value.trim();
   const totalAmount = parseFloat($('amount').value);
   const landmark = $('landmark').value.trim();
 
-  if (!phoneValid) return toast('Enter a valid Somali mobile number.');
-  const userPhone = phoneE164;
+  if (!token) return showView('authView');
   if (!request) return toast('Describe what you need.');
   if (!(totalAmount >= 0)) return toast('Enter a valid amount.');
   if (!landmark) return toast('Landmark is required.');
@@ -96,7 +211,6 @@ $('submitBtn').addEventListener('click', async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        userPhone,
         items: [{ text: request }],
         totalAmount,
         lat: coords?.lat ?? null,
@@ -112,13 +226,14 @@ $('submitBtn').addEventListener('click', async () => {
     await api(`/orders/${order.id}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sender: 'user', body: request }),
+      body: JSON.stringify({ body: request }),
     });
     // Optional reference photo → MinIO.
     const file = $('refPhoto').files[0];
     if (file) { try { await uploadPhoto(order.id, file); await loadPhotos(order.id); } catch { /* non-fatal */ } }
   } catch (e) {
     toast(e.message);
+  } finally {
     $('submitBtn').disabled = false;
   }
 });
@@ -141,7 +256,10 @@ function enterOrderView(ussdUri) {
 async function uploadPhoto(orderId, file) {
   await fetch(`/api/orders/${orderId}/photos/order_ref`, {
     method: 'POST',
-    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      Authorization: `Bearer ${token}`,
+    },
     body: file,
   });
 }
@@ -150,29 +268,49 @@ async function loadPhotos(orderId) {
     const { photos } = await api(`/orders/${orderId}/photos`);
     const el = $('photos');
     if (!photos || !photos.length) { el.innerHTML = '<span class="muted">No photos yet.</span>'; return; }
+    // Photo bytes are authorized too, so they can't be loaded with a plain <img src>.
+    // Fetch each with the token and render from an object URL.
     el.innerHTML = photos.map((p) => `
       <figure class="photo">
-        <img src="${p.url}" alt="${p.kind}" loading="lazy" />
+        <img data-src="${p.url}" alt="${p.kind}" loading="lazy" />
         <figcaption class="muted">${p.kind === 'delivery_proof' ? 'Delivery proof' : 'Reference'}</figcaption>
       </figure>`).join('');
+    el.querySelectorAll('img[data-src]').forEach(async (img) => {
+      try {
+        const r = await fetch(img.dataset.src, { headers: { Authorization: `Bearer ${token}` } });
+        if (!r.ok) return;
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        img.src = url;
+        img.addEventListener('load', () => URL.revokeObjectURL(url), { once: true });
+      } catch { /* leave the placeholder */ }
+    });
   } catch { /* ignore */ }
 }
 
-// ── Realtime socket: subscribe to THIS order and react to pushes ──
+// ── Realtime socket: authenticate, then subscribe to THIS order ──
+// A browser can't set headers on a WebSocket handshake and a token in the query string ends
+// up in every access log, so the token goes in the first frame instead. The server drops
+// sockets that haven't authenticated within 10s.
 function connectSocket() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onopen = () => {
     $('liveDot').classList.add('on');
-    ws.send(JSON.stringify({ type: 'subscribe', orderId: order.id }));
+    ws.send(JSON.stringify({ type: 'auth', token }));
   };
   ws.onclose = () => {
     $('liveDot').classList.remove('on');
-    setTimeout(connectSocket, 2000); // auto-reconnect
+    if (token && order) setTimeout(connectSocket, 2000); // auto-reconnect
   };
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
-    if (m.type === 'order_state') {
+    if (m.type === 'authenticated') {
+      if (order) ws.send(JSON.stringify({ type: 'subscribe', orderId: order.id }));
+    } else if (m.type === 'auth_error') {
+      clearSession();
+      showView('authView');
+    } else if (m.type === 'order_state') {
       order.status = m.to;
       renderTimeline(m.to);
       updateBadge(m.to);
@@ -226,15 +364,16 @@ async function sendChat() {
   const body = $('chatInput').value.trim();
   if (!body || !order) return;
   $('chatInput').value = '';
+  // `sender` is derived server-side from the session — a client can't label its own message.
   await api(`/orders/${order.id}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sender: 'user', body }),
+    body: JSON.stringify({ body }),
   });
 }
 
 // ── Header navigation: Home (landing) + FAQ ──
-const VIEWS = ['landingView', 'startView', 'orderView', 'resumeView', 'faqView'];
+const VIEWS = ['landingView', 'authView', 'startView', 'orderView', 'resumeView', 'faqView'];
 function showView(id) {
   VIEWS.forEach((v) => $(v).classList.add('hidden'));
   $(id).classList.remove('hidden');
@@ -243,21 +382,18 @@ $('navHome').addEventListener('click', () => showView('landingView'));
 $('faqBtn').addEventListener('click', () => showView('faqView'));
 $('faqBack').addEventListener('click', () => showView(order ? 'orderView' : 'landingView'));
 
-// ── Resume an order keyed on phone number ──
+// ── Resume an order ──
+// Scoped to the verified session: the server answers with THIS number's orders. There is no
+// longer any way to list orders for a number you merely typed.
 $('resumeBtn').addEventListener('click', async () => {
-  const r = SomPhone.parse($('phone').value);
-  if (!r.valid) return toast('Enter your valid phone number to find your orders.');
-  const res = await api(`/orders/by-phone/${encodeURIComponent(r.e164)}`);
+  if (!token) return showView('authView');
+  const res = await api('/orders/mine');
   if (res.error) return toast(res.error);
   showResumeList(res.orders || []);
 });
-$('resumeBack').addEventListener('click', () => {
-  $('resumeView').classList.add('hidden');
-  $('startView').classList.remove('hidden');
-});
+$('resumeBack').addEventListener('click', () => showView('startView'));
 function showResumeList(orders) {
-  $('startView').classList.add('hidden');
-  $('resumeView').classList.remove('hidden');
+  showView('resumeView');
   $('resumeList').innerHTML = orders.length
     ? orders.map((o) => `
         <div class="card" style="background:var(--panel-2);cursor:pointer" data-id="${o.id}" data-ussd="${o.ussdUri}">
@@ -281,13 +417,16 @@ async function resumeOrder(id, ussd) {
 }
 
 // Auto-resume the last active order on load (survives refresh, per the resume requirement).
+// Requires a live session — without one there is nothing to resume into.
 (async function autoResume() {
   try {
+    if (!token) return;
     const saved = JSON.parse(localStorage.getItem('gm_last') || 'null');
     if (!saved?.orderId) return;
     const res = await api(`/orders/${saved.orderId}`);
     if (res.order && !['DELIVERED', 'FAILED_REFUND'].includes(res.order.status)) {
       order = res.order;
+      $('signedInAs').textContent = myPhone || '';
       enterOrderView(res.ussdUri);
     } else {
       localStorage.removeItem('gm_last');

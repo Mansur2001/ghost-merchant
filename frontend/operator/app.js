@@ -119,11 +119,22 @@ async function loadCardPhotos(orderId) {
     const { photos } = await api(`/orders/${orderId}/photos`);
     const el = $(`opPhotos-${orderId}`);
     if (!el || !photos || !photos.length) return;
+    // Photo bytes are authorized now, so a bare <img src> would 401 — fetch each with the
+    // bearer token and render from an object URL.
     el.innerHTML = photos.map((p) => `
       <figure class="photo">
-        <img src="${p.url}" alt="${p.kind}" loading="lazy" />
+        <img data-src="${p.url}" alt="${p.kind}" loading="lazy" />
         <figcaption class="muted">${p.kind === 'delivery_proof' ? 'Proof' : 'Reference'}</figcaption>
       </figure>`).join('');
+    el.querySelectorAll('img[data-src]').forEach(async (img) => {
+      try {
+        const r = await fetch(img.dataset.src, { headers: { Authorization: `Bearer ${token}` } });
+        if (!r.ok) return;
+        const url = URL.createObjectURL(await r.blob());
+        img.src = url;
+        img.addEventListener('load', () => URL.revokeObjectURL(url), { once: true });
+      } catch { /* leave the placeholder */ }
+    });
   } catch { /* ignore */ }
 }
 
@@ -201,10 +212,20 @@ let ws;
 function connectSocket() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws`);
-  ws.onopen = () => { $('liveDot').classList.add('on'); ws.send(JSON.stringify({ type: 'subscribe_operator' })); };
-  ws.onclose = () => { $('liveDot').classList.remove('on'); setTimeout(connectSocket, 2500); };
+  // Authenticate in the first frame, then subscribe. subscribe_operator is now role-gated —
+  // before this, any client could send it and receive every order in the system.
+  ws.onopen = () => { $('liveDot').classList.add('on'); ws.send(JSON.stringify({ type: 'auth', token })); };
+  ws.onclose = () => { $('liveDot').classList.remove('on'); if (token) setTimeout(connectSocket, 2500); };
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
+    if (m.type === 'authenticated') {
+      return ws.send(JSON.stringify({ type: 'subscribe_operator' }));
+    }
+    if (m.type === 'auth_error') {
+      sessionStorage.removeItem('opToken');
+      token = null;
+      return location.reload();
+    }
     if (m.type === 'oracle_down') {
       setOracleBadge(false);
       setStatus('⚠ Oracle DOWN — payment receipts may be missed. Check the phone.', 'down');

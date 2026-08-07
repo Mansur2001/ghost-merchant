@@ -57,12 +57,32 @@
         </ul>
       </section>
 
-      <!-- Step 1: identify + describe the need (chat-first coordination) -->
-      <section id="startView" class="card hidden">
-        <button class="secondary" id="homeBtn" type="button" style="max-width:110px;margin:0 0 12px;">← Home</button>
+      <!-- Step 1: prove you hold the phone number. It is the identity every order,
+           chat thread and photo is authorized against, so it has to be verified once. -->
+      <section id="authView" class="card hidden">
+        <button class="secondary" id="authHome" type="button" style="max-width:110px;margin:0 0 12px;">← Home</button>
         <label for="phone">Your phone number (this is your identity)</label>
         <input id="phone" type="tel" inputmode="tel" placeholder="61 234 5678" autocomplete="tel" />
         <div class="phone-hint muted" id="phoneHint">Enter your mobile number</div>
+        <button id="sendCodeBtn" type="button">Send me a code</button>
+
+        <div id="codeStep" class="hidden">
+          <label for="codeInput">Enter the 6-digit code we sent you</label>
+          <input id="codeInput" type="text" inputmode="numeric" autocomplete="one-time-code"
+                 maxlength="6" placeholder="123456" />
+          <button id="verifyBtn" type="button">Verify &amp; continue</button>
+          <button class="secondary" id="resendBtn" type="button">Send a new code</button>
+        </div>
+        <div id="otpStatus" class="muted"></div>
+      </section>
+
+      <!-- Step 2: describe the need (chat-first coordination) -->
+      <section id="startView" class="card hidden">
+        <button class="secondary" id="homeBtn" type="button" style="max-width:110px;margin:0 0 12px;">← Home</button>
+        <div class="row" style="align-items:center;">
+          <div class="muted">Ordering as <strong id="signedInAs"></strong></div>
+          <button class="linkbtn" id="signOutBtn" type="button" style="margin-left:auto;">Sign out</button>
+        </div>
         <button class="secondary" id="resumeBtn" type="button">Resume a previous order</button>
 
         <label for="request">What do you need? Describe it in your own words.</label>

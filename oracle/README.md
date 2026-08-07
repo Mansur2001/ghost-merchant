@@ -41,6 +41,19 @@ Hormuud/Somtel SIMs and real target devices**:
    order. **Tune the regexes** (`AMOUNT_RE`, `SENDER_RE`, `REF_RE`) to the exact wording of
    real EVC Plus / eDahab receipts — the samples are guesses.
 
+3. **Outbound SMS for login codes.** Customer authentication (OTP) sends codes back out
+   through this phone, so the Oracle now needs a *send* path in addition to its listener:
+   an HTTP endpoint on the device that accepts `POST {to, text}` signed with
+   `X-Oracle-Signature` (same HMAC scheme and secret as the inbound webhook) and shells out
+   to `termux-sms-send -n <to> "<text>"`. Point the backend at it with
+   `OTP_TRANSPORT=oracle` and `ORACLE_SMS_URL=<device endpoint>`.
+   **This is written but never tested on hardware.** Things to verify: the device is
+   reachable from the backend (tailnet/VPN — do not expose it to the open internet), send
+   latency is under the 5-minute code TTL, the telecom doesn't rate-limit or flag automated
+   sends from a normal subscriber SIM, and per-SMS cost at expected login volume is sane.
+   Until this is validated, the backend cannot run with `NODE_ENV=production` (it refuses to
+   boot on the dev `log` transport, which would print login codes into the server log).
+
 ## Operational hardening (from the SRS warnings)
 
 - Dedicated phone, dedicated SIM. No personal use. Treat it as a server-in-a-box.

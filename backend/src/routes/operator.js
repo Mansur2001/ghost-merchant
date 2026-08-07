@@ -1,6 +1,7 @@
 // Operator/dispatcher super-user dashboard routes. The manual-override surface that turns
 // edge-case failures (Oracle down, wrong amount, ambiguous match) into a recoverable
 // business rather than a broken one.
+import crypto from 'node:crypto';
 import { Router } from 'express';
 import { query, withTransaction } from '../db/pool.js';
 import {
@@ -8,6 +9,7 @@ import {
   requireRole,
   hashSecret,
 } from '../middleware/auth.js';
+import { rateLimit } from '../middleware/rateLimit.js';
 import { config } from '../config.js';
 import { transitionOrder, postMessage, assignDriver } from '../commands/orders.js';
 import {
@@ -23,13 +25,23 @@ import { oracleStatus } from '../realtime/oracleMonitor.js';
 export const operatorRouter = Router();
 
 // POST /api/operator/login  { password }
-operatorRouter.post('/operator/login', (req, res) => {
-  const { password } = req.body || {};
-  if (password !== config.operatorPassword) {
-    return res.status(401).json({ error: 'invalid credentials' });
+// One shared password guards the highest-privilege surface in the system (it can read every
+// order and drive every state machine), so the limiter here is deliberately tight. Per-operator
+// accounts are P0 #5 — until then this password is the whole perimeter.
+operatorRouter.post(
+  '/operator/login',
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: 'too many login attempts' }),
+  (req, res) => {
+    const supplied = Buffer.from(String(req.body?.password ?? ''));
+    const expected = Buffer.from(String(config.operatorPassword));
+    // Constant-time compare; length is checked separately because timingSafeEqual throws on
+    // a length mismatch (which would itself leak the password length via a 500).
+    const ok =
+      supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
+    if (!ok) return res.status(401).json({ error: 'invalid credentials' });
+    res.json({ token: signToken({ role: 'operator', id: 'super' }) });
   }
-  res.json({ token: signToken({ role: 'operator', id: 'super' }) });
-});
+);
 
 const operatorOnly = requireRole('operator');
 

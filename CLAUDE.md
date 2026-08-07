@@ -42,7 +42,7 @@ The plan is rapid shipping with public update posts. That's fine, with guardrail
 5. Speed comes from cutting *scope*, never from cutting the invariants below. If a feature
    can't be done safely this week, ship less of it, not an unsafe version of it.
 
-## Current status — living log (last updated 2026-08-06)
+## Current status — living log (last updated 2026-08-06, P0 auth landed)
 Read this first when resuming: it's the running snapshot of where the project is, so a new
 session doesn't need re-discovery. Keep it current as work lands.
 
@@ -59,12 +59,17 @@ session doesn't need re-discovery. Keep it current as work lands.
   panes so long lists scroll inside a container, not the page.
 - **Idempotent, re-runnable seed** (`npm run seed`) — one order in every state + an unmatched
   receipt + seeded photos. This is the ONLY seed; there's no static fixture elsewhere.
-- **Jest suite** (51 tests): state machine, phone normalization, USSD encoding, payment edge cases.
+- **Authentication + authorization** (P0 #1–#3, landed 2026-08-06): customer OTP login, every
+  order-scoped route and WebSocket subscription authorized against the owner, rate limits on
+  every login path. See "Authentication & authorization" below.
+- **Jest suite** (86 tests): state machine, phone, USSD, payment edge cases, OTP + session
+  tokens, the access rule, the rate limiter.
 - **Version control**: initialized 2026-08-06. Was previously untracked inside the home-dir repo.
 
-**Status: MVP-complete, NOT production-safe.** The demo loop works; the security model does
-not exist yet. See "Road to production" — do not put this in front of real customers until
-P0 is closed.
+**Status: MVP-complete; P0 auth closed, remaining P0 items open.** The data-exposure holes are
+fixed and verified against the live stack. Still open before real customers: per-operator
+accounts (P0 #5), the prod hygiene pass (P0 #4), and OTP delivery has never run on real
+hardware (P4) — `OTP_TRANSPORT=oracle` is written but unvalidated.
 
 **Conventions for updating this log:** convert relative dates to absolute; when a "not done"
 item ships, move it up and tick the README checklist; keep entries one line.
@@ -112,6 +117,43 @@ publish(ORDER_STATE_CHANGED / PAYMENT_RECEIVED) → socket push → PWA updates 
    truncates the dial string.
 6. **Money never flows through the platform.** No wallet, no balance, no held funds, no
    platform-initiated transfer. The backend only ever *records* an observed telecom receipt.
+7. **Every order-scoped route is authorized, and the rule lives in one file.**
+   `domain/access.js` `canAccessOrder()` is the only definition of who may see an order.
+   Adding a route under `/orders/:id` without `requireAuth, requireOrderAccess` is a data
+   breach, not a missing feature. Same rule governs WebSocket `subscribe`.
+
+## Authentication & authorization
+Three identities, one signing secret (`SESSION_SECRET`), all tokens HMAC-signed (`middleware/auth.js`).
+
+| Role | How they authenticate | Token TTL | Sees |
+|---|---|---|---|
+| `customer` | phone + 6-digit OTP over SMS | 30 days | only orders under their verified phone |
+| `driver` | msisdn + PIN (scrypt) | 12 hours | only orders the operator assigned to them |
+| `operator` | shared password | 12 hours | everything (P0 #5: needs per-user accounts) |
+
+- **OTP** (`domain/otp.js`, `commands/auth.js`, `routes/auth.js`): 6 uniform random digits,
+  scrypt-hashed at rest, 5-minute TTL, single-use, max 5 attempts, 60s resend cooldown
+  enforced atomically in the DB (`otp_codes`, one live challenge per phone). Verification
+  returns ONE generic error for every failure mode — distinguishing "no challenge" from
+  "wrong code" would make the endpoint a phone-number oracle.
+- **Delivery** (`notify/smsSender.js`): `OTP_TRANSPORT=log` prints the code (dev only — the
+  backend **refuses to boot** with it under `NODE_ENV=production`); `oracle` sends a real SMS
+  via the Oracle phone over an HMAC-signed request, reusing `ORACLE_WEBHOOK_SECRET`.
+  **The oracle path has never run on real hardware** (P4).
+- **Deny = 404, never 403.** A 403 confirms "this order exists, it just isn't yours" — exactly
+  what an enumeration script wants. Order IDs stay sequential until the UUID migration (P1),
+  so "not yours" and "doesn't exist" must be byte-identical. Same for WebSocket `subscribe`.
+- **The client never chooses its own identity.** Order creation takes the phone from the
+  token (not the body); chat `sender` is derived from the role; `subscribe_driver` uses the
+  driver id in the token. None of these are expressible as client input.
+- **WebSocket**: token in the first frame (browsers can't set handshake headers, and a token
+  in the query string lands in every access log). Sockets that don't authenticate within 10s
+  are closed (4401). Room members are **re-authorized on every event**, not just at subscribe
+  time, so a reassigned driver stops receiving a customer's updates immediately.
+- **Rate limits** (`middleware/rateLimit.js`): in-process sliding window on OTP request/verify
+  (per IP + per phone), driver login (per IP + per msisdn), operator login. ⚠️ Per-process
+  state — with N instances the real limit is N×max. Moves to Redis with the event bus (P2);
+  **do not scale the backend horizontally until then.**
 
 ---
 
@@ -122,20 +164,14 @@ open doors that make the current build unsafe to point at real people.
 
 ## P0 — security blockers (nothing ships to real customers before these)
 
-1. **The whole customer API is unauthenticated with sequential integer IDs.**
-   Every route in `routes/orders.js` is open — there is no `requireRole` in that file.
-   `GET /api/orders/:id`, `/messages`, `/photos/:pid/raw`, `/by-phone/:phone`, and
-   `POST /orders/:id/messages` are all reachable by anyone. Iterating `:id` from 1 dumps
-   every customer's phone, address, chat, and photos.
-   **Fix:** OTP on the phone number → scoped session token → per-order authorization check
-   (`order.phone_number === req.auth.phone`), plus UUID order IDs (see P1) to kill enumeration.
-2. **WebSocket has no auth at all.** `socketServer.js` accepts `{type:'subscribe_operator'}`
-   from any client and streams every order, payment, and message in the system. `subscribe`
-   accepts any `orderId`. **Fix:** require the session token in the connect handshake;
-   authorize `subscribe` against order ownership; gate `subscribe_operator` on the operator role.
-3. **No rate limiting on auth endpoints.** Operator login is a *single shared password* and
-   driver login is a *4-digit PIN* — both brute-forceable at line speed. **Fix:** per-IP and
-   per-identity limiter on `/operator/login` and `/driver/login`, with lockout + backoff.
+1. ~~**The whole customer API is unauthenticated with sequential integer IDs.**~~
+   **DONE 2026-08-06.** OTP login → scoped session token → `requireOrderAccess` on every
+   order-scoped route. `/orders/by-phone/:phone` is gone, replaced by `/orders/mine`.
+2. ~~**WebSocket has no auth at all.**~~ **DONE 2026-08-06.** Token in the first frame,
+   10s auth timeout, `subscribe` authorized per order, `subscribe_operator` role-gated,
+   `subscribe_driver` added for a driver's own feed.
+3. ~~**No rate limiting on auth endpoints.**~~ **DONE 2026-08-06.** Per-IP + per-identity
+   sliding-window limiter on OTP request/verify, driver login, and operator login.
 4. **No security headers, request logging, global error handler, or graceful shutdown.**
    Stack traces can leak to clients; there's no audit trail of who did what from where.
 5. **Operator is one shared password with no per-user identity.** Every operator action is
@@ -217,11 +253,13 @@ Rules (`commands/photos.js`):
   URL; `…/photos/:pid/raw` **streams the bytes through the backend** (`storage/objectStore.js`
   `getObject`). `presignGet` is kept for real deploys where MinIO is browser-reachable behind
   Caddy — locally `minio:9000` only resolves inside the docker network, so we stream instead.
-- ⚠️ Photo reads are currently unauthenticated (P0 #1). Anyone with an order ID gets the bytes.
+- Photo reads are authorized like every other order-scoped read, so a plain `<img src>` gets
+  a 401 — the PWAs fetch the bytes with the bearer token and render from an object URL.
 
 ## Seeding (idempotent, re-runnable)
-`backend/src/db/seed.js` (`npm run seed`, or `docker compose exec -e SEED_FORCE=1 backend npm run seed`
-since `.env` sets `NODE_ENV=production`, which the seed guards against). It `TRUNCATE … RESTART
+`backend/src/db/seed.js` (`docker compose exec backend npm run seed`). Local `.env` now sets
+`NODE_ENV=development`, so no `SEED_FORCE=1` dance — that flag is only needed if you
+deliberately point a production-flagged backend at the seed, which you shouldn't. It `TRUNCATE … RESTART
 IDENTITY`s the domain tables then inserts a fixed dataset, so **every run converges to the same
 state** — reset here whenever data drifts. Covers one order in **every** state
 (PENDING_PAYMENT → FAILED_REFUND), two drivers (Amina/1234, Bashir/5678), matched receipts, one
@@ -236,12 +274,17 @@ seed against prod — it truncates.
 (`styles.css`, `phone.js`, `theme.js`). Kept framework-free to respect the SRS data budget
 (initial load < 1.5MB). Each PWA has a Service Worker (`sw.js`) that cache-first serves its shell.
 
-- **User**: identity = phone; resume via `localStorage` (`gm_last`) + `GET
-  /api/orders/by-phone/:phone`. Auth is currently trust-on-phone (no OTP yet — P0 #1). Opens on a
+- **User**: identity = phone, **verified by OTP**. Session token in `localStorage`
+  (`gm_token`/`gm_phone`) — not `sessionStorage`, because re-verifying costs a real SMS and the
+  customer is on one personal handset. Any 401 clears the session and returns to sign-in.
+  Resume via `GET /api/orders/mine` (scoped to the token; you can no longer list orders for a
+  number you merely typed). Opens on a
   **home/landing** (role picker: Customer / Driver / Operator). Header has **Home** (→ landing),
   **FAQ** (in-app accordion), and the theme toggle. Checkout takes an optional reference photo;
   the order view shows a live photo gallery.
-- **Driver**: PIN login → signed token in `sessionStorage` (`driverToken`). Queue shows **only
+- **Driver**: PIN login → signed token in `sessionStorage` (`driverToken`); the socket
+  authenticates then joins `subscribe_driver` (its own feed — it used to take the whole
+  operator firehose). The self-serve "Accept order" button is gone with the route. Queue shows **only
   orders the operator assigned to this driver** (`getDriverQueue` = `driver_id = me AND status IN
   (DISPATCHED, IN_TRANSIT)`) — no shared self-serve pool. Order detail can capture a
   **delivery-proof** photo. **Home** link → `/`.
@@ -263,7 +306,7 @@ serving the cached old version. This is the #1 "my change isn't showing" gotcha 
 ```bash
 cp .env.example .env          # first time; edit secrets
 docker compose up -d --build  # whole stack: postgres + minio + backend + caddy
-docker compose exec -e SEED_FORCE=1 backend npm run seed   # load/reset the demo dataset
+docker compose exec backend npm run seed   # load/reset the demo dataset
 docker compose logs -f backend
 docker compose down           # stop (keep data)   |   down -v  wipes data
 ```
@@ -290,8 +333,9 @@ within ~1s over the socket.
 cd backend && npm install   # first time (installs jest + cross-env devDeps)
 npm test                    # Jest, ESM via --experimental-vm-modules
 ```
-Suites live in `backend/tests/`. Pure-domain suites (`stateMachine`, `phone`, `ussd`) need
-no DB; `payments` mocks the pg transaction + event bus (`jest.unstable_mockModule`).
+Suites live in `backend/tests/`. Pure-domain suites (`stateMachine`, `phone`, `ussd`, `otp`,
+`access`, `rateLimit`) need no DB; `payments` mocks the pg transaction + event bus
+(`jest.unstable_mockModule`).
 `tests/setup/env.js` seeds the env vars `config.js` requires at import. Jest is a
 devDependency — the Docker image (`npm install --omit=dev`) does not ship it.
 

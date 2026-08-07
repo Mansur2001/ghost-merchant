@@ -8,11 +8,16 @@ import { ordersRouter } from './routes/orders.js';
 import { webhookRouter } from './routes/webhook.js';
 import { driversRouter } from './routes/drivers.js';
 import { operatorRouter } from './routes/operator.js';
+import { authRouter } from './routes/auth.js';
 import { attachSocketServer } from './realtime/socketServer.js';
 import { startOracleMonitor } from './realtime/oracleMonitor.js';
 import { ensureBucket } from './storage/objectStore.js';
+import { sweepExpiredOtps } from './commands/auth.js';
 
 const app = express();
+
+// Rate limiting is only as good as the IP it buckets on — see config.trustProxyHops.
+app.set('trust proxy', config.trustProxyHops);
 
 // Minimal CORS (frontend is same-origin behind Caddy; this eases local dev tooling).
 app.use((req, res, next) => {
@@ -31,6 +36,7 @@ app.use((req, res, next) => {
 app.use('/api', webhookRouter);
 
 app.use(express.json({ limit: '32kb' })); // order payloads must stay small
+app.use('/api', authRouter);
 app.use('/api', ordersRouter);
 app.use('/api', driversRouter);
 app.use('/api', operatorRouter);
@@ -41,7 +47,23 @@ const server = http.createServer(app);
 attachSocketServer(server);
 startOracleMonitor();
 
+// Expired passcodes are dead weight and PII-adjacent — sweep them hourly.
+const otpSweep = setInterval(() => {
+  sweepExpiredOtps().catch((err) => console.error('OTP sweep failed:', err.message));
+}, 60 * 60 * 1000);
+otpSweep.unref();
+
 async function boot() {
+  // Refuse to be quietly insecure: with the log transport there is no SMS, so anyone who can
+  // read the logs can log in as any customer. Fine in dev, fatal in production.
+  if (config.env === 'production' && config.otp.transport !== 'oracle') {
+    console.error(
+      'FATAL: OTP_TRANSPORT must be "oracle" in production — ' +
+        `"${config.otp.transport}" prints login codes to the server log.`
+    );
+    process.exit(1);
+  }
+
   try {
     await ensureBucket();
   } catch (err) {

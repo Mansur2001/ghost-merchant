@@ -2,7 +2,9 @@
 import { Router, raw } from 'express';
 import { query } from '../db/pool.js';
 import { verifySecret, signToken, requireRole } from '../middleware/auth.js';
-import { transitionOrder, assignDriver, postMessage } from '../commands/orders.js';
+import { requireOrderAccess } from '../middleware/authorize.js';
+import { rateLimit } from '../middleware/rateLimit.js';
+import { transitionOrder, postMessage } from '../commands/orders.js';
 import { savePhoto } from '../commands/photos.js';
 import { getDriverQueue, getShoppingList } from '../queries/orders.js';
 import { STATUS } from '../domain/stateMachine.js';
@@ -12,8 +14,20 @@ export const driversRouter = Router();
 
 const rawImage = raw({ type: () => true, limit: '6mb' });
 
+// A 4-digit PIN is 10,000 possibilities — trivially brute-forced at line speed without this.
+// Limited per-IP and per-msisdn so neither one host nor one targeted driver can be ground down.
+const loginLimits = [
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: 'too many login attempts' }),
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    key: (req) => String(req.body?.msisdn || 'unknown').slice(0, 24),
+    message: 'too many login attempts',
+  }),
+];
+
 // POST /api/driver/login  { msisdn, pin }
-driversRouter.post('/driver/login', async (req, res) => {
+driversRouter.post('/driver/login', ...loginLimits, async (req, res) => {
   const { msisdn, pin } = req.body || {};
   const phone = parseSomaliMsisdn(msisdn);
   const lookup = phone.valid ? phone.e164 : msisdn;
@@ -30,37 +44,30 @@ driversRouter.post('/driver/login', async (req, res) => {
 });
 
 const driverOnly = requireRole('driver');
+// Every :id route below is additionally gated on "the operator assigned this order to ME"
+// (domain/access.js). Without it, any logged-in driver could drive any order's state machine
+// — mark a stranger's order delivered, or read their address off the shopping list.
+const myOrder = [driverOnly, requireOrderAccess];
 
-// GET /api/driver/queue — unassigned paid orders + this driver's active orders.
+// GET /api/driver/queue — only what the operator assigned to this driver.
 driversRouter.get('/driver/queue', driverOnly, async (req, res) => {
   res.json({ orders: await getDriverQueue(req.auth.id) });
 });
 
 // GET /api/driver/orders/:id — full shopping list view.
-driversRouter.get('/driver/orders/:id', driverOnly, async (req, res) => {
+driversRouter.get('/driver/orders/:id', ...myOrder, async (req, res) => {
   const order = await getShoppingList(req.params.id);
   if (!order) return res.status(404).json({ error: 'not found' });
   res.json({ order });
 });
 
-// POST /api/driver/orders/:id/accept — claim a PAID_UNASSIGNED order.
-driversRouter.post('/driver/orders/:id/accept', driverOnly, async (req, res) => {
-  try {
-    await assignDriver(req.params.id, req.auth.id);
-    const order = await transitionOrder(
-      req.params.id,
-      STATUS.DISPATCHED,
-      `driver:${req.auth.id}`,
-      'driver accepted'
-    );
-    res.json({ order });
-  } catch (err) {
-    res.status(409).json({ error: err.message });
-  }
-});
+// NOTE: the old POST /driver/orders/:id/accept (self-serve claim of a PAID_UNASSIGNED order)
+// was removed. Dispatch is operator-driven: a driver only ever works orders the operator
+// assigned, so "accept" contradicted the model and was the one route that needed to bypass
+// the assignment check. Assignment happens at POST /operator/orders/:id/assign.
 
 // POST /api/driver/orders/:id/secured — items in hand, heading to customer.
-driversRouter.post('/driver/orders/:id/secured', driverOnly, async (req, res) => {
+driversRouter.post('/driver/orders/:id/secured', ...myOrder, async (req, res) => {
   try {
     const order = await transitionOrder(
       req.params.id,
@@ -75,7 +82,7 @@ driversRouter.post('/driver/orders/:id/secured', driverOnly, async (req, res) =>
 });
 
 // POST /api/driver/orders/:id/delivered
-driversRouter.post('/driver/orders/:id/delivered', driverOnly, async (req, res) => {
+driversRouter.post('/driver/orders/:id/delivered', ...myOrder, async (req, res) => {
   try {
     const order = await transitionOrder(
       req.params.id,
@@ -90,7 +97,7 @@ driversRouter.post('/driver/orders/:id/delivered', driverOnly, async (req, res) 
 });
 
 // POST /api/driver/orders/:id/failed  { reason }
-driversRouter.post('/driver/orders/:id/failed', driverOnly, async (req, res) => {
+driversRouter.post('/driver/orders/:id/failed', ...myOrder, async (req, res) => {
   try {
     const order = await transitionOrder(
       req.params.id,
@@ -106,7 +113,7 @@ driversRouter.post('/driver/orders/:id/failed', driverOnly, async (req, res) => 
 
 // POST /api/driver/orders/:id/delivery-proof — driver uploads a proof-of-delivery photo
 // (raw image bytes). Stored in MinIO; posts a system line into the thread for live sync.
-driversRouter.post('/driver/orders/:id/delivery-proof', driverOnly, rawImage, async (req, res) => {
+driversRouter.post('/driver/orders/:id/delivery-proof', ...myOrder, rawImage, async (req, res) => {
   try {
     const photo = await savePhoto({
       orderId: req.params.id,
@@ -123,7 +130,7 @@ driversRouter.post('/driver/orders/:id/delivery-proof', driverOnly, rawImage, as
 
 // POST /api/driver/orders/:id/adjust  { items } — out-of-stock / price adjustment.
 // Records the new item list and drops a note into the chat so the customer sees it.
-driversRouter.post('/driver/orders/:id/adjust', driverOnly, async (req, res) => {
+driversRouter.post('/driver/orders/:id/adjust', ...myOrder, async (req, res) => {
   try {
     const { items, note } = req.body || {};
     await query('UPDATE orders SET items = $1, updated_at = now() WHERE id = $2', [

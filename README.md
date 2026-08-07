@@ -43,8 +43,10 @@ rewriting logic.
 - [x] MinIO object storage adapter (S3 SDK)
 - [x] Photo attachments in MinIO — customer reference + driver delivery-proof, idempotent keys
 - [x] Idempotent re-runnable seed (`npm run seed`) — one order in every state + unmatched receipt
-- [x] Jest test suite (state machine, phone, USSD, payment edge cases) — `npm test`
-- [ ] OTP auth (phone-number identity) — stubbed, needs SMS send path
+- [x] Jest test suite (state machine, phone, USSD, payments, OTP, access rule, rate limiter) — `npm test`
+- [x] OTP auth (phone-number identity) — code send path via the Oracle phone (unvalidated on real hardware)
+- [x] Per-order authorization on every route + authenticated WebSocket subscriptions
+- [x] Rate limiting on every login path (OTP request/verify, driver PIN, operator password)
 - [ ] Manual refund / reconciliation workflow
 
 ### Frontend (Option A: sovereign in-app chat)
@@ -86,8 +88,8 @@ docker compose up -d --build
 #    Migrations run automatically on backend boot (idempotent, tracked in schema_migrations).
 
 # 3. Load the demo dataset (one order in every state, two drivers, seeded photos).
-#    .env sets NODE_ENV=production, which the seed guards against — SEED_FORCE=1 overrides.
-docker compose exec -e SEED_FORCE=1 backend npm run seed
+#    (Local .env uses NODE_ENV=development. In production the seed refuses to run at all.)
+docker compose exec backend npm run seed
 
 # 4. Open the PWAs (accept the self-signed cert warning once per PWA):
 #    User      https://localhost/
@@ -117,7 +119,7 @@ ORACLE_WEBHOOK_SECRET=<same as .env> BACKEND_URL=https://localhost \
 
 ```bash
 cd backend && npm install   # first time — installs jest + cross-env devDeps
-npm test                    # Jest (51 tests): state machine, phone, USSD, payment edges
+npm test                    # Jest (86 tests): domain, payments, OTP + tokens, access rule, limiter
 ```
 
 ## Running in production
@@ -143,6 +145,9 @@ VPS IP, and ports **80 + 443 open** (Caddy needs 80 for the ACME HTTP challenge)
 #      MERCHANT_MSISDN=<real EVC Plus / eDahab number>
 #      USSD_TEMPLATE / TELECOM_SENDER_IDS       # match the live telecom
 #      POSTGRES_PASSWORD, S3_SECRET_KEY         # strong, unique
+#      OTP_TRANSPORT=oracle                     # REQUIRED in prod — the backend refuses to
+#      ORACLE_SMS_URL=<Oracle device endpoint>  # boot with the dev "log" transport, which
+#                                               # would print customer login codes to the log.
 
 # 3. Launch.
 docker compose up -d --build

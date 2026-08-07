@@ -46,4 +46,17 @@ export const config = {
 
   oracleHeartbeatTimeoutMs:
     parseInt(process.env.ORACLE_HEARTBEAT_TIMEOUT_SECONDS || '180', 10) * 1000,
+
+  otp: {
+    // 'log' (dev: code printed to the server log) | 'oracle' (real SMS via the Oracle phone).
+    transport: process.env.OTP_TRANSPORT || 'log',
+    oracleSmsUrl: process.env.ORACLE_SMS_URL || '',
+    sendTimeoutMs: parseInt(process.env.OTP_SEND_TIMEOUT_MS || '10000', 10),
+  },
+
+  // Behind Caddy the socket peer is always the proxy, so req.ip would be the proxy for every
+  // request and the rate limiter would bucket the whole world together. Trust exactly ONE
+  // hop: enough to read the real client IP, not enough for a client to forge it by sending
+  // its own X-Forwarded-For (Express takes the value the trusted hop appended).
+  trustProxyHops: parseInt(process.env.TRUST_PROXY_HOPS || '1', 10),
 };
