@@ -11,7 +11,7 @@ import { requestOtp, verifyOtp, OtpCooldownError, OtpInvalidError } from '../com
 import { signToken, requireRole, CUSTOMER_TOKEN_TTL_SECONDS } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { isWellFormedCode } from '../domain/otp.js';
-import { parseSomaliMsisdn } from '../domain/phone.js';
+import { parsePhone } from '../domain/phone.js';
 import { config } from '../config.js';
 
 export const authRouter = Router();
@@ -19,7 +19,7 @@ export const authRouter = Router();
 // Bucket key for the per-phone limits. Falls back to the raw input so garbage can't dodge
 // the limiter by simply being unparseable.
 const phoneKey = (req) => {
-  const parsed = parseSomaliMsisdn(req.body?.phone);
+  const parsed = parsePhone(req.body?.phone);
   return parsed.valid ? parsed.e164 : `raw:${String(req.body?.phone || '').slice(0, 24)}`;
 };
 
@@ -58,7 +58,7 @@ authRouter.post('/auth/otp/request', ...requestLimits, async (req, res) => {
       return res.status(429).json({ error: err.message, retryAfter });
     }
     // Invalid number (from normalizeMsisdnOrThrow) or SMS delivery failure.
-    const status = /Invalid Somali phone number/.test(err.message) ? 400 : 502;
+    const status = /Invalid phone number/.test(err.message) ? 400 : 502;
     res.status(status).json({ error: status === 400 ? err.message : 'could not send code' });
   }
 });
@@ -77,7 +77,7 @@ authRouter.post('/auth/otp/verify', ...verifyLimits, async (req, res) => {
     res.json({ token, phone: verified, expiresInSeconds: CUSTOMER_TOKEN_TTL_SECONDS });
   } catch (err) {
     if (err instanceof OtpInvalidError) return res.status(401).json({ error: err.message });
-    if (/Invalid Somali phone number/.test(err.message)) {
+    if (/Invalid phone number/.test(err.message)) {
       return res.status(400).json({ error: err.message });
     }
     res.status(500).json({ error: 'verification failed' });

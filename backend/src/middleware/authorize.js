@@ -8,11 +8,17 @@
 // "not yours" and "doesn't exist" must be byte-identical.
 import { getOrder } from '../queries/orders.js';
 import { canAccessOrder } from '../domain/access.js';
+import { isUuid } from '../domain/ids.js';
 
 const NOT_FOUND = { error: 'not found' };
 
 export async function requireOrderAccess(req, res, next) {
   try {
+    // Shape-check first: a non-UUID would make Postgres raise 22P02, surfacing as a 500 —
+    // "the server is broken" when the truth is "you sent nonsense". Same 404 as everything
+    // else so the response reveals nothing about which ids exist.
+    if (!isUuid(req.params.id)) return res.status(404).json(NOT_FOUND);
+
     const order = await getOrder(req.params.id);
     if (!order || !canAccessOrder(req.auth, order)) {
       return res.status(404).json(NOT_FOUND);

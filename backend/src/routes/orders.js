@@ -11,9 +11,10 @@ import { getOrderTimeline, getMessages, getOrdersByPhone } from '../queries/orde
 import { savePhoto } from '../commands/photos.js';
 import { listPhotos, getPhoto } from '../queries/photos.js';
 import { getObject } from '../storage/objectStore.js';
-import { buildUssdUri } from '../domain/ussd.js';
-import { parseSomaliMsisdn } from '../domain/phone.js';
+import { buildPaymentInstruction } from '../domain/ussd.js';
+import { parsePhone } from '../domain/phone.js';
 import { senderForRole } from '../domain/access.js';
+import { isUuid } from '../domain/ids.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { requireOrderAccess } from '../middleware/authorize.js';
 import { rateLimit } from '../middleware/rateLimit.js';
@@ -27,14 +28,14 @@ const rawImage = raw({ type: () => true, limit: '6mb' });
 
 const customerOnly = requireRole('customer');
 
-// Live Somali-number validation for the frontend (also the single source of truth). Public by
+// Live phone validation for the frontend (also the single source of truth). Public by
 // necessity — it runs BEFORE anyone can have a session. It's a pure function over the input
 // and touches no data, so the only abuse is volume; rate-limit and move on.
 ordersRouter.get(
   '/phone/validate/:phone',
   rateLimit({ windowMs: 60 * 1000, max: 120 }),
   (req, res) => {
-    res.json(parseSomaliMsisdn(req.params.phone));
+    res.json(parsePhone(req.params.phone));
   }
 );
 
@@ -45,7 +46,7 @@ ordersRouter.get('/orders/mine', customerOnly, async (req, res) => {
   const orders = await getOrdersByPhone(req.auth.phone);
   res.json({
     phone: req.auth.phone,
-    orders: orders.map((o) => ({ ...o, ussdUri: buildUssdUri(o.total_amount) })),
+    orders: orders.map((o) => ({ ...o, ...buildPaymentInstruction(o) })),
   });
 });
 
@@ -54,8 +55,11 @@ ordersRouter.get('/orders/mine', customerOnly, async (req, res) => {
 // could create orders (and chat threads) under someone else's number.
 ordersRouter.post('/orders', customerOnly, async (req, res) => {
   try {
-    const { items, totalAmount, lat, lng, landmark } = req.body || {};
-    const order = await createOrder({
+    const { id, items, totalAmount, lat, lng, landmark } = req.body || {};
+    // `id` is the client's own UUID when it has one. Retrying a create whose response was
+    // lost returns the SAME order (201 -> 200) instead of billing the customer twice.
+    const { order, created } = await createOrder({
+      id,
       userPhone: req.auth.phone,
       items,
       totalAmount,
@@ -63,14 +67,18 @@ ordersRouter.post('/orders', customerOnly, async (req, res) => {
       lng,
       landmark,
     });
-    res.status(201).json({ order, ussdUri: buildUssdUri(order.total_amount) });
+    res.status(created ? 201 : 200).json({
+      order,
+      created,
+      ...buildPaymentInstruction(order),
+    });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
 ordersRouter.get('/orders/:id', requireAuth, requireOrderAccess, (req, res) => {
-  res.json({ order: req.order, ussdUri: buildUssdUri(req.order.total_amount) });
+  res.json({ order: req.order, ...buildPaymentInstruction(req.order) });
 });
 
 ordersRouter.get('/orders/:id/timeline', requireAuth, requireOrderAccess, async (req, res) => {

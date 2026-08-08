@@ -27,7 +27,7 @@ import {
 } from '../queries/orders.js';
 import { getDriversWithStats, getDriverById } from '../queries/drivers.js';
 import { STATUS } from '../domain/stateMachine.js';
-import { parseSomaliMsisdn } from '../domain/phone.js';
+import { parsePhone } from '../domain/phone.js';
 import { oracleStatus } from '../realtime/oracleMonitor.js';
 import { wakeOutbox, outboxHealth } from '../events/outbox.js';
 
@@ -285,7 +285,7 @@ operatorRouter.post('/operator/drivers', operatorOnly, async (req, res) => {
     if (!name || !msisdn || !pin) {
       return res.status(400).json({ error: 'name, msisdn, pin required' });
     }
-    const phone = parseSomaliMsisdn(msisdn);
+    const phone = parsePhone(msisdn);
     if (!phone.valid) return res.status(400).json({ error: `driver number: ${phone.reason}` });
     const { rows } = await query(
       `INSERT INTO drivers(name, msisdn, pin_hash) VALUES ($1, $2, $3)

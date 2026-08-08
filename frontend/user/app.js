@@ -61,6 +61,7 @@ const LABELS = {
 
 let coords = null; // { lat, lng }
 let order = null;
+let pendingOrderId = null; // client-minted UUID, held across retries
 let ws = null;
 let phoneValid = false;
 let phoneE164 = null;
@@ -206,11 +207,15 @@ $('submitBtn').addEventListener('click', async () => {
   if (!landmark) return toast('Landmark is required.');
 
   $('submitBtn').disabled = true;
+  // Mint the id here, once, and reuse it if we retry. A lost response on a bad connection
+  // must not create a second order the customer could pay for twice.
+  pendingOrderId = pendingOrderId || GMIds.newId();
   try {
     const res = await api('/orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        id: pendingOrderId,
         items: [{ text: request }],
         totalAmount,
         lat: coords?.lat ?? null,
@@ -220,8 +225,9 @@ $('submitBtn').addEventListener('click', async () => {
     });
     if (res.error) throw new Error(res.error);
     order = res.order;
+    pendingOrderId = null; // consumed
     localStorage.setItem('gm_last', JSON.stringify({ orderId: order.id }));
-    enterOrderView(res.ussdUri);
+    enterOrderView(res);
     // Seed the thread with the user's request.
     await api(`/orders/${order.id}/messages`, {
       method: 'POST',
@@ -238,18 +244,38 @@ $('submitBtn').addEventListener('click', async () => {
   }
 });
 
-function enterOrderView(ussdUri) {
+// `payment` is { paymentMethod, ussdUri, paymentNote } from the server. A US test number
+// has no EVC Plus rail, so there may be no URI at all — render what we're given rather than
+// assuming a pay link exists.
+function enterOrderView(payment) {
   showView('orderView');
-  $('orderId').textContent = order.id;
+  $('orderId').textContent = GMIds.shortId(order.id);
   $('orderTotal').textContent = Number(order.total_amount).toFixed(2);
-  // CRITICAL: use the server-built URI verbatim; the trailing # is already %23-encoded.
-  $('payLink').setAttribute('href', ussdUri);
+  renderPayment(payment || {});
   renderTimeline(order.status);
   updateBadge(order.status);
-  setStatus(`Order #${order.id}: ${LABELS[order.status] || order.status}`, STATUS_KIND[order.status]);
+  setStatus(`Order #${GMIds.shortId(order.id)}: ${LABELS[order.status] || order.status}`, STATUS_KIND[order.status]);
   loadThread();
   loadPhotos(order.id);
   connectSocket();
+}
+
+// Show the pay button only when this order can actually be paid that way. A dead
+// `tel:*712*...#` link on a +1 number produces a dial string the network rejects — worse
+// than no button, because the customer thinks they've paid.
+function renderPayment(payment) {
+  const link = $('payLink');
+  const note = $('payNote');
+  if (payment.paymentMethod === 'ussd' && payment.ussdUri) {
+    // CRITICAL: use the server-built URI verbatim; the trailing # is already %23-encoded.
+    link.setAttribute('href', payment.ussdUri);
+    link.classList.remove('hidden');
+    note.textContent = 'Tapping opens your dialer with the USSD code pre-filled. Approve the transfer on your phone — this page updates automatically when payment is confirmed.';
+  } else {
+    link.classList.add('hidden');
+    note.textContent = payment.paymentNote
+      || 'Pay the operator directly; they will confirm this order.';
+  }
 }
 
 // ── Photos (MinIO-backed; bytes stream through the backend) ──
@@ -314,10 +340,10 @@ function connectSocket() {
       order.status = m.to;
       renderTimeline(m.to);
       updateBadge(m.to);
-      setStatus(`Order #${order.id}: ${LABELS[m.to] || m.to}`, STATUS_KIND[m.to]);
+      setStatus(`Order #${GMIds.shortId(order.id)}: ${LABELS[m.to] || m.to}`, STATUS_KIND[m.to]);
     } else if (m.type === 'payment_confirmed') {
       updateBadge('PAID_UNASSIGNED');
-      setStatus(`Order #${order.id}: Payment confirmed ✓`, 'ok');
+      setStatus(`Order #${GMIds.shortId(order.id)}: Payment confirmed ✓`, 'ok');
       toast('Payment confirmed ✓');
     } else if (m.type === 'message') {
       appendMessage(m.message);
@@ -396,24 +422,24 @@ function showResumeList(orders) {
   showView('resumeView');
   $('resumeList').innerHTML = orders.length
     ? orders.map((o) => `
-        <div class="card" style="background:var(--panel-2);cursor:pointer" data-id="${o.id}" data-ussd="${o.ussdUri}">
+        <div class="card" style="background:var(--panel-2);cursor:pointer" data-id="${o.id}">
           <div class="row" style="align-items:center;">
-            <div><strong>#${o.id}</strong> · $${Number(o.total_amount).toFixed(2)}</div>
+            <div><strong>#${GMIds.shortId(o.id)}</strong> · $${Number(o.total_amount).toFixed(2)}</div>
             <span class="badge ${badgeClass(o.status)}">${o.status}</span>
           </div>
           <div class="muted">${o.landmark_text || ''}</div>
         </div>`).join('')
     : '<p class="muted">No orders found for this number.</p>';
   $('resumeList').querySelectorAll('[data-id]').forEach((el) =>
-    el.addEventListener('click', () => resumeOrder(el.dataset.id, el.dataset.ussd))
+    el.addEventListener('click', () => resumeOrder(el.dataset.id))
   );
 }
-async function resumeOrder(id, ussd) {
+async function resumeOrder(id) {
   const res = await api(`/orders/${id}`);
   if (res.error) return toast(res.error);
   order = res.order;
   localStorage.setItem('gm_last', JSON.stringify({ orderId: order.id }));
-  enterOrderView(res.ussdUri || ussd);
+  enterOrderView(res);
 }
 
 // Auto-resume the last active order on load (survives refresh, per the resume requirement).
@@ -427,7 +453,7 @@ async function resumeOrder(id, ussd) {
     if (res.order && !['DELIVERED', 'FAILED_REFUND'].includes(res.order.status)) {
       order = res.order;
       $('signedInAs').textContent = myPhone || '';
-      enterOrderView(res.ussdUri);
+      enterOrderView(res);
     } else {
       localStorage.removeItem('gm_last');
     }

@@ -9,27 +9,49 @@ import { withTransaction, inTransaction, query } from '../db/pool.js';
 import { assertTransition, AUTO_RESPONSES } from '../domain/stateMachine.js';
 import { normalizeMsisdnOrThrow } from '../domain/phone.js';
 import { EVENTS } from '../events/bus.js';
+import { isUuid, newOrderId } from '../domain/ids.js';
 import { enqueue, wakeOutbox } from '../events/outbox.js';
 
-// Create an order (and the user, if new). Returns the created order row.
-export async function createOrder({ userPhone, items, totalAmount, lat, lng, landmark }) {
+// Create an order (and the user, if new). Returns { order, created }.
+//
+// `id` may be supplied by the client (a UUID it minted itself). That makes creation
+// IDEMPOTENT: a flaky mobile connection that retries a request whose response was lost gets
+// the original order back instead of silently creating a second one the customer then pays
+// for twice. It is also the mechanism the offline write queue (P2) will use.
+//
+// The client chooses the id, never the owner: the phone still comes from the verified session.
+export async function createOrder({ id, userPhone, items, totalAmount, lat, lng, landmark }) {
   if (!userPhone) throw new Error('userPhone required');
   if (!landmark || !landmark.trim()) throw new Error('landmark is mandatory');
-  // Enforce the Somali-number rule server-side; store canonical E.164 as the identity.
+  if (id != null && !isUuid(id)) throw new Error('id must be a UUID');
+  // Enforce the phone rules server-side; store canonical E.164 as the identity.
   const phone = normalizeMsisdnOrThrow(userPhone);
+  const orderId = id || newOrderId();
 
-  const order = await withTransaction(async (client) => {
+  const result = await withTransaction(async (client) => {
     await client.query(
       `INSERT INTO users(phone_number) VALUES ($1)
        ON CONFLICT (phone_number) DO NOTHING`,
       [phone]
     );
     const { rows } = await client.query(
-      `INSERT INTO orders(user_phone, items, total_amount, lat, lng, landmark_text)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO orders(id, user_phone, items, total_amount, lat, lng, landmark_text)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (id) DO NOTHING
        RETURNING *`,
-      [phone, JSON.stringify(items || []), totalAmount, lat, lng, landmark]
+      [orderId, phone, JSON.stringify(items || []), totalAmount, lat, lng, landmark]
     );
+
+    // Conflict: this id already exists, so it's a retry. Return the existing order — but only
+    // to its owner. Otherwise supplying someone else's order id would leak their order.
+    if (rows.length === 0) {
+      const { rows: existing } = await client.query('SELECT * FROM orders WHERE id = $1', [orderId]);
+      if (!existing[0] || existing[0].user_phone !== phone) {
+        throw new Error('id already in use');
+      }
+      return { order: existing[0], created: false };
+    }
+
     const created = rows[0];
     await client.query(
       `INSERT INTO order_events(order_id, from_status, to_status, actor, note)
@@ -37,11 +59,12 @@ export async function createOrder({ userPhone, items, totalAmount, lat, lng, lan
       [created.id]
     );
     await enqueue(client, EVENTS.ORDER_CREATED, { orderId: created.id, order: created });
-    return created;
+    return { order: created, created: true };
   });
 
-  wakeOutbox();
-  return order;
+  // A retry produced no new state, so there is nothing new to deliver.
+  if (result.created) wakeOutbox();
+  return result;
 }
 
 // Transition an order's status. The ONLY path allowed to change orders.status.

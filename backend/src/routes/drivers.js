@@ -8,7 +8,7 @@ import { transitionOrder, postMessage } from '../commands/orders.js';
 import { savePhoto } from '../commands/photos.js';
 import { getDriverQueue, getShoppingList } from '../queries/orders.js';
 import { STATUS } from '../domain/stateMachine.js';
-import { parseSomaliMsisdn } from '../domain/phone.js';
+import { parsePhone } from '../domain/phone.js';
 
 export const driversRouter = Router();
 
@@ -29,7 +29,7 @@ const loginLimits = [
 // POST /api/driver/login  { msisdn, pin }
 driversRouter.post('/driver/login', ...loginLimits, async (req, res) => {
   const { msisdn, pin } = req.body || {};
-  const phone = parseSomaliMsisdn(msisdn);
+  const phone = parsePhone(msisdn);
   const lookup = phone.valid ? phone.e164 : msisdn;
   const { rows } = await query(
     'SELECT * FROM drivers WHERE msisdn = $1 AND active = true',

@@ -14,7 +14,7 @@
 import { withTransaction } from '../db/pool.js';
 import { transitionOrder } from './orders.js';
 import { STATUS } from '../domain/stateMachine.js';
-import { parseSomaliMsisdn } from '../domain/phone.js';
+import { parsePhone } from '../domain/phone.js';
 import { EVENTS } from '../events/bus.js';
 import { enqueue, wakeOutbox } from '../events/outbox.js';
 
@@ -23,7 +23,7 @@ export async function recordAndMatchPayment({ receiptId, senderMsisdn, amount, r
   // Normalize the sender to the same canonical E.164 identity we stored on the order, so
   // a receipt from "61234567", "061234567", or "+25261234567" all match. If the Oracle
   // reports an unrecognized number we keep the raw value (operator will reconcile).
-  const parsed = parseSomaliMsisdn(senderMsisdn);
+  const parsed = parsePhone(senderMsisdn);
   const sender = parsed.valid ? parsed.e164 : String(senderMsisdn || '');
 
   const outcome = await withTransaction(async (client) => {

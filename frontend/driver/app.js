@@ -16,7 +16,7 @@ const STATUS_KIND = {
 // Status bar becomes available once the driver is working an order.
 function setStatus(orderId, status) {
   $('statusbar').classList.remove('hidden');
-  $('sbText').textContent = `Order #${orderId}: ${LABELS[status] || status}`;
+  $('sbText').textContent = `Order #${GMIds.shortId(orderId)}: ${LABELS[status] || status}`;
   $('sbTime').textContent = new Date().toLocaleTimeString();
   $('statusbar').className = 'statusbar ' + (STATUS_KIND[status] || '');
 }
@@ -78,7 +78,7 @@ async function loadQueue() {
     ? orders.map((o) => `
       <div class="card" style="background:var(--panel-2);cursor:pointer" data-id="${o.id}">
         <div class="row" style="align-items:center;">
-          <div><strong>#${o.id}</strong> · $${Number(o.total_amount).toFixed(2)}</div>
+          <div><strong>#${GMIds.shortId(o.id)}</strong> · $${Number(o.total_amount).toFixed(2)}</div>
           <span class="badge ${o.status === 'PAID_UNASSIGNED' ? 'paid' : 'pending'}">${o.status}</span>
         </div>
         <div class="muted">${o.landmark_text || ''}</div>
@@ -95,7 +95,7 @@ async function openDetail(id) {
   current = res.order;
   $('queueView').classList.add('hidden');
   $('detailView').classList.remove('hidden');
-  $('dOrderId').textContent = current.id;
+  $('dOrderId').textContent = GMIds.shortId(current.id);
   $('dStatus').textContent = current.status;
   $('dBudget').textContent = Number(current.total_amount).toFixed(2);
   $('dLandmark').textContent = current.landmark_text || '(none given)';

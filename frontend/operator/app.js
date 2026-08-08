@@ -203,7 +203,7 @@ async function loadOrders() {
     ? orders.map((o) => `
       <div class="card" style="background:var(--panel-2);">
         <div class="row" style="align-items:center;">
-          <div><strong>#${o.id}</strong> · $${Number(o.total_amount).toFixed(2)} · ${o.user_phone}</div>
+          <div><strong>#${GMIds.shortId(o.id)}</strong> · $${Number(o.total_amount).toFixed(2)} · ${o.user_phone}</div>
           <span class="badge ${badgeClass(o.status)}">${o.status}</span>
         </div>
         <div class="muted">${o.landmark_text || ''} ${o.driver_name ? '· driver: ' + o.driver_name : ''}</div>
@@ -364,13 +364,13 @@ function connectSocket() {
     } else if (m.type === 'oracle_heartbeat') {
       setOracleBadge(true);
     } else if (m.type === 'order_created') {
-      setStatus(`New order #${m.orderId} created — awaiting payment.`, 'warn');
+      setStatus(`New order #${GMIds.shortId(m.orderId)} created — awaiting payment.`, 'warn');
       refreshAll();
     } else if (m.type === 'payment_confirmed') {
-      setStatus(`Payment confirmed on order #${m.orderId} ($${Number(m.amount).toFixed(2)}).`, 'ok');
+      setStatus(`Payment confirmed on order #${GMIds.shortId(m.orderId)} ($${Number(m.amount).toFixed(2)}).`, 'ok');
       refreshAll();
     } else if (m.type === 'order_state') {
-      setStatus(`Order #${m.orderId}: ${STATUS_LABEL[m.to] || m.to}.`, m.to === 'FAILED_REFUND' ? 'down' : 'info');
+      setStatus(`Order #${GMIds.shortId(m.orderId)}: ${STATUS_LABEL[m.to] || m.to}.`, m.to === 'FAILED_REFUND' ? 'down' : 'info');
       refreshAll();
     }
   };
