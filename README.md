@@ -49,6 +49,8 @@ rewriting logic.
 - [x] Rate limiting on every login path (OTP request/verify, driver PIN, operator password)
 - [x] Named operator accounts — audit trail records who did what (`operator:<id>:<username>`)
 - [x] Security headers + CSP, structured request logs (PII-redacted), graceful shutdown
+- [x] Transactional outbox — events commit with the state change; crash-safe delivery
+- [x] Atomic payment matching — receipt + status transition in one transaction
 - [ ] Manual refund / reconciliation workflow
 
 ### Frontend (Option A: sovereign in-app chat)
@@ -121,7 +123,7 @@ ORACLE_WEBHOOK_SECRET=<same as .env> BACKEND_URL=https://localhost \
 
 ```bash
 cd backend && npm install   # first time — installs jest + cross-env devDeps
-npm test                    # Jest (127 tests): domain, payments, OTP, access, limiter, redaction, operators
+npm test                    # Jest (141 tests): domain, payments, OTP, access, limiter, redaction, operators, outbox
 ```
 
 ## Running in production

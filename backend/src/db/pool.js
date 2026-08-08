@@ -15,6 +15,13 @@ export const pool = new pg.Pool({
 export const query = (text, params) => pool.query(text, params);
 
 // Run a set of statements inside a single transaction. `fn` receives a client.
+// Run `fn` inside the caller's transaction if there is one, otherwise open a new one.
+// Lets a command be composed into a bigger transaction (payment record + state transition +
+// outbox rows must commit together) without duplicating it into two near-identical functions.
+export function inTransaction(client, fn) {
+  return client ? fn(client) : withTransaction(fn);
+}
+
 export async function withTransaction(fn) {
   const client = await pool.connect();
   try {

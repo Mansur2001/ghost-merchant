@@ -14,6 +14,9 @@
       <span class="dot" id="liveDot"></span>
       <h1>Operator / Dispatch</h1>
       <span class="badge pending" id="oracleBadge" style="margin-left:auto;">Oracle: ?</span>
+      <!-- Event-relay backlog. Hidden while healthy; if it appears, committed state is not
+           reaching clients and the apps look frozen even though the data is fine. -->
+      <span class="badge fail hidden" id="outboxBadge" style="margin-left:8px;">Events: ?</span>
       <a class="linkbtn" href="/" title="Go to the home page" style="margin-left:8px;">Home</a>
       <button class="linkbtn" id="themeToggle" type="button" title="Toggle theme" style="margin-left:8px;">☀️</button>
       <button class="linkbtn hidden" id="logoutBtn" type="button" style="margin-left:8px;">Log out</button>

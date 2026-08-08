@@ -62,8 +62,11 @@ session doesn't need re-discovery. Keep it current as work lands.
 - **Authentication + authorization** (P0 #1–#3, landed 2026-08-06): customer OTP login, every
   order-scoped route and WebSocket subscription authorized against the owner, rate limits on
   every login path. See "Authentication & authorization" below.
-- **Jest suite** (86 tests): state machine, phone, USSD, payment edge cases, OTP + session
-  tokens, the access rule, the rate limiter.
+- **Transactional outbox** (P1 #6, landed 2026-08-07): domain events are written in the same
+  transaction as the state change and relayed after commit, so a crash can't leave the DB
+  correct while every client is stale. Payment matching is now one transaction too.
+- **Jest suite** (141 tests): state machine, phone, USSD, payment edge cases, OTP + session
+  tokens, the access rule, the rate limiter, log redaction, operator rules, the outbox relay.
 - **Version control**: initialized 2026-08-06. Was previously untracked inside the home-dir repo.
 
 **Status: MVP-complete; P0 auth closed, remaining P0 items open.** The data-exposure holes are
@@ -117,7 +120,11 @@ publish(ORDER_STATE_CHANGED / PAYMENT_RECEIVED) → socket push → PWA updates 
    truncates the dial string.
 6. **Money never flows through the platform.** No wallet, no balance, no held funds, no
    platform-initiated transfer. The backend only ever *records* an observed telecom receipt.
-7. **Every order-scoped route is authorized, and the rule lives in one file.**
+7. **Domain events are written in the same transaction as the state they describe.**
+   Commands call `enqueue(client, EVENT, payload)` with the transaction's client — never
+   `publish()` directly (`events/outbox.js`). Publishing after COMMIT is two steps with a
+   crash-shaped gap between them. Consumers must be idempotent: delivery is at-least-once.
+8. **Every order-scoped route is authorized, and the rule lives in one file.**
    `domain/access.js` `canAccessOrder()` is the only definition of who may see an order.
    Adding a route under `/orders/:id` without `requireAuth, requireOrderAccess` is a data
    breach, not a missing feature. Same rule governs WebSocket `subscribe`.
@@ -194,10 +201,10 @@ hardware — the backend won't run in production without it) and, realistically,
 
 ## P1 — correctness under real-world failure
 
-6. **Events are lost on crash.** Commands commit to Postgres, then publish to the in-process
-   `EventEmitter`. Die in between and the DB is right while every connected client is
-   permanently stale. **Fix: transactional outbox** — write the event row in the same
-   transaction as the state change, relay it after commit, mark it sent.
+6. ~~**Events are lost on crash.**~~ **DONE 2026-08-07.** Transactional outbox
+   (`events/outbox.js`, `outbox` table) — see "Event delivery" below. Also fixed the same
+   class of bug in payment matching, which used to record the receipt and transition the
+   order in two separate transactions.
 7. **UUID order IDs** (client-generatable). Kills enumeration *and* is the prerequisite for
    the offline write queue in P2 — the phone must be able to mint an ID with no network.
 8. **Integration tests.** Domain logic is covered; the HTTP and socket layers are not.
@@ -249,6 +256,31 @@ origin is the local asset server, so all of it 404s on launch.
 `tel:`+USSD `%23` dialing and Oracle SMS interception on actual Hormuud/Somtel SIMs. If either
 misbehaves the payment design changes and P0–P3 partly rework, so this is the schedule risk.
 Don't leave it until last. See `oracle/README.md`.
+
+## Event delivery (transactional outbox)
+`Command tx { state change + INSERT INTO outbox } → COMMIT → relay → bus → sockets`
+
+- **Write path**: commands call `enqueue(client, EVENT, payload)` inside their transaction,
+  then `wakeOutbox()` **after** it commits (waking early would publish an uncommitted event).
+  Forgetting to wake costs latency only — the 1s poll catches it.
+- **Relay** (`startOutboxRelay`): claims rows with `FOR UPDATE SKIP LOCKED` in `id` order,
+  publishes to the in-process bus, stamps `published_at`. A batch is one transaction, so a
+  crash mid-batch redelivers rather than loses.
+- **At-least-once, so consumers must be idempotent.** Today's consumers are socket
+  broadcasts, and every event is a state *snapshot* ("order 4 is IN_TRANSIT"), not a delta —
+  keep new events shaped that way and a duplicate stays harmless.
+- **Ordering** is by `id` and holds with ONE relay. A second backend instance would interleave
+  (SKIP LOCKED hands each a different row) — same single-instance constraint as the rate
+  limiter, lifted together in P2.
+- **A poison event parks after 5 attempts** (`failed = true`) instead of wedging the queue:
+  Postgres is still the truth and clients resync on reload, so one dropped notification beats
+  a relay that never moves again. Parked rows need a human.
+- **Backlog is visible**: `GET /api/operator/outbox`, surfaced as an alert badge in the
+  operator header when the relay falls behind (>20 pending, >30s old, or anything parked).
+  A stalled relay looks exactly like "the app is frozen", so it must not be silent.
+- Delivered rows are kept **7 days** as the "why did this happen at 3am" record, then swept.
+- Oracle heartbeat/down events stay on the direct bus: they're derived from in-memory monitor
+  state, not from a database write, so there is nothing to make atomic.
 
 ## Observability & operational hygiene (P0 #4)
 - **Every response carries `X-Request-Id`**, and every request logs one JSON line
@@ -369,8 +401,8 @@ cd backend && npm install   # first time (installs jest + cross-env devDeps)
 npm test                    # Jest, ESM via --experimental-vm-modules
 ```
 Suites live in `backend/tests/`. Pure-domain suites (`stateMachine`, `phone`, `ussd`, `otp`,
-`access`, `rateLimit`) need no DB; `payments` mocks the pg transaction + event bus
-(`jest.unstable_mockModule`).
+`access`, `rateLimit`, `redact`, `operator`) need no DB; `payments` and `outbox` mock the pg
+transaction + event bus (`jest.unstable_mockModule`).
 `tests/setup/env.js` seeds the env vars `config.js` requires at import. Jest is a
 devDependency — the Docker image (`npm install --omit=dev`) does not ship it.
 

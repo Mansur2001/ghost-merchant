@@ -29,6 +29,7 @@ import { getDriversWithStats, getDriverById } from '../queries/drivers.js';
 import { STATUS } from '../domain/stateMachine.js';
 import { parseSomaliMsisdn } from '../domain/phone.js';
 import { oracleStatus } from '../realtime/oracleMonitor.js';
+import { wakeOutbox, outboxHealth } from '../events/outbox.js';
 
 export const operatorRouter = Router();
 
@@ -150,6 +151,16 @@ operatorRouter.get('/operator/oracle', operatorOnly, (req, res) => {
   res.json(oracleStatus());
 });
 
+// GET /api/operator/outbox — event-relay backlog. A growing `pending` count means committed
+// state is not reaching clients: the app looks frozen even though the data is fine.
+operatorRouter.get('/operator/outbox', operatorOnly, async (req, res, next) => {
+  try {
+    res.json(await outboxHealth());
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/operator/transactions/unmatched — reconciliation queue.
 operatorRouter.get('/operator/transactions/unmatched', operatorOnly, async (req, res) => {
   res.json({ transactions: await getUnmatchedTransactions() });
@@ -172,16 +183,25 @@ operatorRouter.post('/operator/orders/:id/assign', operatorOnly, async (req, res
     const driver = await getDriverById(driverId);
     if (!driver || !driver.active) return res.status(400).json({ error: 'unknown or inactive driver' });
 
-    await assignDriver(order.id, driverId);
-    if (order.status === STATUS.PAID_UNASSIGNED) {
-      const updated = await transitionOrder(
-        order.id, STATUS.DISPATCHED, actorLabel(req.auth), `assigned to ${driver.name}`
+    // One transaction: an order must never end up assigned-but-not-dispatched (or the
+    // reverse) because the process died between two writes.
+    const result = await withTransaction(async (client) => {
+      await assignDriver(order.id, driverId, { client });
+      if (order.status === STATUS.PAID_UNASSIGNED) {
+        return transitionOrder(
+          order.id, STATUS.DISPATCHED, actorLabel(req.auth), `assigned to ${driver.name}`,
+          { client }
+        );
+      }
+      // Re-assignment on an already-dispatched/in-transit order (no status change).
+      await postMessage(
+        { orderId: order.id, sender: 'system', body: `Reassigned to driver ${driver.name}.` },
+        { client }
       );
-      return res.json({ order: updated });
-    }
-    // Re-assignment on an already-dispatched/in-transit order (no status change).
-    await postMessage({ orderId: order.id, sender: 'system', body: `Reassigned to driver ${driver.name}.` });
-    res.json({ order: await getOrder(order.id) });
+      return null;
+    });
+    wakeOutbox();
+    res.json({ order: result || (await getOrder(order.id)) });
   } catch (err) {
     res.status(409).json({ error: err.message });
   }
@@ -209,16 +229,25 @@ operatorRouter.post('/operator/transactions/:txId/assign', operatorOnly, async (
   try {
     const { orderId } = req.body || {};
     if (!orderId) return res.status(400).json({ error: 'orderId required' });
+    // Binding the receipt and marking the order paid is one decision, so it's one
+    // transaction: a crash between them would leave a receipt claimed against an order that
+    // still reads "awaiting payment" — the money-received-but-app-disagrees state.
     await withTransaction(async (client) => {
-      await client.query(
+      const { rowCount } = await client.query(
         'UPDATE transactions SET order_id = $1, matched = true WHERE id = $2',
         [orderId, req.params.txId]
       );
+      if (rowCount === 0) throw new Error('receipt not found');
+      const { rows } = await client.query('SELECT status FROM orders WHERE id = $1 FOR UPDATE', [
+        orderId,
+      ]);
+      if (!rows[0]) throw new Error('order not found');
+      if (rows[0].status === STATUS.PENDING_PAYMENT) {
+        await transitionOrder(orderId, STATUS.PAID_UNASSIGNED, actorLabel(req.auth),
+          'manual receipt assign', { client });
+      }
     });
-    const order = await getOrder(orderId);
-    if (order.status === STATUS.PENDING_PAYMENT) {
-      await transitionOrder(orderId, STATUS.PAID_UNASSIGNED, actorLabel(req.auth), 'manual receipt assign');
-    }
+    wakeOutbox();
     res.json({ ok: true });
   } catch (err) {
     res.status(409).json({ error: err.message });

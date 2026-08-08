@@ -78,7 +78,7 @@ async function seed() {
 
     // Reset to a clean slate with deterministic ids/sequences.
     await client.query(
-      `TRUNCATE otp_codes, order_photos, order_events, messages, transactions, orders,
+      `TRUNCATE outbox, otp_codes, order_photos, order_events, messages, transactions, orders,
                 drivers, users, operators
        RESTART IDENTITY CASCADE`
     );

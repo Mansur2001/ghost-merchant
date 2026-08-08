@@ -7,7 +7,8 @@ import { jest, describe, test, expect, beforeEach } from '@jest/globals';
 
 // ── Mocks (must be registered before importing the module under test) ──
 const transitionOrder = jest.fn();
-const publish = jest.fn();
+const enqueue = jest.fn();
+const wakeOutbox = jest.fn();
 
 // A single mutable query handler the fake pg client delegates to; each test rewires it.
 let queryImpl;
@@ -20,8 +21,10 @@ jest.unstable_mockModule('../src/db/pool.js', () => ({
 jest.unstable_mockModule('../src/commands/orders.js', () => ({ transitionOrder }));
 jest.unstable_mockModule('../src/events/bus.js', () => ({
   EVENTS: { PAYMENT_RECEIVED: 'payment.received', ORDER_STATE_CHANGED: 'order.state_changed' },
-  publish,
+  publish: jest.fn(),
 }));
+// Events now go through the transactional outbox rather than straight to the bus.
+jest.unstable_mockModule('../src/events/outbox.js', () => ({ enqueue, wakeOutbox }));
 
 const { recordAndMatchPayment } = await import('../src/commands/payments.js');
 
@@ -50,7 +53,8 @@ function scenario({ dupRows = [], matchRows = [] } = {}) {
 
 beforeEach(() => {
   transitionOrder.mockReset();
-  publish.mockReset();
+  enqueue.mockReset();
+  wakeOutbox.mockReset();
 });
 
 describe('clean single match', () => {
@@ -67,9 +71,17 @@ describe('clean single match', () => {
     // Inserted as a matched transaction.
     expect(calls.insertParams[0]).toBe(42); // order_id
     expect(calls.insertParams[5]).toBe(true); // matched
-    // Side effects fired exactly once.
-    expect(transitionOrder).toHaveBeenCalledWith(42, 'PAID_UNASSIGNED', 'system', expect.any(String));
-    expect(publish).toHaveBeenCalledWith('payment.received', expect.objectContaining({ orderId: 42, amount: 7.25 }));
+    // The transition runs INSIDE this transaction (client passed through), so the receipt
+    // and the status change commit together — no window where money is received but the
+    // order still reads "awaiting payment".
+    expect(transitionOrder).toHaveBeenCalledWith(
+      42, 'PAID_UNASSIGNED', 'system', expect.any(String), { client }
+    );
+    // The event is written to the outbox with the SAME transaction client, not published
+    // directly — that is what makes it crash-safe.
+    expect(enqueue).toHaveBeenCalledWith(
+      client, 'payment.received', expect.objectContaining({ orderId: 42, amount: 7.25 })
+    );
   });
 });
 
@@ -80,9 +92,9 @@ describe('duplicate SMS webhook (idempotency, invariant #2)', () => {
     const out = await recordAndMatchPayment({ receiptId: 'RCPT-1', senderMsisdn: '612345678', amount: 7.25 });
 
     expect(out).toMatchObject({ duplicate: true, orderId: 42 });
-    // Critically: no re-transition, no re-publish.
+    // Critically: no re-transition, no second event.
     expect(transitionOrder).not.toHaveBeenCalled();
-    expect(publish).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
   });
 });
 
@@ -96,7 +108,7 @@ describe('wrong amount / no matching order', () => {
     expect(calls.insertParams[0]).toBeNull(); // order_id
     expect(calls.insertParams[5]).toBe(false); // matched
     expect(transitionOrder).not.toHaveBeenCalled();
-    expect(publish).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
   });
 });
 

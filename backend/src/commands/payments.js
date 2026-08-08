@@ -5,11 +5,18 @@
 // most-recent first. Anything ambiguous or unmatched is left for the operator's manual
 // "Mark as Paid" queue — automated systems WILL have edge cases and that override is a
 // core feature, not a safety net.
+//
+// ONE TRANSACTION, on purpose. This used to insert the receipt, commit, and then transition
+// the order in a second transaction. A crash in between left money received against an order
+// still showing "awaiting payment" — the single worst state this system can be in, because
+// the customer has paid and nothing in the app agrees. Receipt + transition + events now
+// commit together or not at all.
 import { withTransaction } from '../db/pool.js';
 import { transitionOrder } from './orders.js';
 import { STATUS } from '../domain/stateMachine.js';
 import { parseSomaliMsisdn } from '../domain/phone.js';
-import { EVENTS, publish } from '../events/bus.js';
+import { EVENTS } from '../events/bus.js';
+import { enqueue, wakeOutbox } from '../events/outbox.js';
 
 export async function recordAndMatchPayment({ receiptId, senderMsisdn, amount, rawSms }) {
   if (!receiptId) throw new Error('receiptId (telecom_receipt_id) required');
@@ -30,11 +37,16 @@ export async function recordAndMatchPayment({ receiptId, senderMsisdn, amount, r
     }
 
     // Find a single pending order matching sender + amount.
+    // FOR UPDATE matters: two receipts for the same amount arriving together would otherwise
+    // both read the order as PENDING_PAYMENT and both try to claim it. Locking here makes the
+    // second one re-read after the first commits, find no PENDING_PAYMENT order, and record
+    // itself as unmatched for the operator — instead of blowing up and losing the receipt.
     const match = await client.query(
       `SELECT id FROM orders
         WHERE user_phone = $1 AND total_amount = $2 AND status = $3
         ORDER BY created_at DESC
-        LIMIT 2`,
+        LIMIT 2
+        FOR UPDATE`,
       [sender, amount, STATUS.PENDING_PAYMENT]
     );
 
@@ -48,6 +60,19 @@ export async function recordAndMatchPayment({ receiptId, senderMsisdn, amount, r
       [matchedOrderId, receiptId, sender, amount, rawSms || null, matchedOrderId != null]
     );
 
+    if (matchedOrderId) {
+      // Same transaction: we already hold the order's row lock and know it is
+      // PENDING_PAYMENT, so this transition cannot legally fail.
+      await transitionOrder(matchedOrderId, STATUS.PAID_UNASSIGNED, 'system', 'payment matched', {
+        client,
+      });
+      await enqueue(client, EVENTS.PAYMENT_RECEIVED, {
+        orderId: matchedOrderId,
+        amount,
+        receiptId,
+      });
+    }
+
     return {
       duplicate: false,
       transaction: rows[0],
@@ -56,15 +81,8 @@ export async function recordAndMatchPayment({ receiptId, senderMsisdn, amount, r
     };
   });
 
-  // Outside the tx: drive the state machine + notify sockets for a clean match.
-  if (!outcome.duplicate && outcome.orderId) {
-    await transitionOrder(outcome.orderId, STATUS.PAID_UNASSIGNED, 'system', 'payment matched');
-    publish(EVENTS.PAYMENT_RECEIVED, {
-      orderId: outcome.orderId,
-      amount,
-      receiptId,
-    });
-  }
+  // Committed — now let the relay push to the sockets.
+  wakeOutbox();
 
   return outcome; // { duplicate, transaction, orderId, ambiguous }
 }

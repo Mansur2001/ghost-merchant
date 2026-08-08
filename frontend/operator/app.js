@@ -311,6 +311,28 @@ $('addDriver').addEventListener('click', async () => {
 async function pollOracle() {
   const res = await api('/operator/oracle');
   setOracleBadge(res.healthy);
+  pollOutbox();
+}
+
+// Event-relay backlog. Silent while healthy — an always-on green badge trains people to
+// ignore it, and this one only matters when it's wrong.
+async function pollOutbox() {
+  const res = await api('/operator/outbox');
+  const b = $('outboxBadge');
+  if (res.error) return b.classList.add('hidden');
+  const stuck = res.pending > 20 || res.oldest_pending_seconds > 30 || res.parked > 0;
+  b.classList.toggle('hidden', !stuck);
+  if (stuck) {
+    b.textContent = res.parked > 0
+      ? `Events: ${res.parked} PARKED`
+      : `Events: ${res.pending} behind (${res.oldest_pending_seconds}s)`;
+    setStatus(
+      res.parked > 0
+        ? `⚠ ${res.parked} event(s) could not be delivered — clients may show stale state.`
+        : `⚠ Event relay is ${res.oldest_pending_seconds}s behind — live updates are delayed.`,
+      'down'
+    );
+  }
 }
 function setOracleBadge(healthy) {
   const b = $('oracleBadge');

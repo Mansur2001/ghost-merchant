@@ -13,6 +13,7 @@ import { attachSocketServer } from './realtime/socketServer.js';
 import { startOracleMonitor } from './realtime/oracleMonitor.js';
 import { ensureBucket } from './storage/objectStore.js';
 import { sweepExpiredOtps } from './commands/auth.js';
+import { startOutboxRelay, stopOutboxRelay, sweepOutbox } from './events/outbox.js';
 import { ensureBootstrapOperator } from './commands/operators.js';
 import { securityHeaders } from './middleware/securityHeaders.js';
 import { requestLog } from './middleware/requestLog.js';
@@ -63,11 +64,17 @@ const server = http.createServer(app);
 const wss = attachSocketServer(server);
 startOracleMonitor();
 
-// Expired passcodes are dead weight and PII-adjacent — sweep them hourly.
-const otpSweep = setInterval(() => {
+// The relay turns committed outbox rows into bus events. Started before listen() so any
+// events left undelivered by a previous crash go out before we take new traffic.
+startOutboxRelay();
+
+// Hourly housekeeping: expired passcodes are dead weight and PII-adjacent; delivered outbox
+// rows are kept a week as the "why did this happen" record, then dropped.
+const housekeeping = setInterval(() => {
   sweepExpiredOtps().catch((err) => console.error('OTP sweep failed:', err.message));
+  sweepOutbox().catch((err) => console.error('outbox sweep failed:', err.message));
 }, 60 * 60 * 1000);
-otpSweep.unref();
+housekeeping.unref();
 
 async function boot() {
   // Refuse to be quietly insecure: with the log transport there is no SMS, so anyone who can
@@ -112,7 +119,9 @@ async function shutdown(signal) {
   const closed = new Promise((resolve) => server.close(resolve));
   for (const client of wss.clients) client.close(1001, 'server shutting down');
   wss.close();
-  clearInterval(otpSweep);
+  clearInterval(housekeeping);
+  // Undelivered outbox rows are safe: they stay in Postgres and the next boot relays them.
+  stopOutboxRelay();
 
   // Don't hang forever on a stuck socket; past this point, exiting is the better outcome.
   const timeout = new Promise((resolve) => setTimeout(resolve, 10_000).unref?.());
