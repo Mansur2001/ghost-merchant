@@ -33,7 +33,7 @@ function clearSession() {
 async function api(path, opts = {}) {
   const headers = { ...(opts.headers || {}) };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`/api${path}`, { ...opts, headers });
+  const res = await fetch(GMConfig.api(path), { ...opts, headers });
   if (res.status === 401 && token) {
     clearSession();
     showView('authView');
@@ -280,7 +280,7 @@ function renderPayment(payment) {
 
 // ── Photos (MinIO-backed; bytes stream through the backend) ──
 async function uploadPhoto(orderId, file) {
-  await fetch(`/api/orders/${orderId}/photos/order_ref`, {
+  await fetch(GMConfig.api(`/orders/${orderId}/photos/order_ref`), {
     method: 'POST',
     headers: {
       'Content-Type': file.type || 'application/octet-stream',
@@ -303,7 +303,7 @@ async function loadPhotos(orderId) {
       </figure>`).join('');
     el.querySelectorAll('img[data-src]').forEach(async (img) => {
       try {
-        const r = await fetch(img.dataset.src, { headers: { Authorization: `Bearer ${token}` } });
+        const r = await fetch(GMConfig.base + img.dataset.src, { headers: { Authorization: `Bearer ${token}` } });
         if (!r.ok) return;
         const blob = await r.blob();
         const url = URL.createObjectURL(blob);
@@ -319,8 +319,7 @@ async function loadPhotos(orderId) {
 // up in every access log, so the token goes in the first frame instead. The server drops
 // sockets that haven't authenticated within 10s.
 function connectSocket() {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws = new WebSocket(GMConfig.wsUrl());
   ws.onopen = () => {
     $('liveDot').classList.add('on');
     ws.send(JSON.stringify({ type: 'auth', token }));
@@ -473,6 +472,8 @@ function toast(msg) {
 // ── Service worker ──
 // Registered here rather than in an inline <script> so the page can run under a strict
 // Content-Security-Policy (script-src 'self'), which is what blocks injected script.
-if ('serviceWorker' in navigator) {
+// Skipped in the native shell: Capacitor bundles the assets into the APK, so a service
+// worker would be a second, stale copy of the app competing with the real one.
+if ('serviceWorker' in navigator && !GMConfig.isNative()) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
 }

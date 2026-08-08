@@ -1,0 +1,22 @@
+{
+  "name": "gurikaabe-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GuriKaabe \u2014 Android shell (Capacitor) around the Ghost Merchant PWAs.",
+  "type": "module",
+  "scripts": {
+    "build": "node build-www.mjs && node configure-android.mjs",
+    "sync": "node build-www.mjs && node configure-android.mjs && cap sync android",
+    "open": "cap open android",
+    "run:device": "node build-www.mjs && node configure-android.mjs && cap sync android && cap run android",
+    "assemble:debug": "cd android && ./gradlew assembleDebug",
+    "bundle:release": "cd android && ./gradlew bundleRelease"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "appId": "so.gurikaabe.app",
+  "appName": "GuriKaabe",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  },
+  "server": {
+    "androidScheme": "http"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": false
+    }
+  }
+}

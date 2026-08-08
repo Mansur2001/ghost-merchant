@@ -21,7 +21,7 @@ const STATUS_LABEL = {
 if (window.SomPhone) SomPhone.attach({ input: $('dMsisdn'), hint: $('phoneHint') });
 
 const api = (path, opts = {}) =>
-  fetch(`/api${path}`, {
+  fetch(GMConfig.api(path), {
     ...opts,
     headers: {
       'Content-Type': 'application/json',
@@ -238,7 +238,7 @@ async function loadCardPhotos(orderId) {
       </figure>`).join('');
     el.querySelectorAll('img[data-src]').forEach(async (img) => {
       try {
-        const r = await fetch(img.dataset.src, { headers: { Authorization: `Bearer ${token}` } });
+        const r = await fetch(GMConfig.base + img.dataset.src, { headers: { Authorization: `Bearer ${token}` } });
         if (!r.ok) return;
         const url = URL.createObjectURL(await r.blob());
         img.src = url;
@@ -342,8 +342,7 @@ function setOracleBadge(healthy) {
 
 let ws;
 function connectSocket() {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws = new WebSocket(GMConfig.wsUrl());
   // Authenticate in the first frame, then subscribe. subscribe_operator is now role-gated —
   // before this, any client could send it and receive every order in the system.
   ws.onopen = () => { $('liveDot').classList.add('on'); ws.send(JSON.stringify({ type: 'auth', token })); };
@@ -390,6 +389,8 @@ if (token) showDash();
 // ── Service worker ──
 // Registered here rather than in an inline <script> so the page can run under a strict
 // Content-Security-Policy (script-src 'self'), which is what blocks injected script.
-if ('serviceWorker' in navigator) {
+// Skipped in the native shell: Capacitor bundles the assets into the APK, so a service
+// worker would be a second, stale copy of the app competing with the real one.
+if ('serviceWorker' in navigator && !GMConfig.isNative()) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/operator/sw.js'));
 }

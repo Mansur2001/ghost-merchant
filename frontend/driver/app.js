@@ -25,7 +25,7 @@ function setStatus(orderId, status) {
 if (window.SomPhone) SomPhone.attach({ input: $('msisdn'), hint: $('phoneHint') });
 
 const api = (path, opts = {}) =>
-  fetch(`/api${path}`, {
+  fetch(GMConfig.api(path), {
     ...opts,
     headers: {
       'Content-Type': 'application/json',
@@ -133,7 +133,7 @@ async function loadPhotos(orderId) {
       </figure>`).join('');
     el.querySelectorAll('img[data-src]').forEach(async (img) => {
       try {
-        const r = await fetch(img.dataset.src, { headers: { Authorization: `Bearer ${token}` } });
+        const r = await fetch(GMConfig.base + img.dataset.src, { headers: { Authorization: `Bearer ${token}` } });
         if (!r.ok) return;
         const url = URL.createObjectURL(await r.blob());
         img.src = url;
@@ -148,7 +148,7 @@ $('proofBtn').addEventListener('click', async () => {
   if (!current) return;
   try {
     // Raw bytes (not JSON), so bypass the JSON api() helper but keep the auth token.
-    const r = await fetch(`/api/driver/orders/${current.id}/delivery-proof`, {
+    const r = await fetch(GMConfig.api(`/driver/orders/${current.id}/delivery-proof`), {
       method: 'POST',
       headers: { 'Content-Type': file.type || 'application/octet-stream', Authorization: `Bearer ${token}` },
       body: file,
@@ -205,8 +205,7 @@ $('adjustBtn').addEventListener('click', async () => {
 let ws;
 function connectSocket() {
   if (ws) return;
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws = new WebSocket(GMConfig.wsUrl());
   // The token goes in the first frame (a browser can't set handshake headers, and a token in
   // the query string lands in every access log). Subscribing happens only once the server
   // has confirmed the session.
@@ -251,6 +250,8 @@ if (token) showQueue();
 // ── Service worker ──
 // Registered here rather than in an inline <script> so the page can run under a strict
 // Content-Security-Policy (script-src 'self'), which is what blocks injected script.
-if ('serviceWorker' in navigator) {
+// Skipped in the native shell: Capacitor bundles the assets into the APK, so a service
+// worker would be a second, stale copy of the app competing with the real one.
+if ('serviceWorker' in navigator && !GMConfig.isNative()) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/driver/sw.js'));
 }

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">GuriKaabe</string>
+    <string name="title_activity_main">GuriKaabe</string>
+    <string name="package_name">so.gurikaabe.app</string>
+    <string name="custom_url_scheme">so.gurikaabe.app</string>
+</resources>

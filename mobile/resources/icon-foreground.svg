@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Adaptive-icon FOREGROUND layer. Android masks this to a circle/squircle/rounded square
+       depending on the launcher, and animates it independently of the background — so the
+       mark is drawn inside the ~66% safe zone with a transparent field. Anything outside
+       that centre area will be cropped on some devices. -->
+  <g transform="translate(256 256) scale(0.62) translate(-256 -256)">
+    <g fill="none" stroke="#d4af37" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M96 246 L256 118 L416 246"/>
+      <path d="M136 232 L136 394 L376 394 L376 232"/>
+    </g>
+    <path d="M214 394 L214 300 a42 42 0 0 1 84 0 L298 394 Z" fill="#d4af37"/>
+  </g>
+</svg>

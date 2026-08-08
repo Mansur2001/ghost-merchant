@@ -1,5 +1,5 @@
 const CACHE = 'ghost-driver-v10';
-const SHELL = ['/driver/', '/driver/index.html', '/driver/app.js', '/shared/styles.css', '/shared/ids.js', '/shared/phone.js', '/shared/theme.js'];
+const SHELL = ['/driver/', '/driver/index.html', '/driver/app.js', '/shared/styles.css', '/shared/config.js', '/shared/ids.js', '/shared/phone.js', '/shared/theme.js'];
 self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener('activate', (e) => e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', (e) => {

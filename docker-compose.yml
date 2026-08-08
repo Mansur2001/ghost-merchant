@@ -48,6 +48,9 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      # DEV ONLY: plain-HTTP listener so a real phone on the LAN can reach the stack.
+      # Remove this mapping (and the :8080 block in the Caddyfile) before a public deploy.
+      - "8080:8080"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./frontend:/srv/frontend:ro

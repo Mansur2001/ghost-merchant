@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:theme="@style/AppTheme">
+
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths"></meta-data>
+        </provider>
+    </application>
+
+    <!-- Permissions.
+         Every one of these has to be justified in the Play listing, and each is asked for at
+         the moment it is used rather than on launch — a permission prompt before the user
+         understands why is the fastest way to get denied. -->
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Network state: so the app can tell "you are offline" from "the server is down". -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Delivery location. FOREGROUND ONLY — asked for at checkout, when the customer taps
+         "Set my delivery location". We never request background location: it is the single
+         most scrutinised permission on Play, it needs a separate declaration and video
+         review, and this app has no use for it. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Reference photo at checkout and the driver's delivery-proof photo. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- The camera is optional hardware: an order can be placed without a photo, so don't
+         let Play hide the app from devices without one. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+
+    <!-- The USSD payment bridge opens the dialer with the code pre-filled (ACTION_DIAL via a
+         tel: link). The user presses call themselves, so CALL_PHONE is deliberately NOT
+         requested — that permission is restricted on Play and we don't need it. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+            <data android:scheme="tel" />
+        </intent>
+    </queries>
+</manifest>

@@ -3,6 +3,44 @@
 #
 # For a real VPS, replace `localhost` with your domain, e.g. `app.example.com`.
 
+# ── DEV ONLY: plain-HTTP listener for testing on a real phone ────────────────────────────
+# An Android WebView will not accept Caddy's self-signed localhost certificate, and you
+# cannot get a real cert for 192.168.x.x. So debug builds of the app talk to this port over
+# the LAN instead. It serves the same API and the same PWAs.
+#
+# DELETE THIS BLOCK BEFORE DEPLOYING TO A PUBLIC VPS. On a public IP it would serve customer
+# addresses, chat and session tokens in the clear. The app's own network config refuses to
+# use cleartext for anything but a private address, but this side must not be left open.
+:8080 {
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy backend:3000
+	}
+	handle /ws {
+		reverse_proxy backend:3000
+	}
+	handle /shared/* {
+		root * /srv/frontend
+		file_server
+	}
+	handle_path /driver/* {
+		root * /srv/frontend/driver
+		file_server
+		try_files {path} /index.html
+	}
+	handle_path /operator/* {
+		root * /srv/frontend/operator
+		file_server
+		try_files {path} /index.html
+	}
+	handle {
+		root * /srv/frontend/user
+		file_server
+		try_files {path} /index.html
+	}
+}
+
 localhost {
 	encode gzip
 

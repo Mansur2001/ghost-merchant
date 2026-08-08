@@ -8,7 +8,7 @@ const SHELL = [
   '/manifest.json',
   '/icon.svg',
   '/shared/styles.css',
-  '/shared/ids.js', '/shared/phone.js',
+  '/shared/config.js', '/shared/ids.js', '/shared/phone.js',
   '/shared/theme.js',
 ];
 

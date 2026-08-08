@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- GuriKaabe launcher icon. "Guri" = house, "kaabe" = helper/support.
+       Black field with the gold trim the apps already use, so the icon, the splash and the
+       running app read as one thing. Full-bleed variant (legacy launchers). -->
+  <rect width="512" height="512" fill="#000000"/>
+  <g fill="none" stroke="#d4af37" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+    <!-- roof -->
+    <path d="M96 246 L256 118 L416 246"/>
+    <!-- walls -->
+    <path d="M136 232 L136 394 L376 394 L376 232"/>
+  </g>
+  <!-- doorway, filled: the "delivered to your door" idea -->
+  <path d="M214 394 L214 300 a42 42 0 0 1 84 0 L298 394 Z" fill="#d4af37"/>
+</svg>
