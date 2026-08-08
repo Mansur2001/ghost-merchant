@@ -64,6 +64,13 @@ rewriting logic.
 - [x] Photo UX: customer reference photo at checkout, driver delivery-proof, thumbnails for operator
 - [ ] Push notifications (optional, later)
 
+### Mobile app (GuriKaabe — Android)
+- [x] Configurable API base URL across all three PWAs (`frontend/shared/config.js`)
+- [x] Capacitor project, builds a debug APK and a signed release AAB (`mobile/`)
+- [x] Dev LAN listener + derived network-security config for on-device testing
+- [x] Launcher icons, splash, permissions, Play submission pack (`docs/`)
+- [ ] Closed test with 12+ testers for 14 days (Play requirement for personal accounts)
+
 ### Validate on real hardware (do before scaling)
 - [ ] `tel:`+USSD `%23` fires on real Hormuud/Somtel devices
 - [ ] Android Oracle SMS interception + HMAC webhook round-trip
@@ -123,8 +130,17 @@ ORACLE_WEBHOOK_SECRET=<same as .env> BACKEND_URL=https://localhost \
 
 ```bash
 cd backend && npm install   # first time — installs jest + cross-env devDeps
-npm test                    # Jest (141 tests): domain, payments, OTP, access, limiter, redaction, operators, outbox
+npm test                    # Jest (255 tests): domain, payments, OTP, access, limiter, redaction, operators, outbox
 ```
+
+### Live verification (HTTP + WebSocket, against the running stack)
+
+```bash
+./scripts/verify/run-all.sh   # 153 checks: authz, OTP, rate limits, outbox, UUIDs, US numbers
+```
+
+Resets the stack between suites — the rate limiter and the accounts the suites create are
+stateful by design.
 
 ## Running in production
 

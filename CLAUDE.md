@@ -42,7 +42,7 @@ The plan is rapid shipping with public update posts. That's fine, with guardrail
 5. Speed comes from cutting *scope*, never from cutting the invariants below. If a feature
    can't be done safely this week, ship less of it, not an unsafe version of it.
 
-## Current status — living log (last updated 2026-08-06, P0 auth landed)
+## Current status — living log (last updated 2026-08-07, P1 done + Android app)
 Read this first when resuming: it's the running snapshot of where the project is, so a new
 session doesn't need re-discovery. Keep it current as work lands.
 
@@ -67,12 +67,20 @@ session doesn't need re-discovery. Keep it current as work lands.
   correct while every client is stale. Payment matching is now one transaction too.
 - **Jest suite** (141 tests): state machine, phone, USSD, payment edge cases, OTP + session
   tokens, the access rule, the rate limiter, log redaction, operator rules, the outbox relay.
+- **UUID order ids** with client-minted, idempotent creation (P1 #7) — the prerequisite for
+  the P2 offline queue, and it kills enumeration outright.
+- **US (+1) numbers** are full identities for device testing, but cannot pay by USSD; the app
+  says so and falls back to the operator's manual path.
+- **GuriKaabe Android app** (`mobile/`) — Capacitor shell over the same three PWAs, builds to
+  a 3.8MB debug APK / 2.7MB release AAB. See `mobile/README.md`.
+- **Live verification suite** (`scripts/verify/run-all.sh`, P1 #8) — 153 checks over the real
+  HTTP + WebSocket layers, including an actual crash-and-restart of the outbox.
 - **Version control**: initialized 2026-08-06. Was previously untracked inside the home-dir repo.
 
-**Status: MVP-complete; P0 auth closed, remaining P0 items open.** The data-exposure holes are
-fixed and verified against the live stack. Still open before real customers: per-operator
-accounts (P0 #5), the prod hygiene pass (P0 #4), and OTP delivery has never run on real
-hardware (P4) — `OTP_TRANSPORT=oracle` is written but unvalidated.
+**Status: P0 and P1 closed; the Android app (GuriKaabe) builds and installs.** Security, crash-safety and identity work
+are all verified against the live stack. **The one remaining blocker to a real launch is P4**:
+OTP delivery has never run on real hardware, and the backend refuses to boot in production
+without it. A reviewer who can't receive a login code sees a broken app.
 
 **Conventions for updating this log:** convert relative dates to absolute; when a "not done"
 item ships, move it up and tick the README checklist; keep entries one line.
@@ -205,11 +213,12 @@ hardware — the backend won't run in production without it) and, realistically,
    (`events/outbox.js`, `outbox` table) — see "Event delivery" below. Also fixed the same
    class of bug in payment matching, which used to record the receipt and transition the
    order in two separate transactions.
-7. **UUID order IDs** (client-generatable). Kills enumeration *and* is the prerequisite for
-   the offline write queue in P2 — the phone must be able to mint an ID with no network.
-8. **Integration tests.** Domain logic is covered; the HTTP and socket layers are not.
-   Once P0 lands, the authorization rules are exactly the thing that must be regression-tested
-   (supertest + a throwaway Postgres).
+7. ~~**UUID order IDs**~~ **DONE 2026-08-07.** Migration 006. Clients may mint their own id,
+   which makes creation idempotent (a lost response no longer creates a second order).
+8. ~~**Integration tests.**~~ **DONE 2026-08-07.** `scripts/verify/run-all.sh` — 153 checks
+   over the live HTTP + WebSocket layers. Shell rather than supertest, deliberately: it tests
+   the stack as deployed (through Caddy, with the real DB and MinIO), which is where the
+   authorization rules actually have to hold.
 
 ## P2 — CAP: what we actually choose
 
@@ -230,32 +239,32 @@ Over Somali mobile networks **P is not optional**, so the design is picking C or
 - **Conflict rule:** the server's state machine always wins over a queued client transition.
   A rejected offline action surfaces in the UI as "couldn't sync" — never silently dropped.
 
-## P3 — mobile app (Ionic Capacitor → Play Store)
+## P3 — mobile app (Capacitor → Play Store) — DONE 2026-08-07
 
-**The frontend does not run in a WebView as written.** Every call is same-origin relative
-(`fetch('/api' + path)`, `new WebSocket(\`${proto}://${location.host}/ws\`)`). In Capacitor the
-origin is the local asset server, so all of it 404s on launch.
+Built as **GuriKaabe** in `mobile/`. Read `mobile/README.md` before touching it; the essentials:
 
-- **First change:** a configurable API base URL threaded through all three apps
-  (`shared/config.js`, injected at build time). Nothing else in P3 works until this lands.
-- **One binary, not three.** Play wants one app per listing — bundle the existing role picker
-  into a single app. Driver/operator can stay web or side-loaded if review gets awkward.
-- **Service workers become redundant** in Capacitor; native asset bundling replaces the shell
-  cache. Simplification, not a loss — but the *offline data* queue (P2) is still ours to write.
-- **Real domain + Let's Encrypt is a prerequisite.** A WebView won't accept the self-signed cert.
+- **`shared/config.js` resolves the API base** (build-time value → `?api=` → same origin). This
+  was the blocker: same-origin calls inside a WebView point at the phone.
+- **One binary, three roles** — the landing page's role picker, all bundled from the same PWAs.
+  `build-www.mjs` copies rather than forks, so web and Android never drift.
+- **Cleartext is derived, not configured.** `build-www.mjs` refuses a non-private http base;
+  `configure-android.mjs` generates a network-security config permitting cleartext for exactly
+  one private host, and sets the WebView scheme to match (an `https://localhost` page cannot
+  call `http://192.168.x.x`). A release build regenerates it with no exceptions.
 - **The Oracle must never go on Play.** SMS reading needs `READ_SMS`, restricted to default
-  SMS-handler apps; it would be rejected. Side-loaded Termux on a dedicated phone is the
-  correct and only reviewable architecture.
-- **USSD:** use `ACTION_DIAL` (prefills the dialer, user presses call). No `CALL_PHONE`
-  permission, no policy risk.
-- **Play Console checklist:** $25 account, privacy policy URL, Data Safety form (must be true —
-  see P0), signed AAB, current target API level, prominent disclosure for location permission.
+  SMS-handler apps. Side-loaded Termux on a dedicated phone is the only reviewable architecture.
+- **USSD uses `ACTION_DIAL`** — no `CALL_PHONE`, no restricted-permission declaration.
+- **R8 is off and AGP warns about compileSdk 35** — see the toolchain notes in the mobile README.
+- Submission pack: `docs/PLAY_LISTING.md`, `docs/PRIVACY.md`.
 
 ## P4 — validate on real hardware (do this NOW, in parallel — biggest unknown)
 
-`tel:`+USSD `%23` dialing and Oracle SMS interception on actual Hormuud/Somtel SIMs. If either
-misbehaves the payment design changes and P0–P3 partly rework, so this is the schedule risk.
-Don't leave it until last. See `oracle/README.md`.
+`tel:`+USSD `%23` dialing, Oracle SMS interception, **and the outbound SMS path that delivers
+login codes**. This is now the ONLY thing between the current build and a real launch:
+- the backend refuses to boot with `NODE_ENV=production` unless `OTP_TRANSPORT=oracle`;
+- a Play reviewer who cannot receive a login code cannot get past the first screen, and the
+  app is rejected as broken.
+See `oracle/README.md`.
 
 ## Event delivery (transactional outbox)
 `Command tx { state change + INSERT INTO outbox } → COMMIT → relay → bus → sockets`

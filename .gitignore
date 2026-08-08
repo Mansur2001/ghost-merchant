@@ -26,3 +26,6 @@ mobile/android/capacitor-cordova-android-plugins/
 *.aab
 *.keystore
 *.jks
+
+# Release signing credentials — never commit.
+mobile/android/app/keystore.properties

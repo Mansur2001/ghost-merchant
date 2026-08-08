@@ -1,5 +1,21 @@
 apply plugin: 'com.android.application'
 
+// Release signing. The keystore is YOURS and must never enter git: losing it means you can
+// never update the app again (Play identifies an app by its signing key), and leaking it
+// means someone else can publish an update to your users.
+//
+// Create keystore.properties next to this file (git-ignored):
+//   storeFile=/absolute/path/to/gurikaabe-release.jks
+//   storePassword=...
+//   keyAlias=gurikaabe
+//   keyPassword=...
+def keystorePropertiesFile = rootProject.file("app/keystore.properties")
+def keystoreProperties = new Properties()
+def hasReleaseKeystore = keystorePropertiesFile.exists()
+if (hasReleaseKeystore) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace "so.gurikaabe.app"
     compileSdk rootProject.ext.compileSdkVersion
@@ -16,11 +32,42 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            release {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // R8 is deliberately OFF. This app is a thin WebView shell — the Java side is a
+            // handful of classes, and R8 does not touch the web assets, which are the actual
+            // payload. So shrinking saves almost nothing, while AGP 8.2's R8 fails outright
+            // against compileSdk 35 and over-aggressive shrinking causes release-only crashes
+            // that never show up in debug. Not worth it. Revisit if AGP is upgraded.
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (hasReleaseKeystore) {
+                signingConfig signingConfigs.release
+            }
         }
+    }
+
+}
+
+// A release build without a keystore produces an unsigned artifact that Play rejects on
+// upload. Fail early, with an explanation, rather than after a full build with a cryptic
+// "app not signed" from the Console.
+gradle.taskGraph.whenReady { graph ->
+    if (!hasReleaseKeystore && graph.allTasks.any { it.name =~ /(?i)(assemble|bundle)Release/ }) {
+        throw new GradleException(
+            "No app/keystore.properties — a release build would be unsigned and Play would " +
+            "reject it.\nSee mobile/README.md > 'Releasing to Play' to create your keystore.")
     }
 }
 
