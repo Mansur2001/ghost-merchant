@@ -6,6 +6,25 @@
 localhost {
 	encode gzip
 
+	# Security headers for the PWA documents. The API sets its own (middleware/securityHeaders.js);
+	# these protect the DOM, which is where an injected script would actually do damage —
+	# it would sit next to a live session token.
+	header {
+		# script-src 'self' means NO inline <script> runs: that's why service-worker
+		# registration lives in app.js instead of an inline block. Keep it that way.
+		# 'unsafe-inline' for styles only, because the markup uses style="" attributes.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; font-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		# The customer PWA needs geolocation (delivery point) and camera (reference photo);
+		# everything else is denied outright.
+		Permissions-Policy "geolocation=(self), camera=(self), microphone=(), payment=(), usb=(), interest-cohort=()"
+		# Uncomment on a REAL domain. Never on localhost: it pins your dev browser to HTTPS
+		# for a year and is a genuine pain to undo.
+		# Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
 	# API + webhook + heartbeat -> backend
 	handle /api/* {
 		reverse_proxy backend:3000

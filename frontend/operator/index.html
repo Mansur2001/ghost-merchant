@@ -26,12 +26,24 @@
     </div>
     <main>
       <section id="loginView" class="card">
-        <label for="password">Operator password</label>
-        <input id="password" type="password" placeholder="••••••••" />
+        <label for="username">Operator username</label>
+        <input id="username" type="text" autocomplete="username" autocapitalize="none"
+               spellcheck="false" placeholder="amina" />
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" />
         <button id="loginBtn" type="button">Log in</button>
+        <div class="muted" id="loginHint"></div>
       </section>
 
       <section id="dash" class="hidden">
+        <!-- The bootstrap account is created from OPERATOR_PASSWORD, which lives in .env and
+             shell history — this nag stays until it's changed. -->
+        <div class="card hidden" id="pwNag" style="border-color:var(--warn,#e6c65c);">
+          <strong>Change your password.</strong>
+          <p class="muted" style="margin:6px 0 0;">This account still uses the bootstrap
+            password from the server environment. Anyone who has seen that file can sign in as you.</p>
+        </div>
+
         <div class="card">
           <h3 style="margin:0 0 8px;">Active orders</h3>
           <div id="orders" class="scroll-list"></div>
@@ -54,15 +66,35 @@
           <input id="dPin" placeholder="PIN" inputmode="numeric" style="margin-top:10px;" />
           <button id="addDriver" type="button">Create driver</button>
         </div>
+
+        <!-- Operator accounts (P0 #5). Named accounts are what makes order_events.actor
+             mean something in a dispute. -->
+        <div class="card">
+          <h3 style="margin:0 0 8px;">Operators</h3>
+          <div id="operators" class="scroll-list"></div>
+        </div>
+
+        <div class="card">
+          <h3 style="margin:0 0 8px;">Add operator</h3>
+          <div class="row">
+            <input id="oUsername" placeholder="username" autocapitalize="none" spellcheck="false" />
+            <input id="oName" placeholder="Display name" />
+          </div>
+          <input id="oPassword" type="password" placeholder="password (min 12 characters)"
+                 autocomplete="new-password" style="margin-top:10px;" />
+          <button id="addOperator" type="button">Create operator</button>
+        </div>
+
+        <div class="card">
+          <h3 style="margin:0 0 8px;">Change my password</h3>
+          <input id="pwCurrent" type="password" autocomplete="current-password" placeholder="current password" />
+          <input id="pwNew" type="password" autocomplete="new-password" placeholder="new password (min 12 characters)" style="margin-top:10px;" />
+          <button id="changePw" type="button">Change password</button>
+        </div>
       </section>
     </main>
   </div>
   <script src="/shared/phone.js"></script>
   <script src="/operator/app.js"></script>
-  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => navigator.serviceWorker.register('/operator/sw.js'));
-    }
-  </script>
 </body>
 </html>

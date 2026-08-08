@@ -34,6 +34,13 @@ const PATHS = {
   FAILED_REFUND: ['PENDING_PAYMENT', 'FAILED_REFUND'],
 };
 
+// Named operator accounts (P0 #5). Two of them on purpose: the whole point of the change is
+// that order_events.actor can tell two people apart, and a one-row roster can't demo that.
+const OPERATORS = [
+  { username: 'admin', displayName: 'Bootstrap operator', password: 'change-me-please-1' },
+  { username: 'hodan', displayName: 'Hodan (dispatch)', password: 'seeded-operator-pw-1' },
+];
+
 const DRIVERS = [
   { name: 'Amina', msisdn: '+252619876543', pin: '1234' },
   { name: 'Bashir', msisdn: '+252651112223', pin: '5678' },
@@ -72,7 +79,7 @@ async function seed() {
     // Reset to a clean slate with deterministic ids/sequences.
     await client.query(
       `TRUNCATE otp_codes, order_photos, order_events, messages, transactions, orders,
-                drivers, users
+                drivers, users, operators
        RESTART IDENTITY CASCADE`
     );
 
@@ -81,6 +88,14 @@ async function seed() {
     }
 
     const driverIds = [];
+    for (const o of OPERATORS) {
+      await client.query(
+        `INSERT INTO operators(username, display_name, password_hash, created_by)
+         VALUES ($1, $2, $3, 'system:seed')`,
+        [o.username, o.displayName, hashSecret(o.password)]
+      );
+    }
+
     for (const d of DRIVERS) {
       const { rows } = await client.query(
         'INSERT INTO drivers(name, msisdn, pin_hash) VALUES ($1, $2, $3) RETURNING id',
@@ -175,6 +190,7 @@ async function seed() {
   console.log('Seed complete. Orders by status:');
   for (const r of rows) console.log(`  ${r.status.padEnd(16)} ${r.count}`);
   console.log(`Drivers: ${DRIVERS.map((d) => `${d.name}/${d.pin}`).join(', ')}`);
+  console.log(`Operators: ${OPERATORS.map((o) => `${o.username}/${o.password}`).join(', ')}`);
   await pool.end();
 }
 

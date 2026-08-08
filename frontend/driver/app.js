@@ -124,11 +124,22 @@ async function loadPhotos(orderId) {
     const { photos } = await api(`/orders/${orderId}/photos`);
     const el = $('dPhotos');
     if (!photos || !photos.length) { el.innerHTML = '<span class="muted">No photos yet.</span>'; return; }
+    // Photo bytes are authorized, so a bare <img src> gets a 401 — fetch with the bearer
+    // token and render from an object URL.
     el.innerHTML = photos.map((p) => `
       <figure class="photo">
-        <img src="${p.url}" alt="${p.kind}" loading="lazy" />
+        <img data-src="${p.url}" alt="${p.kind}" loading="lazy" />
         <figcaption class="muted">${p.kind === 'delivery_proof' ? 'Delivery proof' : 'Reference'}</figcaption>
       </figure>`).join('');
+    el.querySelectorAll('img[data-src]').forEach(async (img) => {
+      try {
+        const r = await fetch(img.dataset.src, { headers: { Authorization: `Bearer ${token}` } });
+        if (!r.ok) return;
+        const url = URL.createObjectURL(await r.blob());
+        img.src = url;
+        img.addEventListener('load', () => URL.revokeObjectURL(url), { once: true });
+      } catch { /* leave the placeholder */ }
+    });
   } catch { /* ignore */ }
 }
 $('proofBtn').addEventListener('click', async () => {
@@ -236,3 +247,10 @@ function toast(msg) {
 
 // Auto-resume session.
 if (token) showQueue();
+
+// ── Service worker ──
+// Registered here rather than in an inline <script> so the page can run under a strict
+// Content-Security-Policy (script-src 'self'), which is what blocks injected script.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/driver/sw.js'));
+}

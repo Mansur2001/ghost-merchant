@@ -13,11 +13,22 @@ import { attachSocketServer } from './realtime/socketServer.js';
 import { startOracleMonitor } from './realtime/oracleMonitor.js';
 import { ensureBucket } from './storage/objectStore.js';
 import { sweepExpiredOtps } from './commands/auth.js';
+import { ensureBootstrapOperator } from './commands/operators.js';
+import { securityHeaders } from './middleware/securityHeaders.js';
+import { requestLog } from './middleware/requestLog.js';
+import { apiNotFound, errorHandler } from './middleware/errorHandler.js';
+import { pool } from './db/pool.js';
 
 const app = express();
 
 // Rate limiting is only as good as the IP it buckets on — see config.trustProxyHops.
 app.set('trust proxy', config.trustProxyHops);
+app.disable('x-powered-by'); // don't advertise the stack
+
+// Order matters: log/headers first so they apply to EVERY response including 404s and
+// rejections from the body parser.
+app.use(requestLog);
+app.use(securityHeaders);
 
 // Minimal CORS (frontend is same-origin behind Caddy; this eases local dev tooling).
 app.use((req, res, next) => {
@@ -26,6 +37,7 @@ app.use((req, res, next) => {
     res.set('Access-Control-Allow-Origin', origin);
     res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Oracle-Signature');
     res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.set('Vary', 'Origin');
   }
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
@@ -43,8 +55,12 @@ app.use('/api', operatorRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
+// Terminal handlers, after every route.
+app.use('/api', apiNotFound);
+app.use(errorHandler);
+
 const server = http.createServer(app);
-attachSocketServer(server);
+const wss = attachSocketServer(server);
 startOracleMonitor();
 
 // Expired passcodes are dead weight and PII-adjacent — sweep them hourly.
@@ -64,6 +80,14 @@ async function boot() {
     process.exit(1);
   }
 
+  // Create the first named operator if the roster is empty, so a fresh deploy is reachable.
+  try {
+    await ensureBootstrapOperator();
+  } catch (err) {
+    console.error('FATAL: operator bootstrap failed:', err.message);
+    process.exit(1);
+  }
+
   try {
     await ensureBucket();
   } catch (err) {
@@ -73,5 +97,38 @@ async function boot() {
     console.log(`Ghost Merchant backend listening on :${config.port} (${config.env})`);
   });
 }
+
+// ── Graceful shutdown ──
+// `docker compose up -d --build` sends SIGTERM. Without this, in-flight requests are cut
+// mid-response and Postgres is left to time out the connections — which during a deploy can
+// mean an order write that the customer saw succeed never actually committed.
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} received — shutting down`);
+
+  // Stop taking new work, then let in-flight requests finish.
+  const closed = new Promise((resolve) => server.close(resolve));
+  for (const client of wss.clients) client.close(1001, 'server shutting down');
+  wss.close();
+  clearInterval(otpSweep);
+
+  // Don't hang forever on a stuck socket; past this point, exiting is the better outcome.
+  const timeout = new Promise((resolve) => setTimeout(resolve, 10_000).unref?.());
+  await Promise.race([closed, timeout]);
+
+  await pool.end().catch(() => {});
+  console.log('shutdown complete');
+  process.exit(0);
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+// A crash with an open DB pool and live sockets should still be loud and clean, not silent.
+process.on('unhandledRejection', (err) => {
+  console.error('FATAL unhandledRejection:', err);
+  shutdown('unhandledRejection');
+});
 
 boot();

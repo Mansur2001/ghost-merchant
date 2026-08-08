@@ -443,3 +443,10 @@ function toast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.remove(), 3200);
 }
+
+// ── Service worker ──
+// Registered here rather than in an inline <script> so the page can run under a strict
+// Content-Security-Policy (script-src 'self'), which is what blocks injected script.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
+}

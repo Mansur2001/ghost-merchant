@@ -47,6 +47,8 @@ rewriting logic.
 - [x] OTP auth (phone-number identity) — code send path via the Oracle phone (unvalidated on real hardware)
 - [x] Per-order authorization on every route + authenticated WebSocket subscriptions
 - [x] Rate limiting on every login path (OTP request/verify, driver PIN, operator password)
+- [x] Named operator accounts — audit trail records who did what (`operator:<id>:<username>`)
+- [x] Security headers + CSP, structured request logs (PII-redacted), graceful shutdown
 - [ ] Manual refund / reconciliation workflow
 
 ### Frontend (Option A: sovereign in-app chat)
@@ -94,7 +96,7 @@ docker compose exec backend npm run seed
 # 4. Open the PWAs (accept the self-signed cert warning once per PWA):
 #    User      https://localhost/
 #    Driver    https://localhost/driver/     (Amina / 1234, Bashir / 5678)
-#    Operator  https://localhost/operator/   (password = OPERATOR_PASSWORD in .env)
+#    Operator  https://localhost/operator/   (admin / change-me-please-1, or hodan / seeded-operator-pw-1)
 
 docker compose logs -f backend   # tail logs
 docker compose down              # stop, keep data   |   down -v  wipes DB + MinIO
@@ -119,7 +121,7 @@ ORACLE_WEBHOOK_SECRET=<same as .env> BACKEND_URL=https://localhost \
 
 ```bash
 cd backend && npm install   # first time — installs jest + cross-env devDeps
-npm test                    # Jest (86 tests): domain, payments, OTP + tokens, access rule, limiter
+npm test                    # Jest (127 tests): domain, payments, OTP, access, limiter, redaction, operators
 ```
 
 ## Running in production
@@ -141,7 +143,7 @@ VPS IP, and ports **80 + 443 open** (Caddy needs 80 for the ACME HTTP challenge)
 #    Set for prod:
 #      NODE_ENV=production
 #      CORS_ORIGINS=https://app.example.com     # your domain, not localhost
-#      OPERATOR_PASSWORD=<strong password>
+#      OPERATOR_PASSWORD=<strong password, 12+ chars — bootstraps the first operator account>
 #      MERCHANT_MSISDN=<real EVC Plus / eDahab number>
 #      USSD_TEMPLATE / TELECOM_SENDER_IDS       # match the live telecom
 #      POSTGRES_PASSWORD, S3_SECRET_KEY         # strong, unique

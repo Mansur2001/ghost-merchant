@@ -1,7 +1,6 @@
 // Operator/dispatcher super-user dashboard routes. The manual-override surface that turns
 // edge-case failures (Oracle down, wrong amount, ambiguous match) into a recoverable
 // business rather than a broken one.
-import crypto from 'node:crypto';
 import { Router } from 'express';
 import { query, withTransaction } from '../db/pool.js';
 import {
@@ -10,7 +9,16 @@ import {
   hashSecret,
 } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
-import { config } from '../config.js';
+import {
+  createOperator,
+  verifyOperatorLogin,
+  changeOwnPassword,
+  setOperatorActive,
+  OperatorError,
+} from '../commands/operators.js';
+import { listOperators, getOperatorById } from '../queries/operators.js';
+import { normalizeUsername } from '../domain/operator.js';
+import { actorLabel } from '../domain/redact.js';
 import { transitionOrder, postMessage, assignDriver } from '../commands/orders.js';
 import {
   getActiveOrders,
@@ -24,26 +32,113 @@ import { oracleStatus } from '../realtime/oracleMonitor.js';
 
 export const operatorRouter = Router();
 
-// POST /api/operator/login  { password }
-// One shared password guards the highest-privilege surface in the system (it can read every
-// order and drive every state machine), so the limiter here is deliberately tight. Per-operator
-// accounts are P0 #5 — until then this password is the whole perimeter.
+// POST /api/operator/login  { username, password }
+// Named accounts (P0 #5): every action below is attributed to a specific person in
+// order_events.actor, which is the record we rely on in a payment dispute. Limited per-IP and
+// per-username — this surface can read every order and drive every state machine.
 operatorRouter.post(
   '/operator/login',
-  rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: 'too many login attempts' }),
-  (req, res) => {
-    const supplied = Buffer.from(String(req.body?.password ?? ''));
-    const expected = Buffer.from(String(config.operatorPassword));
-    // Constant-time compare; length is checked separately because timingSafeEqual throws on
-    // a length mismatch (which would itself leak the password length via a 500).
-    const ok =
-      supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
-    if (!ok) return res.status(401).json({ error: 'invalid credentials' });
-    res.json({ token: signToken({ role: 'operator', id: 'super' }) });
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: 'too many login attempts' }),
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    key: (req) => normalizeUsername(req.body?.username).slice(0, 32) || 'unknown',
+    message: 'too many login attempts',
+  }),
+  async (req, res, next) => {
+    try {
+      const { username, password } = req.body || {};
+      const operator = await verifyOperatorLogin(username, password);
+      // One error for both "no such account" and "wrong password": the difference would
+      // enumerate the staff roster.
+      if (!operator) return res.status(401).json({ error: 'invalid credentials' });
+      const token = signToken({
+        role: 'operator',
+        id: operator.id,
+        username: operator.username,
+        name: operator.display_name,
+      });
+      res.json({
+        token,
+        operator: {
+          id: operator.id,
+          username: operator.username,
+          displayName: operator.display_name,
+          mustChangePassword: operator.must_change_password,
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
   }
 );
 
 const operatorOnly = requireRole('operator');
+
+// Who is signed in — lets the dashboard show the name and nag about a bootstrap password.
+operatorRouter.get('/operator/me', operatorOnly, async (req, res, next) => {
+  try {
+    const me = await getOperatorById(req.auth.id);
+    if (!me) return res.status(401).json({ error: 'unauthorized' }); // deactivated mid-session
+    res.json({ operator: me });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Operator account management ──
+operatorRouter.get('/operator/operators', operatorOnly, async (req, res, next) => {
+  try {
+    res.json({ operators: await listOperators() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/operator/operators { username, displayName, password }
+operatorRouter.post('/operator/operators', operatorOnly, async (req, res, next) => {
+  try {
+    const { username, displayName, password } = req.body || {};
+    const operator = await createOperator({
+      username,
+      displayName,
+      password,
+      createdBy: actorLabel(req.auth),
+    });
+    res.status(201).json({ operator });
+  } catch (err) {
+    if (err instanceof OperatorError) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+// POST /api/operator/operators/:id/active { active: bool } — deactivate/reactivate.
+operatorRouter.post('/operator/operators/:id/active', operatorOnly, async (req, res, next) => {
+  try {
+    const operator = await setOperatorActive(req.params.id, req.body?.active !== false, req.auth.id);
+    res.json({ operator });
+  } catch (err) {
+    if (err instanceof OperatorError) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+// POST /api/operator/me/password { currentPassword, newPassword }
+operatorRouter.post(
+  '/operator/me/password',
+  operatorOnly,
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: 'too many attempts' }),
+  async (req, res, next) => {
+    try {
+      const { currentPassword, newPassword } = req.body || {};
+      await changeOwnPassword({ operatorId: req.auth.id, currentPassword, newPassword });
+      res.json({ ok: true });
+    } catch (err) {
+      if (err instanceof OperatorError) return res.status(err.status).json({ error: err.message });
+      next(err);
+    }
+  }
+);
 
 // GET /api/operator/orders — all active orders.
 operatorRouter.get('/operator/orders', operatorOnly, async (req, res) => {
@@ -80,7 +175,7 @@ operatorRouter.post('/operator/orders/:id/assign', operatorOnly, async (req, res
     await assignDriver(order.id, driverId);
     if (order.status === STATUS.PAID_UNASSIGNED) {
       const updated = await transitionOrder(
-        order.id, STATUS.DISPATCHED, 'operator:super', `assigned to ${driver.name}`
+        order.id, STATUS.DISPATCHED, actorLabel(req.auth), `assigned to ${driver.name}`
       );
       return res.json({ order: updated });
     }
@@ -99,7 +194,7 @@ operatorRouter.post('/operator/orders/:id/mark-paid', operatorOnly, async (req, 
     const order = await transitionOrder(
       req.params.id,
       STATUS.PAID_UNASSIGNED,
-      'operator:super',
+      actorLabel(req.auth),
       req.body?.note || 'manual mark-paid override'
     );
     res.json({ order });
@@ -122,7 +217,7 @@ operatorRouter.post('/operator/transactions/:txId/assign', operatorOnly, async (
     });
     const order = await getOrder(orderId);
     if (order.status === STATUS.PENDING_PAYMENT) {
-      await transitionOrder(orderId, STATUS.PAID_UNASSIGNED, 'operator:super', 'manual receipt assign');
+      await transitionOrder(orderId, STATUS.PAID_UNASSIGNED, actorLabel(req.auth), 'manual receipt assign');
     }
     res.json({ ok: true });
   } catch (err) {
@@ -137,7 +232,7 @@ operatorRouter.post('/operator/orders/:id/refund', operatorOnly, async (req, res
     const order = await transitionOrder(
       req.params.id,
       STATUS.FAILED_REFUND,
-      'operator:super',
+      actorLabel(req.auth),
       req.body?.reason || 'operator refund'
     );
     res.json({ order });

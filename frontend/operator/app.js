@@ -30,14 +30,34 @@ const api = (path, opts = {}) =>
     },
   }).then((r) => r.json());
 
-$('loginBtn').addEventListener('click', async () => {
+let me = null; // the signed-in operator (id, username, display_name, must_change_password)
+
+async function login() {
+  const username = $('username').value.trim();
   const password = $('password').value;
-  const res = await api('/operator/login', { method: 'POST', body: JSON.stringify({ password }) });
-  if (res.error) return toast(res.error);
+  if (!username || !password) return toast('Enter your username and password.');
+  $('loginBtn').disabled = true;
+  const res = await api('/operator/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  });
+  $('loginBtn').disabled = false;
+  if (res.error) {
+    // 429 carries retryAfter — say how long rather than just failing.
+    $('loginHint').textContent = res.retryAfter
+      ? `${res.error}. Try again in ${res.retryAfter}s.`
+      : res.error;
+    return;
+  }
   token = res.token;
+  me = res.operator;
   sessionStorage.setItem('opToken', token);
+  $('password').value = '';
+  $('loginHint').textContent = '';
   showDash();
-});
+}
+$('loginBtn').addEventListener('click', login);
+$('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
 
 $('logoutBtn').addEventListener('click', () => {
   sessionStorage.removeItem('opToken');
@@ -45,22 +65,112 @@ $('logoutBtn').addEventListener('click', () => {
   location.reload();
 });
 
-function showDash() {
+async function showDash() {
   $('loginView').classList.add('hidden');
   $('dash').classList.remove('hidden');
   $('logoutBtn').classList.remove('hidden');
-  setStatus('Monitoring live — waiting for activity.', 'ok');
+  await loadMe();
+  setStatus(
+    me ? `Signed in as ${me.display_name} (${me.username}) — monitoring live.`
+       : 'Monitoring live — waiting for activity.',
+    'ok'
+  );
   refreshAll();
   connectSocket();
   setInterval(pollOracle, 20000);
   pollOracle();
 }
 
+// Resolve who we are from the token. Also catches the case where this account was
+// deactivated while the tab sat open — the server answers 401 and we bounce to login.
+async function loadMe() {
+  const res = await api('/operator/me');
+  if (res.error || !res.operator) {
+    sessionStorage.removeItem('opToken');
+    token = null;
+    return location.reload();
+  }
+  me = res.operator;
+  $('pwNag').classList.toggle('hidden', !me.must_change_password);
+}
+
 let drivers = []; // roster with workload stats, kept fresh for the assign picker
 
 async function refreshAll() {
   await loadDrivers();                       // load first so order cards can build the picker
-  await Promise.all([loadOrders(), loadUnmatched()]);
+  await Promise.all([loadOrders(), loadUnmatched(), loadOperators()]);
+}
+
+// ── Operator roster (P0 #5) ──
+async function loadOperators() {
+  const res = await api('/operator/operators');
+  const list = res.operators || [];
+  $('operators').innerHTML = list.length
+    ? list.map((o) => `
+        <div class="card" style="background:var(--panel-2);">
+          <div class="row" style="align-items:center;">
+            <div>
+              <strong>${escapeHtml(o.display_name)}</strong>
+              <span class="muted"> @${escapeHtml(o.username)}</span>
+              ${o.id === me?.id ? '<span class="muted"> — you</span>' : ''}
+            </div>
+            <span class="badge ${o.active ? 'paid' : 'fail'}" style="margin-left:auto;">
+              ${o.active ? 'active' : 'disabled'}</span>
+          </div>
+          <div class="muted">
+            ${o.last_login_at ? `last login ${new Date(o.last_login_at).toLocaleString()}` : 'never signed in'}
+            ${o.must_change_password ? ' · must change password' : ''}
+          </div>
+          ${o.id === me?.id ? '' : `<button class="${o.active ? 'danger' : ''}" data-op="${o.id}"
+             data-active="${o.active ? 'false' : 'true'}">${o.active ? 'Deactivate' : 'Reactivate'}</button>`}
+        </div>`).join('')
+    : '<p class="muted">No operators.</p>';
+  $('operators').querySelectorAll('[data-op]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const res2 = await api(`/operator/operators/${b.dataset.op}/active`, {
+        method: 'POST',
+        body: JSON.stringify({ active: b.dataset.active === 'true' }),
+      });
+      if (res2.error) return toast(res2.error);
+      toast('Updated ✓');
+      loadOperators();
+    })
+  );
+}
+
+$('addOperator').addEventListener('click', async () => {
+  const username = $('oUsername').value.trim();
+  const displayName = $('oName').value.trim() || username;
+  const password = $('oPassword').value;
+  if (!username || !password) return toast('Username and password are required.');
+  const res = await api('/operator/operators', {
+    method: 'POST',
+    body: JSON.stringify({ username, displayName, password }),
+  });
+  if (res.error) return toast(res.error);
+  $('oUsername').value = ''; $('oName').value = ''; $('oPassword').value = '';
+  toast('Operator created ✓');
+  loadOperators();
+});
+
+$('changePw').addEventListener('click', async () => {
+  const currentPassword = $('pwCurrent').value;
+  const newPassword = $('pwNew').value;
+  if (!currentPassword || !newPassword) return toast('Fill in both password fields.');
+  const res = await api('/operator/me/password', {
+    method: 'POST',
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+  if (res.error) return toast(res.error);
+  $('pwCurrent').value = ''; $('pwNew').value = '';
+  toast('Password changed ✓');
+  loadMe();
+});
+
+// Operator-supplied names land in innerHTML; escape them rather than trusting the roster.
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 async function loadDrivers() {
@@ -254,3 +364,10 @@ function toast(msg) {
 }
 
 if (token) showDash();
+
+// ── Service worker ──
+// Registered here rather than in an inline <script> so the page can run under a strict
+// Content-Security-Policy (script-src 'self'), which is what blocks injected script.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/operator/sw.js'));
+}

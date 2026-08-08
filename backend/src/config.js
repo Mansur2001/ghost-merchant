@@ -34,7 +34,13 @@ export const config = {
 
   oracleWebhookSecret: required('ORACLE_WEBHOOK_SECRET'),
   sessionSecret: required('SESSION_SECRET'),
+  // Bootstrap credential ONLY: used once, on first boot, to create the initial named operator
+  // account when the roster is empty (commands/operators.js). After that, accounts live in the
+  // operators table and this value is inert — real logins never consult it.
   operatorPassword: process.env.OPERATOR_PASSWORD || 'change_me_operator_password',
+  bootstrapOperator: {
+    username: (process.env.BOOTSTRAP_OPERATOR_USERNAME || 'admin').trim().toLowerCase(),
+  },
 
   payment: {
     merchantMsisdn: process.env.MERCHANT_MSISDN || '61XXXXXXX',

@@ -129,7 +129,7 @@ Three identities, one signing secret (`SESSION_SECRET`), all tokens HMAC-signed 
 |---|---|---|---|
 | `customer` | phone + 6-digit OTP over SMS | 30 days | only orders under their verified phone |
 | `driver` | msisdn + PIN (scrypt) | 12 hours | only orders the operator assigned to them |
-| `operator` | shared password | 12 hours | everything (P0 #5: needs per-user accounts) |
+| `operator` | username + password (scrypt) | 12 hours | everything |
 
 - **OTP** (`domain/otp.js`, `commands/auth.js`, `routes/auth.js`): 6 uniform random digits,
   scrypt-hashed at rest, 5-minute TTL, single-use, max 5 attempts, 60s resend cooldown
@@ -150,6 +150,15 @@ Three identities, one signing secret (`SESSION_SECRET`), all tokens HMAC-signed 
   in the query string lands in every access log). Sockets that don't authenticate within 10s
   are closed (4401). Room members are **re-authorized on every event**, not just at subscribe
   time, so a reassigned driver stops receiving a customer's updates immediately.
+- **Operator accounts** (`domain/operator.js`, `commands/operators.js`): usernames are
+  normalized to lowercase (so "Amina " and "amina" can't become two accounts and a lookalike);
+  passwords are ≥12 chars, scrypt-hashed, and may not contain the username. Login answers one
+  generic error for both "no such account" and "wrong password" — the difference enumerates the
+  staff roster. Accounts are **deactivated, never deleted** (the audit trail references them),
+  you cannot deactivate yourself, and the last active operator cannot be deactivated — locking
+  the whole desk out of a running delivery business is a worse outage than any account.
+  First boot creates `admin` from `OPERATOR_PASSWORD`, flagged `must_change_password`, because
+  that value lives in `.env` and shell history and is a delivery mechanism, not a secret.
 - **Rate limits** (`middleware/rateLimit.js`): in-process sliding window on OTP request/verify
   (per IP + per phone), driver login (per IP + per msisdn), operator login. ⚠️ Per-process
   state — with N instances the real limit is N×max. Moves to Redis with the event bus (P2);
@@ -172,11 +181,16 @@ open doors that make the current build unsafe to point at real people.
    `subscribe_driver` added for a driver's own feed.
 3. ~~**No rate limiting on auth endpoints.**~~ **DONE 2026-08-06.** Per-IP + per-identity
    sliding-window limiter on OTP request/verify, driver login, and operator login.
-4. **No security headers, request logging, global error handler, or graceful shutdown.**
-   Stack traces can leak to clients; there's no audit trail of who did what from where.
-5. **Operator is one shared password with no per-user identity.** Every operator action is
-   attributed to "the operator." **Fix:** per-operator accounts before there's more than one
-   person on the dashboard; the `order_events` audit table needs a real actor.
+4. ~~**No security headers, request logging, global error handler, or graceful shutdown.**~~
+   **DONE 2026-08-07.** Security headers on the API + a real CSP on the PWAs (Caddy),
+   structured request logs with a request id and a redacted actor, JSON 404/error handling
+   with no stack leakage, SIGTERM graceful shutdown.
+5. ~~**Operator is one shared password with no per-user identity.**~~ **DONE 2026-08-07.**
+   Named accounts in an `operators` table; `order_events.actor` now records
+   `operator:<id>:<username>`.
+
+**P0 is closed.** What remains before real customers is P4 (validate the Oracle SMS path on
+hardware — the backend won't run in production without it) and, realistically, P1 #6/#8.
 
 ## P1 — correctness under real-world failure
 
@@ -235,6 +249,27 @@ origin is the local asset server, so all of it 404s on launch.
 `tel:`+USSD `%23` dialing and Oracle SMS interception on actual Hormuud/Somtel SIMs. If either
 misbehaves the payment design changes and P0–P3 partly rework, so this is the schedule risk.
 Don't leave it until last. See `oracle/README.md`.
+
+## Observability & operational hygiene (P0 #4)
+- **Every response carries `X-Request-Id`**, and every request logs one JSON line
+  (`middleware/requestLog.js`): method, masked path, status, ms, ip, actor. When a customer
+  disputes a payment, that line plus `order_events.actor` is the whole story.
+- **Logs must never undo the API's privacy** (`domain/redact.js`): phone numbers are masked to
+  `+252••••••678` — including inside the URL, since `/phone/validate/:phone` puts PII in the
+  request line — and token/password/pin/code keys are dropped entirely. Never
+  `console.log(req.body)`; use `redact()`.
+- **Errors** (`middleware/errorHandler.js`): the client gets a generic message plus the request
+  id; the stack goes to the log. Express's default handler renders stack traces into the
+  response body outside production — file paths, library versions, sometimes the failing SQL.
+  Malformed JSON is 400, oversized bodies are 413, unknown `/api` routes are JSON 404.
+- **Graceful shutdown**: SIGTERM stops new work, closes sockets with 1001, drains in-flight
+  requests (10s cap), then ends the pg pool. Without it a deploy cuts requests mid-response
+  and an order the customer saw succeed may never have committed.
+- **CSP on the PWAs** (Caddyfile): `script-src 'self'` — which is why service-worker
+  registration lives in `app.js`, not an inline `<script>`. Don't reintroduce inline scripts.
+  ⚠️ The CSP has been verified by header inspection but **not yet by loading the PWAs in a
+  real browser** — `connect-src 'self'` must permit the same-origin WebSocket; confirm no
+  violations in the console before a demo.
 
 ---
 
