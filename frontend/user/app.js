@@ -473,7 +473,7 @@ async function sendChat() {
 }
 
 // ── Header navigation: Home (landing) + FAQ ──
-const VIEWS = ['landingView', 'authView', 'startView', 'orderView', 'resumeView', 'faqView'];
+const VIEWS = ['landingView', 'joinView', 'authView', 'startView', 'orderView', 'resumeView', 'faqView'];
 function showView(id) {
   VIEWS.forEach((v) => $(v).classList.add('hidden'));
   $(id).classList.remove('hidden');
@@ -533,6 +533,66 @@ async function resumeOrder(id) {
     }
   } catch { /* ignore */ }
 })();
+
+// ── Ask to join the team ──
+// This submits a REQUEST. It creates no account: an operator reads it, calls the number, and
+// decides. The page says so plainly, because a form that looks like registration and then
+// doesn't sign you in reads as broken.
+$('joinBtn').addEventListener('click', async () => {
+  showView('joinView');
+  loadOwnerContact();
+});
+$('joinHome').addEventListener('click', () => showView('landingView'));
+
+// Live validation on the applicant's number — same rules as everywhere else, so we don't take
+// a request we can't call back.
+let joinPhoneValid = false;
+let joinPhoneE164 = null;
+SomPhone.attach({
+  input: $('joinPhone'),
+  hint: $('joinPhoneHint'),
+  onChange: (r) => { joinPhoneValid = r.valid; joinPhoneE164 = r.e164 || null; },
+});
+
+async function loadOwnerContact() {
+  const el = $('ownerContact');
+  if (el.dataset.loaded) return;
+  const res = await api('/signup/contact');
+  const c = res.contact;
+  if (!c) return;
+  el.innerHTML = `
+    <div><a href="mailto:${c.email}">${c.email}</a></div>
+    <div><a href="tel:${String(c.phone).replace(/[^\d+]/g, '')}">${c.phone}</a></div>`;
+  el.dataset.loaded = '1';
+}
+
+$('joinSubmit').addEventListener('click', async () => {
+  const name = $('joinName').value.trim();
+  const role = $('joinRole').value;
+  const message = $('joinMessage').value.trim();
+
+  if (name.length < 2) return toast('Please enter your name.');
+  if (!joinPhoneValid) return toast('Enter a valid phone number so we can call you back.');
+
+  $('joinSubmit').disabled = true;
+  $('joinStatus').textContent = 'Sending…';
+  const res = await api('/signup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role, name, phone: joinPhoneE164, message }),
+  });
+  $('joinSubmit').disabled = false;
+
+  if (res.error) {
+    $('joinStatus').textContent = res.retryAfter
+      ? `${res.error} (try again in ${res.retryAfter}s)`
+      : res.error;
+    return;
+  }
+  $('joinStatus').textContent = res.message;
+  $('joinName').value = '';
+  $('joinMessage').value = '';
+});
 
 // ── Tiny toast ──
 let toastTimer;

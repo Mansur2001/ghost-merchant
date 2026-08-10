@@ -3,9 +3,14 @@
 // Signs a webhook exactly like the real Android Oracle would and POSTs it to the backend.
 //
 // Usage:
-//   ORACLE_WEBHOOK_SECRET=<secret> node simulate.js payment <senderMsisdn> <amount> [receiptId]
-//   ORACLE_WEBHOOK_SECRET=<secret> node simulate.js heartbeat
-//   BACKEND_URL=https://localhost node simulate.js payment 61234567 5.50
+//   node simulate.js payment  <senderMsisdn> <amount> [receiptId]   — Somali rail, auto-matches
+//   node simulate.js sms      <provider> <amount> [name]            — RAW message, any rail
+//   node simulate.js heartbeat
+//
+// `sms` is the realistic one: it sends the raw text the merchant phone would actually receive
+// and lets the SERVER parse it, which is how the real Oracle now works. Use it to test a US
+// rail without a SIM:
+//   node simulate.js sms zelle 25.00 "John Smith"
 //
 // (For self-signed localhost certs, prefix with NODE_TLS_REJECT_UNAUTHORIZED=0.)
 import crypto from 'node:crypto';
@@ -43,9 +48,32 @@ if (cmd === 'payment') {
     amount: Number(amount),
     rawSms: `You have received $${amount} from ${sender}. (simulated)`,
   });
+} else if (cmd === 'sms') {
+  // Raw-message mode: exactly what the phone forwards. `sender` here is the provider id.
+  const provider = (sender || '').toLowerCase();
+  const amt = amount || '25.00';
+  const who = receiptId || 'John Smith'; // 4th arg doubles as the payer name
+  const ref = `SIM${Date.now().toString().slice(-6)}`;
+
+  const TEMPLATES = {
+    evcplus: ['EVCPlus', `You have received $${amt} from 612345678. Ref: ${ref}`],
+    edahab:  ['eDahab',  `You have received $${amt} from 652345678. Ref: ${ref}`],
+    zelle:   ['Zelle',   `${who} sent you $${amt} with Zelle. Ref ${ref}`],
+    cashapp: ['CashApp', `${who} sent you $${amt} on Cash App. #${ref}`],
+    venmo:   ['Venmo',   `${who} paid you $${amt} - Venmo. ID: ${ref}`],
+    junk:    ['+12065551234', 'are you open today?'],
+  };
+
+  const t = TEMPLATES[provider];
+  if (!t) {
+    console.error(`Unknown provider "${provider}". One of: ${Object.keys(TEMPLATES).join(', ')}`);
+    process.exit(1);
+  }
+  console.log(`SMS from ${t[0]}: ${t[1]}`);
+  await post('/webhook', { senderId: t[0], body: t[1], receivedAt: String(Date.now()) });
 } else if (cmd === 'heartbeat') {
   await post('/heartbeat', { ts: Date.now(), device: 'simulator' });
 } else {
-  console.error('Commands: payment | heartbeat');
+  console.error('Commands: payment | sms | heartbeat');
   process.exit(1);
 }

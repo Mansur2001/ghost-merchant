@@ -57,6 +57,31 @@
           <div id="unmatched" class="scroll-list"></div>
         </div>
 
+        <!-- Money we owe customers. The platform never holds funds, so settling a refund is
+             an operator sending money back from their own phone — this panel is the ledger
+             that stops that being forgotten. -->
+        <div class="card">
+          <div class="row" style="align-items:center;">
+            <h3 style="margin:0;">Refunds owed</h3>
+            <span class="badge fail hidden" id="refundTotal" style="margin-left:auto;"></span>
+          </div>
+          <div id="refunds" class="scroll-list"></div>
+          <details style="margin-top:10px;">
+            <summary class="muted">Recently closed</summary>
+            <div id="refundsClosed" class="scroll-list" style="margin-top:8px;"></div>
+          </details>
+        </div>
+
+        <!-- People asking to be given an account. Reviewing here records a decision; it does
+             NOT create the account — you do that below, with a password you choose. -->
+        <div class="card">
+          <div class="row" style="align-items:center;">
+            <h3 style="margin:0;">Access requests</h3>
+            <span class="badge pending hidden" id="requestCount" style="margin-left:auto;"></span>
+          </div>
+          <div id="accessRequests" class="scroll-list"></div>
+        </div>
+
         <div class="card">
           <h3 style="margin:0 0 8px;">Drivers</h3>
           <div id="drivers" class="scroll-list"></div>

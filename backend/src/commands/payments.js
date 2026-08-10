@@ -18,13 +18,26 @@ import { parsePhone } from '../domain/phone.js';
 import { EVENTS } from '../events/bus.js';
 import { enqueue, wakeOutbox } from '../events/outbox.js';
 
-export async function recordAndMatchPayment({ receiptId, senderMsisdn, amount, rawSms }) {
+export async function recordAndMatchPayment({
+  receiptId,
+  senderMsisdn,
+  senderName = null,
+  amount,
+  rawSms,
+  provider = null,
+}) {
   if (!receiptId) throw new Error('receiptId (telecom_receipt_id) required');
   // Normalize the sender to the same canonical E.164 identity we stored on the order, so
   // a receipt from "61234567", "061234567", or "+25261234567" all match. If the Oracle
   // reports an unrecognized number we keep the raw value (operator will reconcile).
   const parsed = parsePhone(senderMsisdn);
-  const sender = parsed.valid ? parsed.e164 : String(senderMsisdn || '');
+  const sender = parsed.valid ? parsed.e164 : String(senderMsisdn || senderName || 'unknown');
+
+  // Only a phone number can be matched to an order automatically. US rails (Zelle, Cash App,
+  // Venmo) identify the payer by display name, and matching on amount alone would mark the
+  // WRONG customer's order paid the moment two people owe the same amount. Those go straight
+  // to the operator's reconcile queue, which is exactly what it is for.
+  const canAutoMatch = parsed.valid;
 
   // CP path: a payment must be linearizable and durable before we acknowledge it.
   const outcome = await withCriticalTransaction(async (tx) => {
@@ -61,6 +74,8 @@ export async function recordAndMatchPayment({ receiptId, senderMsisdn, amount, r
         amount,
         raw_sms: rawSms || null,
         matched: matchedOrderId != null,
+        provider,
+        sender_name: senderName,
       },
     });
 

@@ -98,8 +98,28 @@ any module (order / dispatch / tracking / payment) can be extracted later withou
   events to WebSocket clients (subscribe-by-`order_id`; operators get everything).
 
 Data flow for a payment:
-`Oracle → POST /api/webhook (HMAC) → recordAndMatchPayment (command) → transitionOrder →
-publish(ORDER_STATE_CHANGED / PAYMENT_RECEIVED) → socket push → PWA updates live.`
+`Oracle → POST /api/webhook (HMAC) → parseReceipt → recordAndMatchPayment (command) →
+transitionOrder → outbox → socket push → PWA updates live.`
+
+**The Oracle is a CONFIRMATION sensor, not a communication device.** It watches the merchant
+phone's inbox for any message saying money arrived — EVC Plus, eDahab, Zelle, Cash App,
+Venmo — and forwards the RAW text. Conversation between customer, driver and operator never
+touches it; that is the in-app chat over WebSocket.
+
+- **Parsing is server-side** (`domain/receipts.js`). Rails reword their receipts without
+  warning, and a parser fix must not require physical access to a handset in another country.
+  The phone forwards; the server interprets.
+- **Only a receipt carrying a PHONE NUMBER can auto-match.** US rails identify the payer by
+  display name, so those are recorded and land in the operator's reconcile queue. Matching on
+  amount alone would mark the wrong customer's order paid the moment two people owe the same
+  amount — which, with a fixed delivery fee, is most of the time.
+- **A receipt is evidence, not proof**: sender IDs are spoofable. What holds is the narrow
+  match (number + exact amount + an order actually waiting), the reconcile queue for anything
+  ambiguous, and `telecom_receipt_id UNIQUE` so a replay can never credit twice.
+- **Running with no Oracle is supported.** At low volume an operator reads the merchant phone
+  and taps "Mark as paid". The dead-man's switch arms itself only once an Oracle has actually
+  reported, so a deployment without one shows "Payments: manual" rather than a permanent red
+  DOWN — an alarm that is always on is one people learn to ignore.
 
 ## Non-negotiable invariants
 1. **The order state machine is the single source of truth**
@@ -151,10 +171,14 @@ Three identities, one signing secret (`SESSION_SECRET`), all tokens HMAC-signed 
   enforced atomically in the DB (`otp_codes`, one live challenge per phone). Verification
   returns ONE generic error for every failure mode — distinguishing "no challenge" from
   "wrong code" would make the endpoint a phone-number oracle.
-- **Delivery** (`notify/smsSender.js`): `OTP_TRANSPORT=log` prints the code (dev only — the
-  backend **refuses to boot** with it under `NODE_ENV=production`); `oracle` sends a real SMS
-  via the Oracle phone over an HMAC-signed request, reusing `ORACLE_WEBHOOK_SECRET`.
-  **The oracle path has never run on real hardware** (P4).
+- **Delivery** (`notify/smsSender.js`) is per-country, not global — `OTP_TRANSPORT=auto`:
+  `+252` → the **Oracle phone** (no vendor, no platform fee: the sovereignty requirement);
+  everything else → **Twilio** (your US test handset, and a Play reviewer who must receive a
+  code to get past the first screen). A Somali SIM sending internationally is slow, costly and
+  often silently dropped. If Twilio is unconfigured, Somali logins are unaffected — the
+  business does not depend on it. `log` prints the code and the backend **refuses to boot**
+  with it under `NODE_ENV=production`. Setup: `docs/LIVE_SMS_SETUP.md`.
+  **The oracle path has never run on real hardware** (P4); Twilio does not solve that.
 - **Deny = 404, never 403.** A 403 confirms "this order exists, it just isn't yours" — exactly
   what an enumeration script wants. Order IDs stay sequential until the UUID migration (P1),
   so "not yours" and "doesn't exist" must be byte-identical. Same for WebSocket `subscribe`.
@@ -313,6 +337,23 @@ See `oracle/README.md`.
   violations in the console before a demo.
 
 ---
+
+## Refunds & access requests
+- **Refunds are a ledger, not a transfer.** The platform never holds funds (invariant 6), so
+  settling means an operator sent money back from their own phone. A `FAILED_REFUND`
+  transition opens a `refunds` row **in the same transaction** — an order must never be able
+  to end up failed with no record of what is owed, because that record is the only thing that
+  will remind anyone to pay it. Nothing is opened if no payment ever arrived.
+- **Settle requires a telecom reference** (the receipt of the RETURN transfer): it is the only
+  claim in the system we cannot verify ourselves, so it must be checkable against the
+  telecom's own log. **Waive is separate from settle** — conflating "we paid this back" with
+  "nothing was owed" makes the ledger useless in the argument it exists to settle.
+- **Nobody self-registers as staff.** `POST /api/signup` records a REQUEST and grants nothing;
+  an operator reviews it and then creates the account explicitly, with a password they choose.
+  An operator account reads every customer's phone, address, chat and photos — the gate has to
+  be a human who recognises the applicant. Reviewing is *not* wired to account creation on
+  purpose: minting a credential should be a deliberate act, not a side effect of clicking
+  Approve in a list.
 
 ## Photos / object storage (MinIO)
 Two photo types, both stored in MinIO and indexed in `order_photos`:

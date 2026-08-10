@@ -1,63 +1,137 @@
 # The Android Oracle — setup & validation
 
-The Oracle is the single point of failure and the load-bearing wall of the whole concept.
-**Validate it before building anything else on top.**
+## What it is
 
-## Validate the software loop first (no phone needed)
+A dedicated Android phone that **confirms payments**. When someone pays the merchant, the
+rail texts the merchant's phone; the Oracle forwards that message to the backend, which
+matches it to an order and marks it paid.
 
-With the stack running (`docker compose up`), simulate a real signed payment webhook:
+It is a **sensor, not a communication device**. Customer/driver/operator conversation goes
+over the in-app chat and never touches this phone.
+
+**It does not parse.** It forwards the raw SMS and lets the server decide what it means
+(`backend/src/domain/receipts.js`). Rails reword their receipts without warning, and a parser
+fix must not require physical access to a handset that may be in another country. *(This
+changed — earlier versions parsed on the device with regexes you had to tune by hand. Those
+are gone; there is nothing to tune here any more.)*
+
+## Rails it senses
+
+| Rail | Country | Auto-matches? |
+|---|---|---|
+| EVC Plus, eDahab | SO | **Yes** — the receipt carries the payer's phone number |
+| Zelle, Cash App, Venmo | US | **No** — see below |
+
+US rails identify the payer by *display name* ("John Smith sent you $25.00"). There is no safe
+way to turn a name into an order: with a fixed delivery fee, two customers owing the same
+amount is the normal case, so matching on amount alone would mark the **wrong** person's order
+paid. Those receipts are recorded with the payer's name and land in the operator's
+**reconcile queue**, where a human binds them to an order in one click.
+
+Adding a rail = adding an entry to `PROVIDERS` in `backend/src/domain/receipts.js`, plus a
+test. Nothing on the phone changes.
+
+## You do not need an Oracle to run
+
+At low volume an operator reads the merchant phone and taps **Mark as paid**. That path is
+fully supported, and the dashboard shows **"Payments: manual"** rather than an alarm — the
+dead-man's switch only arms once an Oracle has actually reported. The Oracle removes a manual
+step; it is not load-bearing for correctness.
+
+---
+
+## Validate the software loop first (no phone, no SIM)
+
+With the stack running (`docker compose up -d`):
 
 ```bash
 cd oracle
-# secret must match ORACLE_WEBHOOK_SECRET in your .env
-NODE_TLS_REJECT_UNAUTHORIZED=0 \
-ORACLE_WEBHOOK_SECRET=<secret> BACKEND_URL=https://localhost \
-  node simulate.js payment 61234567 5.50
+export $(grep -E '^ORACLE_WEBHOOK_SECRET=' ../.env | xargs)
+export NODE_TLS_REJECT_UNAUTHORIZED=0 BACKEND_URL=https://localhost
+
+# Send the RAW message a phone would actually receive:
+node simulate.js sms evcplus 7.25            # Somali rail  -> auto-matches
+node simulate.js sms zelle 25.00 "John Smith" # US rail      -> queues for reconciliation
+node simulate.js sms junk                     # ordinary text -> ignored
+node simulate.js heartbeat                    # badge goes green
 ```
 
-Expected: create an order in the User PWA with phone `61234567` and total `5.50`, then run
-the command above — the PWA should flip **PENDING_PAYMENT → PAID_UNASSIGNED** within ~1s
-via the WebSocket, with no refresh. Heartbeat test:
+For `evcplus`, create an order in the customer app for phone `612345678` at that exact total
+first — the PWA should flip **PENDING_PAYMENT → PAID_UNASSIGNED** within ~1s over the
+WebSocket, with no refresh.
+
+For `zelle`, the payment appears in the operator's **Unmatched receipts** panel; pick the
+order from the dropdown and it goes paid, with your operator name in the audit trail.
+
+`simulate.js payment <msisdn> <amount>` still exists for the pre-parsed webhook shape.
+
+---
+
+## Put it on the phone
+
+On the **laptop**, serve this folder over your LAN:
 
 ```bash
-ORACLE_WEBHOOK_SECRET=<secret> node simulate.js heartbeat
+cd oracle && python3 -m http.server 8000
 ```
 
-The operator dashboard's "Oracle" badge should read **healthy**; stop sending heartbeats
-past `ORACLE_HEARTBEAT_TIMEOUT_SECONDS` and it should flip to **DOWN**.
+On the **phone**, in Termux:
 
-## Then validate the two hardware assumptions
+```bash
+pkg install -y nodejs termux-api curl
+cd ~
+curl -O http://<laptop-lan-ip>:8000/termux-oracle.js
+curl -O http://<laptop-lan-ip>:8000/start-oracle.sh
+chmod +x start-oracle.sh
+nano start-oracle.sh     # set the secret and BACKEND_URL
+./start-oracle.sh
+```
 
-These are the assumptions that cannot be proven in code — test them on **real
-Hormuud/Somtel SIMs and real target devices**:
+Stop the laptop's file server (Ctrl-C) once the files are across.
 
-1. **`tel:` + USSD `%23` fires.** Put a real order's pay button in front of a real Android
-   phone on the target network. Confirm the dialer opens with the full USSD string intact
-   (the trailing `#` must survive as `%23`). Note: iOS blocks USSD execution from `tel:`
-   for security — if you have iPhone users, they need a fallback (manual code display).
+### The gotcha that stops most people
+`pkg install termux-api` installs only the **bridge**. You also need the separate
+**Termux:API app**, and *both* it and Termux must come from **F-Droid** — mixed sources have
+different signing keys and every SMS command silently returns nothing.
 
-2. **SMS interception + webhook round-trip.** Follow the setup in `termux-oracle.js`, send a
-   real P2P transfer, and confirm the parsed receipt reaches `/webhook` and matches the
-   order. **Tune the regexes** (`AMOUNT_RE`, `SENDER_RE`, `REF_RE`) to the exact wording of
-   real EVC Plus / eDahab receipts — the samples are guesses.
+Then grant SMS access explicitly: **Settings → Apps → Termux:API → Permissions → SMS → Allow**.
+`termux-setup-storage` does *not* cover SMS. `start-oracle.sh` checks both before starting.
 
-3. **Outbound SMS for login codes.** Customer authentication (OTP) sends codes back out
-   through this phone, so the Oracle now needs a *send* path in addition to its listener:
-   an HTTP endpoint on the device that accepts `POST {to, text}` signed with
-   `X-Oracle-Signature` (same HMAC scheme and secret as the inbound webhook) and shells out
-   to `termux-sms-send -n <to> "<text>"`. Point the backend at it with
-   `OTP_TRANSPORT=oracle` and `ORACLE_SMS_URL=<device endpoint>`.
-   **This is written but never tested on hardware.** Things to verify: the device is
-   reachable from the backend (tailnet/VPN — do not expose it to the open internet), send
-   latency is under the 5-minute code TTL, the telecom doesn't rate-limit or flag automated
-   sends from a normal subscriber SIM, and per-SMS cost at expected login volume is sane.
-   Until this is validated, the backend cannot run with `NODE_ENV=production` (it refuses to
-   boot on the dev `log` transport, which would print login codes into the server log).
+---
 
-## Operational hardening (from the SRS warnings)
+## Still unvalidated on real hardware (P4)
+
+These cannot be proven in code:
+
+1. **`tel:` + USSD `%23` fires.** Put a real order's pay button in front of a phone on a
+   Hormuud/Somtel SIM and confirm the dialer opens with the dial string intact — the trailing
+   `#` must survive as `%23`. (iOS blocks USSD from `tel:` entirely; iPhone users need the
+   code displayed to copy.)
+
+2. **Receipt wording.** The parsers are written from documented formats, not from messages off
+   a live SIM. When a real payment arrives, check the backend log: if it says
+   `ignored (not a receipt)`, paste the real text (amount and number changed) and adjust
+   `PROVIDERS` — a server-side change, no phone access needed.
+
+3. **Outbound SMS for login codes.** *Not built.* Somali customers can't receive a login code
+   until this phone also runs a small HTTP listener that accepts `POST {to, text}` signed with
+   `X-Oracle-Signature` and shells out to `termux-sms-send`. US numbers are unaffected — they
+   go through Twilio (`docs/LIVE_SMS_SETUP.md`). Things to check when it is built: the device
+   is reachable from the backend (tailnet/VPN — never expose it to the open internet), send
+   latency is under the 5-minute code TTL, and the telecom doesn't flag automated sends from
+   a subscriber SIM.
+
+## Operational hardening
 
 - Dedicated phone, dedicated SIM. No personal use. Treat it as a server-in-a-box.
-- Constant power + disable battery optimization for Termux. Run `termux-wake-lock`.
-- Keep the raw SMS (`raw_sms` column) for every receipt — your audit trail for disputes.
-- The backend enforces anti-double-spend via `UNIQUE(telecom_receipt_id)`, so a duplicated
-  or replayed webhook can never credit an order twice.
+- Constant power, battery optimisation disabled for Termux. `start-oracle.sh` takes a wake
+  lock — Android suspending the process means payments silently stop being matched, and the
+  heartbeat badge going red is the only signal.
+- The raw SMS is stored on every receipt (`transactions.raw_sms`) — your evidence in a dispute.
+- `UNIQUE(telecom_receipt_id)` means a duplicated or replayed webhook can never credit twice.
+- **A receipt is evidence, not proof.** Sender IDs are spoofable. What protects you is the
+  narrow match (phone number + exact amount + an order actually waiting), the reconcile queue
+  for anything ambiguous, and that unique constraint. On a named-payer rail *you* are the
+  verification step — check your banking app before binding a large payment.
+- If `ORACLE_WEBHOOK_SECRET` leaks, payments can be forged. Rotate it on the server and in
+  `start-oracle.sh` together, then reconcile every transaction since the leak by hand.

@@ -98,7 +98,9 @@ let drivers = []; // roster with workload stats, kept fresh for the assign picke
 
 async function refreshAll() {
   await loadDrivers();                       // load first so order cards can build the picker
-  await Promise.all([loadOrders(), loadUnmatched(), loadOperators()]);
+  await Promise.all([
+    loadOrders(), loadUnmatched(), loadOperators(), loadRefunds(), loadAccessRequests(),
+  ]);
 }
 
 // ── Operator roster (P0 #5) ──
@@ -166,6 +168,128 @@ $('changePw').addEventListener('click', async () => {
   toast('Password changed ✓');
   loadMe();
 });
+
+// ── Refunds owed ──
+// Settling means the operator actually sent money back from their own phone. The telecom
+// reference is required because it is the only thing checkable against the telecom's records.
+async function loadRefunds() {
+  const res = await api('/operator/refunds');
+  if (res.error) return;
+  const list = res.refunds || [];
+
+  const badge = $('refundTotal');
+  badge.textContent = `$${res.total} owed`;
+  badge.classList.toggle('hidden', list.length === 0);
+
+  $('refunds').innerHTML = list.length
+    ? list.map((r) => `
+        <div class="card" style="background:var(--panel-2);">
+          <div class="row" style="align-items:center;">
+            <div><strong>$${Number(r.amount).toFixed(2)}</strong>
+              <span class="muted"> · order #${GMIds.shortId(r.order?.id)}</span></div>
+            <span class="muted" style="margin-left:auto;">${escapeHtml(r.order?.user_phone || '')}</span>
+          </div>
+          <div class="muted">${escapeHtml(r.reason || '')} · opened ${new Date(r.created_at).toLocaleDateString()}</div>
+          <input placeholder="EVC / eDahab reference of the money you sent back"
+                 id="ref-${r.id}" style="margin-top:8px;" />
+          <input placeholder="note (optional)" id="note-${r.id}" style="margin-top:6px;" />
+          <div class="row" style="margin-top:8px;">
+            <button data-settle="${r.id}">Mark refunded</button>
+            <button class="secondary" data-waive="${r.id}">Nothing owed</button>
+          </div>
+        </div>`).join('')
+    : '<p class="muted">Nothing outstanding — every refund has been settled.</p>';
+
+  $('refunds').querySelectorAll('[data-settle]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const id = b.dataset.settle;
+      const reference = $(`ref-${id}`).value.trim();
+      if (!reference) return toast('Enter the reference from the transfer you sent.');
+      const out = await api(`/operator/refunds/${id}/settle`, {
+        method: 'POST',
+        body: JSON.stringify({ reference, note: $(`note-${id}`).value.trim() }),
+      });
+      if (out.error) return toast(out.error);
+      toast('Refund recorded ✓');
+      loadRefunds();
+    })
+  );
+  $('refunds').querySelectorAll('[data-waive]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const id = b.dataset.waive;
+      const note = $(`note-${id}`).value.trim();
+      if (!note) return toast('Say why nothing is owed — the ledger has to explain itself.');
+      const out = await api(`/operator/refunds/${id}/waive`, {
+        method: 'POST',
+        body: JSON.stringify({ note }),
+      });
+      if (out.error) return toast(out.error);
+      toast('Closed ✓');
+      loadRefunds();
+    })
+  );
+
+  $('refundsClosed').innerHTML = (res.settled || []).length
+    ? res.settled.map((r) => `
+        <div class="row" style="padding:6px 0;border-bottom:1px solid var(--border,#333);">
+          <span>$${Number(r.amount).toFixed(2)} · ${r.status}</span>
+          <span class="muted" style="margin-left:auto;">
+            ${escapeHtml(r.settlement_reference || r.settlement_note || '')}</span>
+        </div>`).join('')
+    : '<p class="muted">Nothing closed yet.</p>';
+}
+
+// ── Access requests ──
+// Reviewing records a decision. It does NOT create an account — that stays a deliberate act
+// with a password typed for it, in the forms below.
+async function loadAccessRequests() {
+  const res = await api('/operator/access-requests');
+  if (res.error) return;
+  const list = res.requests || [];
+
+  const badge = $('requestCount');
+  const fresh = list.filter((r) => r.status === 'new').length;
+  badge.textContent = `${fresh} new`;
+  badge.classList.toggle('hidden', fresh === 0);
+
+  $('accessRequests').innerHTML = list.length
+    ? list.map((r) => `
+        <div class="card" style="background:var(--panel-2);">
+          <div class="row" style="align-items:center;">
+            <div><strong>${escapeHtml(r.name)}</strong>
+              <span class="muted"> wants to be a ${escapeHtml(r.role)}</span></div>
+            <span class="badge ${r.status === 'new' ? 'pending' : 'paid'}"
+                  style="margin-left:auto;">${escapeHtml(r.status)}</span>
+          </div>
+          <div class="muted">
+            <a href="tel:${escapeHtml(r.phone)}">${escapeHtml(r.phone)}</a>
+            · ${new Date(r.created_at).toLocaleDateString()}
+          </div>
+          ${r.message ? `<div style="margin-top:6px;">${escapeHtml(r.message)}</div>` : ''}
+          <div class="row" style="margin-top:8px;">
+            <button class="secondary" data-req="${r.id}" data-status="contacted">Called them</button>
+            <button data-req="${r.id}" data-status="approved">Approved</button>
+            <button class="danger" data-req="${r.id}" data-status="declined">Decline</button>
+          </div>
+        </div>`).join('')
+    : '<p class="muted">No open requests.</p>';
+
+  $('accessRequests').querySelectorAll('[data-req]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const out = await api(`/operator/access-requests/${b.dataset.req}/review`, {
+        method: 'POST',
+        body: JSON.stringify({ status: b.dataset.status }),
+      });
+      if (out.error) return toast(out.error);
+      toast(
+        b.dataset.status === 'approved'
+          ? 'Marked approved — now create their account below.'
+          : 'Updated ✓'
+      );
+      loadAccessRequests();
+    })
+  );
+}
 
 // Operator-supplied names land in innerHTML; escape them rather than trusting the roster.
 function escapeHtml(s) {
@@ -273,28 +397,65 @@ function bindOrderButtons() {
   );
 }
 
+// Payments we can see but couldn't attribute. Every US rail lands here by design: Zelle and
+// friends name the payer instead of giving a phone number, and guessing from the amount alone
+// would mark the wrong customer's order paid.
 async function loadUnmatched() {
-  const res = await api('/operator/transactions/unmatched');
+  const [res, orderRes] = await Promise.all([
+    api('/operator/transactions/unmatched'),
+    api('/operator/orders'),
+  ]);
   const txs = res.transactions || [];
+  const pending = (orderRes.orders || []).filter((o) => o.status === 'PENDING_PAYMENT');
+
+  // Picking the order is a CHOICE FROM A LIST, not a typed id. Order ids are UUIDs now —
+  // asking someone to transcribe 9110aafa-fd8f-4469-8592-4d5f944952e3 from one panel to
+  // another is a mis-keyed character away from crediting a stranger's order.
+  const orderOptions = (amount) => {
+    if (!pending.length) return '<option value="">— no orders awaiting payment —</option>';
+    const exact = pending.filter((o) => Number(o.total_amount) === Number(amount));
+    const rest = pending.filter((o) => Number(o.total_amount) !== Number(amount));
+    const opt = (o, mark) =>
+      `<option value="${o.id}">${mark}#${GMIds.shortId(o.id)} · $${Number(o.total_amount).toFixed(2)} · ${escapeHtml(o.user_phone)}</option>`;
+    return (
+      '<option value="">Choose the order this paid for…</option>' +
+      // Same-amount orders float to the top — that's the likely answer, but it is still the
+      // operator confirming it, not the system assuming it.
+      exact.map((o) => opt(o, '✓ same amount — ')).join('') +
+      rest.map((o) => opt(o, '')).join('')
+    );
+  };
+
   $('unmatched').innerHTML = txs.length
-    ? txs.map((t) => `
+    ? txs.map((t) => {
+        const who = t.sender_name || t.sender_msisdn;
+        const rail = t.provider ? `<span class="badge pending">${escapeHtml(t.provider)}</span> ` : '';
+        return `
       <div class="card" style="background:var(--panel-2);">
-        <div>$${Number(t.amount).toFixed(2)} from ${t.sender_msisdn}</div>
-        <div class="muted">receipt ${t.telecom_receipt_id}</div>
-        <div class="row" style="margin-top:8px;">
-          <input placeholder="order # to bind" data-txin="${t.id}" />
-          <button data-txassign="${t.id}" style="max-width:120px;">Assign</button>
+        <div class="row" style="align-items:center;">
+          <div><strong>$${Number(t.amount).toFixed(2)}</strong> from ${escapeHtml(who)}</div>
+          <span style="margin-left:auto;">${rail}</span>
         </div>
-      </div>`).join('')
+        <div class="muted">${new Date(t.created_at).toLocaleString()} · ${escapeHtml(t.telecom_receipt_id)}</div>
+        ${t.sender_name ? '<div class="muted">Named payer, no phone number — confirm which order this is.</div>' : ''}
+        <select data-txin="${t.id}" style="margin-top:8px;">${orderOptions(t.amount)}</select>
+        <button data-txassign="${t.id}" style="margin-top:6px;">Mark this order paid</button>
+      </div>`;
+      }).join('')
     : '<p class="muted">Nothing to reconcile.</p>';
+
   $('unmatched').querySelectorAll('[data-txassign]').forEach((b) =>
     b.addEventListener('click', async () => {
       const txId = b.dataset.txassign;
-      const orderId = $('unmatched').querySelector(`[data-txin="${txId}"]`).value.trim();
-      if (!orderId) return toast('Enter an order number.');
-      const res = await api(`/operator/transactions/${txId}/assign`, { method: 'POST', body: JSON.stringify({ orderId }) });
-      if (res.error) return toast(res.error);
-      toast('Reconciled ✓'); refreshAll();
+      const orderId = $('unmatched').querySelector(`[data-txin="${txId}"]`).value;
+      if (!orderId) return toast('Choose which order this payment was for.');
+      const out = await api(`/operator/transactions/${txId}/assign`, {
+        method: 'POST',
+        body: JSON.stringify({ orderId }),
+      });
+      if (out.error) return toast(out.error);
+      toast('Reconciled ✓');
+      refreshAll();
     })
   );
 }
@@ -310,7 +471,7 @@ $('addDriver').addEventListener('click', async () => {
 
 async function pollOracle() {
   const res = await api('/operator/oracle');
-  setOracleBadge(res.healthy);
+  setOracleBadge(res);
   pollOutbox();
 }
 
@@ -334,10 +495,28 @@ async function pollOutbox() {
     );
   }
 }
-function setOracleBadge(healthy) {
+// Three states, because "we never had an Oracle" and "the Oracle died" are different
+// situations and only one of them is an emergency. Showing a permanent red DOWN for a phone
+// that was never deployed teaches the operator to ignore the badge that matters.
+function setOracleBadge(status) {
   const b = $('oracleBadge');
-  b.textContent = healthy ? 'Oracle: healthy' : 'Oracle: DOWN';
-  b.className = 'badge ' + (healthy ? 'paid' : 'fail');
+  const state = typeof status === 'object' ? status.state : (status ? 'healthy' : 'down');
+
+  if (state === 'not_configured') {
+    b.textContent = 'Payments: manual';
+    b.className = 'badge pending';
+    b.title = status?.detail || 'No Oracle phone connected — confirm payments by hand.';
+    return;
+  }
+  if (state === 'healthy') {
+    b.textContent = 'Oracle: healthy';
+    b.className = 'badge paid';
+    b.title = 'Payment receipts are being matched automatically.';
+    return;
+  }
+  b.textContent = 'Oracle: DOWN';
+  b.className = 'badge fail';
+  b.title = status?.detail || 'The Oracle stopped reporting.';
 }
 
 let ws;
@@ -358,10 +537,10 @@ function connectSocket() {
       return location.reload();
     }
     if (m.type === 'oracle_down') {
-      setOracleBadge(false);
+      setOracleBadge({ state: 'down' });
       setStatus('⚠ Oracle DOWN — payment receipts may be missed. Check the phone.', 'down');
     } else if (m.type === 'oracle_heartbeat') {
-      setOracleBadge(true);
+      setOracleBadge({ state: 'healthy' });
     } else if (m.type === 'order_created') {
       setStatus(`New order #${GMIds.shortId(m.orderId)} created — awaiting payment.`, 'warn');
       refreshAll();

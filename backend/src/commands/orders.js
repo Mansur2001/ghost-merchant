@@ -17,6 +17,7 @@ import { normalizeMsisdnOrThrow } from '../domain/phone.js';
 import { EVENTS } from '../events/bus.js';
 import { isUuid, newOrderId } from '../domain/ids.js';
 import { enqueue, wakeOutbox } from '../events/outbox.js';
+import { openRefundIfOwed } from './refunds.js';
 
 // Create an order (and the user, if new). Returns { order, created }.
 //
@@ -120,6 +121,14 @@ export async function transitionOrder(orderId, toStatus, actor = 'system', note 
     // the status move without the message explaining it, or vice versa.
     const auto = AUTO_RESPONSES[toStatus];
     if (auto) await postMessage({ orderId, sender: 'system', body: auto }, { client: tx });
+
+    // Failing an order that was already paid means we owe the customer money. Open the debt
+    // in the SAME transaction — an order must never be able to end up failed with no record
+    // of what is owed, because that record is the only thing that will remind anyone to pay
+    // it back.
+    if (toStatus === 'FAILED_REFUND') {
+      await openRefundIfOwed({ orderId, reason: note, createdBy: actor }, { client: tx });
+    }
 
     return { previous: order, order: updated };
   });
