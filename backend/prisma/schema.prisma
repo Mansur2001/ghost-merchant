@@ -219,6 +219,31 @@ model Refund {
   @@map("refunds")
 }
 
+/// Requests to be given an operator or driver account.
+///
+/// NOBODY SELF-REGISTERS. Anyone who could create their own operator account could read every
+/// customer's phone number, address, chat and photos — so this table holds a REQUEST, and an
+/// existing operator decides. Approving is what creates the real account; this row only ever
+/// records that someone asked.
+///
+/// Deliberately minimal: a name, a number to call back on, and what they want. Collecting an
+/// address or an ID up front would be data we can't protect and don't need to decide.
+model AccessRequest {
+  id           BigInt    @id @default(autoincrement())
+  role         String    // 'driver' | 'operator'
+  name         String
+  phone        String    // canonical E.164
+  message      String?
+  status       String    @default("new") // 'new' | 'contacted' | 'approved' | 'declined'
+  reviewed_at  DateTime? @db.Timestamptz(6)
+  reviewed_by  String?
+  review_note  String?
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([created_at], map: "idx_access_requests_created")
+  @@map("access_requests")
+}
+
 enum order_status {
   PENDING_PAYMENT
   PAID_UNASSIGNED

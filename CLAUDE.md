@@ -151,10 +151,14 @@ Three identities, one signing secret (`SESSION_SECRET`), all tokens HMAC-signed 
   enforced atomically in the DB (`otp_codes`, one live challenge per phone). Verification
   returns ONE generic error for every failure mode — distinguishing "no challenge" from
   "wrong code" would make the endpoint a phone-number oracle.
-- **Delivery** (`notify/smsSender.js`): `OTP_TRANSPORT=log` prints the code (dev only — the
-  backend **refuses to boot** with it under `NODE_ENV=production`); `oracle` sends a real SMS
-  via the Oracle phone over an HMAC-signed request, reusing `ORACLE_WEBHOOK_SECRET`.
-  **The oracle path has never run on real hardware** (P4).
+- **Delivery** (`notify/smsSender.js`) is per-country, not global — `OTP_TRANSPORT=auto`:
+  `+252` → the **Oracle phone** (no vendor, no platform fee: the sovereignty requirement);
+  everything else → **Twilio** (your US test handset, and a Play reviewer who must receive a
+  code to get past the first screen). A Somali SIM sending internationally is slow, costly and
+  often silently dropped. If Twilio is unconfigured, Somali logins are unaffected — the
+  business does not depend on it. `log` prints the code and the backend **refuses to boot**
+  with it under `NODE_ENV=production`. Setup: `docs/LIVE_SMS_SETUP.md`.
+  **The oracle path has never run on real hardware** (P4); Twilio does not solve that.
 - **Deny = 404, never 403.** A 403 confirms "this order exists, it just isn't yours" — exactly
   what an enumeration script wants. Order IDs stay sequential until the UUID migration (P1),
   so "not yours" and "doesn't exist" must be byte-identical. Same for WebSocket `subscribe`.
@@ -313,6 +317,23 @@ See `oracle/README.md`.
   violations in the console before a demo.
 
 ---
+
+## Refunds & access requests
+- **Refunds are a ledger, not a transfer.** The platform never holds funds (invariant 6), so
+  settling means an operator sent money back from their own phone. A `FAILED_REFUND`
+  transition opens a `refunds` row **in the same transaction** — an order must never be able
+  to end up failed with no record of what is owed, because that record is the only thing that
+  will remind anyone to pay it. Nothing is opened if no payment ever arrived.
+- **Settle requires a telecom reference** (the receipt of the RETURN transfer): it is the only
+  claim in the system we cannot verify ourselves, so it must be checkable against the
+  telecom's own log. **Waive is separate from settle** — conflating "we paid this back" with
+  "nothing was owed" makes the ledger useless in the argument it exists to settle.
+- **Nobody self-registers as staff.** `POST /api/signup` records a REQUEST and grants nothing;
+  an operator reviews it and then creates the account explicitly, with a password they choose.
+  An operator account reads every customer's phone, address, chat and photos — the gate has to
+  be a human who recognises the applicant. Reviewing is *not* wired to account creation on
+  purpose: minting a credential should be a deliberate act, not a side effect of clicking
+  Approve in a list.
 
 ## Photos / object storage (MinIO)
 Two photo types, both stored in MinIO and indexed in `order_photos`:

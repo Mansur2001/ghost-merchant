@@ -87,10 +87,27 @@ export const config = {
   },
 
   otp: {
-    // 'log' (dev: code printed to the server log) | 'oracle' (real SMS via the Oracle phone).
+    // 'log'    — dev only, prints the code. Refused under NODE_ENV=production.
+    // 'oracle' — real SMS via the Oracle phone (no vendor). The Somali path.
+    // 'twilio' — real SMS via Twilio. Non-Somali numbers (testing, Play review).
+    // 'auto'   — per country: +252 via the Oracle, everything else via Twilio.
     transport: process.env.OTP_TRANSPORT || 'log',
     oracleSmsUrl: process.env.ORACLE_SMS_URL || '',
     sendTimeoutMs: parseInt(process.env.OTP_SEND_TIMEOUT_MS || '10000', 10),
+    twilio: {
+      accountSid: process.env.TWILIO_ACCOUNT_SID || '',
+      authToken: process.env.TWILIO_AUTH_TOKEN || '',
+      from: process.env.TWILIO_FROM || '',
+      messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID || '',
+    },
+  },
+
+  // Shown on the access-request page so someone who can't or won't use the form has a person
+  // to contact. Public by design — it is the owner's business contact.
+  owner: {
+    name: process.env.OWNER_NAME || 'GuriKaabe',
+    email: process.env.OWNER_EMAIL || 'tukale206@gmail.com',
+    phone: process.env.OWNER_PHONE || '+1 206 687 6538',
   },
 
   // Behind Caddy the socket peer is always the proxy, so req.ip would be the proxy for every

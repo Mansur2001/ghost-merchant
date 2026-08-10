@@ -9,6 +9,7 @@ import { webhookRouter } from './routes/webhook.js';
 import { driversRouter } from './routes/drivers.js';
 import { operatorRouter } from './routes/operator.js';
 import { authRouter } from './routes/auth.js';
+import { signupRouter } from './routes/signup.js';
 import { attachSocketServer } from './realtime/socketServer.js';
 import { startOracleMonitor } from './realtime/oracleMonitor.js';
 import { ensureBucket } from './storage/objectStore.js';
@@ -52,6 +53,7 @@ app.use('/api', webhookRouter);
 
 app.use(express.json({ limit: '32kb' })); // order payloads must stay small
 app.use('/api', authRouter);
+app.use('/api', signupRouter);
 app.use('/api', ordersRouter);
 app.use('/api', driversRouter);
 app.use('/api', operatorRouter);
@@ -85,9 +87,12 @@ housekeeping.unref();
 async function boot() {
   // Refuse to be quietly insecure: with the log transport there is no SMS, so anyone who can
   // read the logs can log in as any customer. Fine in dev, fatal in production.
-  if (config.env === 'production' && config.otp.transport !== 'oracle') {
+  // The `log` transport prints login codes to the server log, so anyone with log access could
+  // sign in as any customer. Fine in dev, fatal in production. `oracle`, `twilio` and `auto`
+  // all deliver over a real channel.
+  if (config.env === 'production' && !['oracle', 'twilio', 'auto'].includes(config.otp.transport)) {
     console.error(
-      'FATAL: OTP_TRANSPORT must be "oracle" in production — ' +
+      'FATAL: OTP_TRANSPORT must be oracle | twilio | auto in production — ' +
         `"${config.otp.transport}" prints login codes to the server log.`
     );
     process.exit(1);

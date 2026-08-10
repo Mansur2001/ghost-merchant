@@ -51,11 +51,56 @@
           </a>
         </div>
 
+        <p class="muted" style="margin-top:14px;">
+          Want to drive or help run deliveries?
+          <button class="linkbtn" id="joinBtn" type="button">Ask to join the team →</button>
+        </p>
+
         <ul class="how muted">
           <li><strong>1.</strong> Tell us what you need and your landmark.</li>
           <li><strong>2.</strong> Tap to pay — your dialer opens with the code pre-filled.</li>
           <li><strong>3.</strong> Watch your order go from paid → dispatched → delivered.</li>
         </ul>
+      </section>
+
+      <!-- Ask to be given a driver or operator account.
+           This is a REQUEST, not a registration: submitting it creates no account and grants
+           nothing. An operator reads it, calls the number, and decides. Anyone who could
+           create their own operator account could read every customer's address and chat. -->
+      <section id="joinView" class="card hidden">
+        <button class="secondary" id="joinHome" type="button" style="max-width:110px;margin:0 0 12px;">← Home</button>
+        <h2 style="margin:0 0 6px;">Join the GuriKaabe team</h2>
+        <p class="muted" style="margin:0 0 16px;">
+          Tell us who you are and we'll call you back. Accounts are created by hand after we've
+          spoken — drivers carry real money and goods, and operators can see every customer's
+          details, so we don't hand those out from a form.
+        </p>
+
+        <label for="joinRole">What would you like to do?</label>
+        <select id="joinRole">
+          <option value="driver">Drive and deliver orders</option>
+          <option value="operator">Coordinate orders and payments</option>
+        </select>
+
+        <label for="joinName">Your name</label>
+        <input id="joinName" type="text" autocomplete="name" placeholder="Amina Yusuf" />
+
+        <label for="joinPhone">Your phone number</label>
+        <input id="joinPhone" type="tel" inputmode="tel" autocomplete="tel" placeholder="61 234 5678" />
+        <div class="phone-hint muted" id="joinPhoneHint">We'll call you on this number</div>
+
+        <label for="joinMessage">Anything we should know? (optional)</label>
+        <textarea id="joinMessage" placeholder="Which area you cover, whether you have a motorbike, when you're free…"></textarea>
+
+        <button id="joinSubmit" type="button">Send my request</button>
+        <div class="muted" id="joinStatus" style="margin-top:10px;"></div>
+
+        <hr style="margin:20px 0;border:none;border-top:1px solid var(--border,#333);" />
+        <h3 style="margin:0 0 6px;">Or reach out directly</h3>
+        <p class="muted" style="margin:0 0 10px;">
+          Prefer to talk to a person? Contact the owner:
+        </p>
+        <div id="ownerContact" class="muted"></div>
       </section>
 
       <!-- Step 1: prove you hold the phone number. It is the identity every order,

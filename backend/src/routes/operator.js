@@ -30,6 +30,18 @@ import { STATUS } from '../domain/stateMachine.js';
 import { parsePhone } from '../domain/phone.js';
 import { oracleStatus } from '../realtime/oracleMonitor.js';
 import { wakeOutbox, outboxHealth } from '../events/outbox.js';
+import {
+  listOutstandingRefunds,
+  listSettledRefunds,
+  settleRefund,
+  waiveRefund,
+  RefundError,
+} from '../commands/refunds.js';
+import {
+  listAccessRequests,
+  reviewAccessRequest,
+  AccessRequestError,
+} from '../commands/accessRequests.js';
 
 export const operatorRouter = Router();
 
@@ -157,6 +169,92 @@ operatorRouter.get('/operator/outbox', operatorOnly, async (req, res, next) => {
   try {
     res.json(await outboxHealth());
   } catch (err) {
+    next(err);
+  }
+});
+
+// ── Refunds: money we owe customers ──
+//
+// The platform never holds funds, so a refund is an operator sending money back from their
+// own phone. These endpoints are the ledger that makes that debt visible and closeable.
+
+// GET /api/operator/refunds — what is still owed, plus recently closed for context.
+operatorRouter.get('/operator/refunds', operatorOnly, async (req, res, next) => {
+  try {
+    const [outstanding, settled] = await Promise.all([
+      listOutstandingRefunds(),
+      listSettledRefunds(),
+    ]);
+    res.json({ ...outstanding, settled });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/operator/refunds/:id/settle { reference, note }
+// The reference is the telecom receipt for the RETURN transfer — the only thing that can be
+// checked against the telecom's own records in a dispute, so it is required.
+operatorRouter.post('/operator/refunds/:id/settle', operatorOnly, async (req, res, next) => {
+  try {
+    const refund = await settleRefund({
+      refundId: req.params.id,
+      reference: req.body?.reference,
+      note: req.body?.note,
+      settledBy: actorLabel(req.auth),
+    });
+    res.json({ refund });
+  } catch (err) {
+    if (err instanceof RefundError) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+// POST /api/operator/refunds/:id/waive { note }
+// Closes a refund WITHOUT paying it. Separate from settle on purpose: conflating "we paid
+// this back" with "nothing was owed" makes the ledger useless in the argument it exists for.
+operatorRouter.post('/operator/refunds/:id/waive', operatorOnly, async (req, res, next) => {
+  try {
+    const refund = await waiveRefund({
+      refundId: req.params.id,
+      note: req.body?.note,
+      settledBy: actorLabel(req.auth),
+    });
+    res.json({ refund });
+  } catch (err) {
+    if (err instanceof RefundError) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+// ── Access requests: people asking to be given an account ──
+
+// GET /api/operator/access-requests
+operatorRouter.get('/operator/access-requests', operatorOnly, async (req, res, next) => {
+  try {
+    const requests = await listAccessRequests({ includeClosed: req.query.all === '1' });
+    res.json({ requests });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/operator/access-requests/:id/review { status, note }
+// Records the decision only. Approving does NOT create an account — the operator creates it
+// explicitly with a password they choose, because minting a credential should be a deliberate
+// act, not a side effect of clicking a button in a list.
+operatorRouter.post('/operator/access-requests/:id/review', operatorOnly, async (req, res, next) => {
+  try {
+    const request = await reviewAccessRequest({
+      requestId: req.params.id,
+      status: req.body?.status,
+      note: req.body?.note,
+      reviewedBy: actorLabel(req.auth),
+    });
+    res.json({ request });
+  } catch (err) {
+    if (err instanceof AccessRequestError) {
+      return res.status(err.status).json({ error: err.message });
+    }
     next(err);
   }
 });

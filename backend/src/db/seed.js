@@ -79,7 +79,7 @@ async function seed() {
     // both slower and easy to get subtly wrong as the schema grows.
     await tx.$executeRawUnsafe(`
       TRUNCATE outbox, otp_codes, order_photos, order_events, messages, transactions,
-               refunds, orders, drivers, users, operators
+               refunds, access_requests, orders, drivers, users, operators
       RESTART IDENTITY CASCADE
     `);
 
