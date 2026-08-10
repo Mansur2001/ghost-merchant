@@ -103,6 +103,12 @@ model Transaction {
   raw_sms            String?
   matched            Boolean  @default(false)
   created_at         DateTime @default(now()) @db.Timestamptz(6)
+  // Which rail this arrived on (evcplus, zelle, cashapp, …). The Oracle senses any of them.
+  provider           String?
+  // US rails identify people by DISPLAY NAME, not phone number, so there is nothing to match
+  // an order against automatically. The name is recorded so the operator's reconcile queue
+  // says "Zelle · John Smith · $25.00" instead of an anonymous amount.
+  sender_name        String?
 
   order Order? @relation(fields: [order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 

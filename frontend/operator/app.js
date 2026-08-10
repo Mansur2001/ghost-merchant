@@ -434,7 +434,7 @@ $('addDriver').addEventListener('click', async () => {
 
 async function pollOracle() {
   const res = await api('/operator/oracle');
-  setOracleBadge(res.healthy);
+  setOracleBadge(res);
   pollOutbox();
 }
 
@@ -458,10 +458,28 @@ async function pollOutbox() {
     );
   }
 }
-function setOracleBadge(healthy) {
+// Three states, because "we never had an Oracle" and "the Oracle died" are different
+// situations and only one of them is an emergency. Showing a permanent red DOWN for a phone
+// that was never deployed teaches the operator to ignore the badge that matters.
+function setOracleBadge(status) {
   const b = $('oracleBadge');
-  b.textContent = healthy ? 'Oracle: healthy' : 'Oracle: DOWN';
-  b.className = 'badge ' + (healthy ? 'paid' : 'fail');
+  const state = typeof status === 'object' ? status.state : (status ? 'healthy' : 'down');
+
+  if (state === 'not_configured') {
+    b.textContent = 'Payments: manual';
+    b.className = 'badge pending';
+    b.title = status?.detail || 'No Oracle phone connected — confirm payments by hand.';
+    return;
+  }
+  if (state === 'healthy') {
+    b.textContent = 'Oracle: healthy';
+    b.className = 'badge paid';
+    b.title = 'Payment receipts are being matched automatically.';
+    return;
+  }
+  b.textContent = 'Oracle: DOWN';
+  b.className = 'badge fail';
+  b.title = status?.detail || 'The Oracle stopped reporting.';
 }
 
 let ws;
@@ -482,10 +500,10 @@ function connectSocket() {
       return location.reload();
     }
     if (m.type === 'oracle_down') {
-      setOracleBadge(false);
+      setOracleBadge({ state: 'down' });
       setStatus('⚠ Oracle DOWN — payment receipts may be missed. Check the phone.', 'down');
     } else if (m.type === 'oracle_heartbeat') {
-      setOracleBadge(true);
+      setOracleBadge({ state: 'healthy' });
     } else if (m.type === 'order_created') {
       setStatus(`New order #${GMIds.shortId(m.orderId)} created — awaiting payment.`, 'warn');
       refreshAll();

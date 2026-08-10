@@ -98,8 +98,28 @@ any module (order / dispatch / tracking / payment) can be extracted later withou
   events to WebSocket clients (subscribe-by-`order_id`; operators get everything).
 
 Data flow for a payment:
-`Oracle → POST /api/webhook (HMAC) → recordAndMatchPayment (command) → transitionOrder →
-publish(ORDER_STATE_CHANGED / PAYMENT_RECEIVED) → socket push → PWA updates live.`
+`Oracle → POST /api/webhook (HMAC) → parseReceipt → recordAndMatchPayment (command) →
+transitionOrder → outbox → socket push → PWA updates live.`
+
+**The Oracle is a CONFIRMATION sensor, not a communication device.** It watches the merchant
+phone's inbox for any message saying money arrived — EVC Plus, eDahab, Zelle, Cash App,
+Venmo — and forwards the RAW text. Conversation between customer, driver and operator never
+touches it; that is the in-app chat over WebSocket.
+
+- **Parsing is server-side** (`domain/receipts.js`). Rails reword their receipts without
+  warning, and a parser fix must not require physical access to a handset in another country.
+  The phone forwards; the server interprets.
+- **Only a receipt carrying a PHONE NUMBER can auto-match.** US rails identify the payer by
+  display name, so those are recorded and land in the operator's reconcile queue. Matching on
+  amount alone would mark the wrong customer's order paid the moment two people owe the same
+  amount — which, with a fixed delivery fee, is most of the time.
+- **A receipt is evidence, not proof**: sender IDs are spoofable. What holds is the narrow
+  match (number + exact amount + an order actually waiting), the reconcile queue for anything
+  ambiguous, and `telecom_receipt_id UNIQUE` so a replay can never credit twice.
+- **Running with no Oracle is supported.** At low volume an operator reads the merchant phone
+  and taps "Mark as paid". The dead-man's switch arms itself only once an Oracle has actually
+  reported, so a deployment without one shows "Payments: manual" rather than a permanent red
+  DOWN — an alarm that is always on is one people learn to ignore.
 
 ## Non-negotiable invariants
 1. **The order state machine is the single source of truth**
