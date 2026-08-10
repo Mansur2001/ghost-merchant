@@ -53,6 +53,12 @@ export const config = {
   oracleHeartbeatTimeoutMs:
     parseInt(process.env.ORACLE_HEARTBEAT_TIMEOUT_SECONDS || '180', 10) * 1000,
 
+  // Redis is OPTIONAL. Unset = single-instance mode (in-process bus + rate limiter), which
+  // is exactly how this ran before P2. Set it to run more than one backend container.
+  redis: {
+    url: process.env.REDIS_URL || '',
+  },
+
   otp: {
     // 'log' (dev: code printed to the server log) | 'oracle' (real SMS via the Oracle phone).
     transport: process.env.OTP_TRANSPORT || 'log',

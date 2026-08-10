@@ -14,7 +14,7 @@ import { EVENTS, subscribe } from '../events/bus.js';
 import { verifyToken } from '../middleware/auth.js';
 import { canAccessOrder } from '../domain/access.js';
 import { getOrder } from '../queries/orders.js';
-import { consume } from '../middleware/rateLimit.js';
+import { consumeAsync } from '../middleware/rateLimit.js';
 
 const AUTH_TIMEOUT_MS = 10_000; // authenticate within 10s of connecting or be dropped
 const HEARTBEAT_MS = 30_000; // ping idle sockets; drop the ones that stop answering
@@ -128,10 +128,16 @@ export function attachSocketServer(httpServer) {
   const wss = new WebSocketServer({ server: httpServer, path: '/ws', maxPayload: MAX_FRAME_BYTES });
 
   wss.on('connection', (ws, req) => {
-    // Cheap connection flood guard, shared with the HTTP limiter's primitive.
+    // Connection flood guard, shared with the HTTP limiter (and so with Redis when it's
+    // configured, making the limit hold across instances rather than per-instance).
     const ip = req.socket.remoteAddress || 'unknown';
-    const { allowed } = consume(`ws:connect:${ip}`, { windowMs: 60_000, max: 60 });
-    if (!allowed) return ws.close(CLOSE_TOO_MANY, 'too many connections');
+    consumeAsync(`ws:connect:${ip}`, { windowMs: 60_000, max: 60 })
+      .then(({ allowed }) => {
+        if (!allowed) ws.close(CLOSE_TOO_MANY, 'too many connections');
+      })
+      .catch(() => {
+        // A limiter failure must not deny service; the auth timeout still bounds the socket.
+      });
 
     ws.auth = null;
     ws.rooms = new Set();

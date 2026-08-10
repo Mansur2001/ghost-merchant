@@ -30,6 +30,19 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Redis holds no durable truth here — it fans events between backend instances and holds
+    # rate-limit counters. Persistence is off on purpose: a restart should lose nothing that
+    # matters, and an AOF/RDB file would just be one more thing to back up.
+    command: redis-server --save "" --appendonly no --maxmemory 128mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   backend:
     build: ./backend
     restart: unless-stopped
@@ -39,6 +52,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+      redis:
+        condition: service_healthy
     expose:
       - "3000"
 

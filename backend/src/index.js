@@ -19,6 +19,8 @@ import { securityHeaders } from './middleware/securityHeaders.js';
 import { requestLog } from './middleware/requestLog.js';
 import { apiNotFound, errorHandler } from './middleware/errorHandler.js';
 import { pool } from './db/pool.js';
+import { startBusSubscriber } from './events/bus.js';
+import { warnIfSingleInstance, closeRedis } from './redis/client.js';
 
 const app = express();
 
@@ -63,6 +65,10 @@ app.use(errorHandler);
 const server = http.createServer(app);
 const wss = attachSocketServer(server);
 startOracleMonitor();
+
+// Cross-instance event delivery. Without Redis this is a no-op and the bus stays in-process.
+warnIfSingleInstance();
+startBusSubscriber();
 
 // The relay turns committed outbox rows into bus events. Started before listen() so any
 // events left undelivered by a previous crash go out before we take new traffic.
@@ -121,12 +127,15 @@ async function shutdown(signal) {
   wss.close();
   clearInterval(housekeeping);
   // Undelivered outbox rows are safe: they stay in Postgres and the next boot relays them.
-  stopOutboxRelay();
+  // Releasing relay leadership explicitly means a rolling deploy doesn't pause delivery
+  // while another instance waits for this connection to time out.
+  await stopOutboxRelay();
 
   // Don't hang forever on a stuck socket; past this point, exiting is the better outcome.
   const timeout = new Promise((resolve) => setTimeout(resolve, 10_000).unref?.());
   await Promise.race([closed, timeout]);
 
+  await closeRedis();
   await pool.end().catch(() => {});
   console.log('shutdown complete');
   process.exit(0);

@@ -8,10 +8,11 @@
 //      row, and will republish on restart. Every consumer must be idempotent. Today's
 //      consumers are socket broadcasts — re-sending "order 4 is now IN_TRANSIT" is harmless
 //      because it's a state snapshot, not a delta. Keep new events shaped that way.
-//   3. Ordering is by `id`, i.e. write order, and a single relay preserves it. Running two
-//      backends would interleave (SKIP LOCKED lets each grab different rows) — the same
-//      "one instance until Redis" constraint as the rate limiter. See CLAUDE.md P2.
-import { query, withTransaction } from '../db/pool.js';
+//   3. Ordering is by `id`, i.e. write order, and is preserved across instances by electing
+//      a SINGLE relay with a Postgres advisory lock (see "Relay leadership" below). Without
+//      that, two backends each claim a different subset via SKIP LOCKED and publish
+//      concurrently — a customer could see "delivered" before "in transit".
+import { pool, query, withTransaction } from '../db/pool.js';
 import { publish } from './bus.js';
 
 const POLL_INTERVAL_MS = 1000; // floor on delivery latency if nothing calls wake()
@@ -110,6 +111,58 @@ export async function outboxHealth() {
   return rows[0];
 }
 
+// ── Relay leadership ──
+//
+// Ordering is by `id`, and that only holds with ONE relay. Two instances both claiming rows
+// with SKIP LOCKED each get a different subset and publish them concurrently, so a customer
+// could see "delivered" before "in transit".
+//
+// So exactly one instance relays at a time, elected by a Postgres session-scoped advisory
+// lock. No new infrastructure, and no split brain: the lock lives in the same database as the
+// truth it protects, and it is released AUTOMATICALLY if the holder dies or its connection
+// drops — which is precisely the failure a lease-with-timeout scheme has to hand-roll.
+//
+// The non-leaders idle. Failover costs at most one poll interval.
+const RELAY_LOCK_KEY = 0x60057; // arbitrary but fixed: "ghost" in leetspeak
+let lockClient = null;
+let isLeader = false;
+
+async function tryBecomeLeader() {
+  if (isLeader) return true;
+  try {
+    // A dedicated connection, held for as long as we lead: advisory locks are scoped to the
+    // session, so returning this client to the pool would release the lock.
+    if (!lockClient) lockClient = await pool.connect();
+    const { rows } = await lockClient.query('SELECT pg_try_advisory_lock($1) AS ok', [
+      RELAY_LOCK_KEY,
+    ]);
+    isLeader = rows[0].ok === true;
+    if (isLeader) console.log('outbox relay: this instance is the leader');
+    return isLeader;
+  } catch (err) {
+    // Connection died — drop it so the next tick reconnects and re-contests the lock.
+    console.error('outbox relay: leadership check failed:', err.message);
+    try { lockClient?.release(); } catch { /* already gone */ }
+    lockClient = null;
+    isLeader = false;
+    return false;
+  }
+}
+
+async function releaseLeadership() {
+  if (!lockClient) return;
+  try {
+    if (isLeader) await lockClient.query('SELECT pg_advisory_unlock($1)', [RELAY_LOCK_KEY]);
+  } catch { /* the session is going away anyway */ }
+  try { lockClient.release(); } catch { /* already released */ }
+  lockClient = null;
+  isLeader = false;
+}
+
+export function isRelayLeader() {
+  return isLeader;
+}
+
 // ── Relay loop ──
 let timer = null;
 let running = false;
@@ -122,6 +175,7 @@ async function drain() {
     pendingWake = true;
     return;
   }
+  if (!(await tryBecomeLeader())) return; // another instance is relaying
   running = true;
   try {
     // Keep going while full batches come back, so a backlog clears promptly instead of one
@@ -156,7 +210,10 @@ export function startOutboxRelay() {
   console.log('Outbox relay started');
 }
 
-export function stopOutboxRelay() {
+export async function stopOutboxRelay() {
   if (timer) clearInterval(timer);
   timer = null;
+  // Hand leadership over immediately rather than making the next instance wait for our
+  // connection to time out — a rolling deploy should not pause event delivery.
+  await releaseLeadership();
 }

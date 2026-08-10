@@ -8,7 +8,21 @@ let queryImpl;
 const client = { query: (sql, params) => queryImpl(sql, params) };
 const poolQuery = jest.fn();
 
+// The relay holds a DEDICATED connection for its advisory lock (a session-scoped lock is
+// released the moment the client goes back to the pool), so the fake pool hands out a client
+// whose query() answers the leadership probe.
+let leadershipGranted = true;
+const lockClient = {
+  query: jest.fn(async (sql) => {
+    if (/pg_try_advisory_lock/.test(sql)) return { rows: [{ ok: leadershipGranted }] };
+    if (/pg_advisory_unlock/.test(sql)) return { rows: [{}] };
+    throw new Error(`unexpected lock query: ${sql}`);
+  }),
+  release: jest.fn(),
+};
+
 jest.unstable_mockModule('../src/db/pool.js', () => ({
+  pool: { connect: async () => lockClient },
   withTransaction: async (fn) => fn(client),
   query: poolQuery,
   inTransaction: (c, fn) => (c ? fn(c) : fn(client)),
@@ -192,5 +206,58 @@ describe('sweepOutbox', () => {
     expect(sql).toMatch(/published_at IS NOT NULL/);
     // An undelivered row must never be swept — that would silently lose the event.
     expect(sql).not.toMatch(/published_at IS NULL/);
+  });
+});
+
+// ── Relay leadership ──
+// Ordering by id only holds with ONE relay. Two instances each claiming a different subset
+// via SKIP LOCKED would publish concurrently, and a customer could see "delivered" before
+// "in transit". Leadership is what prevents that once more than one backend runs.
+describe('relay leadership', () => {
+  test('the relay claims a Postgres advisory lock on its dedicated connection', async () => {
+    const { startOutboxRelay, stopOutboxRelay, isRelayLeader } =
+      await import('../src/events/outbox.js');
+    leadershipGranted = true;
+    lockClient.query.mockClear();
+    tableWith([]);
+
+    startOutboxRelay();
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(lockClient.query.mock.calls.some(([sql]) => /pg_try_advisory_lock/.test(sql))).toBe(true);
+    expect(isRelayLeader()).toBe(true);
+    await stopOutboxRelay();
+  });
+
+  test('an instance that loses the election does not relay', async () => {
+    // The whole point: the non-leader must publish NOTHING, or ordering is lost.
+    jest.resetModules();
+    leadershipGranted = false;
+    publish.mockClear();
+    const mod = await import('../src/events/outbox.js');
+    tableWith([{ id: 1, event_name: 'order.state_changed', payload: {}, attempts: 0 }]);
+
+    mod.startOutboxRelay();
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(mod.isRelayLeader()).toBe(false);
+    expect(publish).not.toHaveBeenCalled();
+    await mod.stopOutboxRelay();
+    leadershipGranted = true;
+  });
+
+  test('shutdown releases the lock so failover does not wait for a connection timeout', async () => {
+    jest.resetModules();
+    leadershipGranted = true;
+    const mod = await import('../src/events/outbox.js');
+    tableWith([]);
+    mod.startOutboxRelay();
+    await new Promise((r) => setTimeout(r, 20));
+    lockClient.query.mockClear();
+
+    await mod.stopOutboxRelay();
+
+    expect(lockClient.query.mock.calls.some(([sql]) => /pg_advisory_unlock/.test(sql))).toBe(true);
+    expect(mod.isRelayLeader()).toBe(false);
   });
 });

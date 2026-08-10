@@ -20,7 +20,13 @@ if ! curl -sk -o /dev/null --max-time 3 https://localhost/api/health; then
 fi
 
 reset_stack() {
-  echo "── resetting stack (clears the in-memory rate limiter + reseeds) ──"
+  echo "── resetting stack (clears rate-limit counters + reseeds) ──"
+  # Rate-limit counters live in Redis when it's configured, so they now SURVIVE a backend
+  # restart — which is the whole point of sharing them across instances, and exactly why the
+  # old "just restart the backend" reset silently stopped working. Clear the keys directly.
+  # Scoped to rl:* so nothing else in Redis is touched.
+  docker compose exec -T redis sh -c \
+    'redis-cli --scan --pattern "rl:*" | xargs -r redis-cli DEL' >/dev/null 2>&1 || true
   docker compose restart backend >/dev/null 2>&1
   for _ in $(seq 1 30); do
     curl -sk -o /dev/null --max-time 2 https://localhost/api/health && break
