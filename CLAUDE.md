@@ -358,6 +358,13 @@ See `oracle/README.md`.
   claim in the system we cannot verify ourselves, so it must be checkable against the
   telecom's own log. **Waive is separate from settle** — conflating "we paid this back" with
   "nothing was owed" makes the ledger useless in the argument it exists to settle.
+- **ID documents are the most sensitive data here** and are treated accordingly: uploaded with
+  a short-lived token scoped to one request (so the request id never goes over the wire and
+  nobody can attach to someone else's application), stored only as a key with a random
+  component, streamed no-store to an authenticated operator, and **destroyed the moment the
+  decision is made**. The row keeps `id_document_at` as proof it was checked and
+  `reviewed_by` as who checked it. Holding a government ID after the decision it supported is
+  pure liability — a routine breach becomes identity theft. Customers are NEVER asked for one.
 - **Nobody self-registers as staff.** `POST /api/signup` records a REQUEST and grants nothing;
   an operator reviews it and then creates the account explicitly, with a password they choose.
   An operator account reads every customer's phone, address, chat and photos — the gate has to

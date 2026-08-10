@@ -241,6 +241,13 @@ model AccessRequest {
   phone        String    // canonical E.164
   message      String?
   status       String    @default("new") // 'new' | 'contacted' | 'approved' | 'declined'
+  // ID document held in MinIO. This is the most sensitive data in the system — a leaked
+  // government ID is identity theft, not an inconvenience — so only the KEY is stored here,
+  // the bytes never leave object storage except streamed to an authenticated operator, and
+  // the object is DESTROYED the moment the decision it supports is made. Keeping it after
+  // that is pure liability with no purpose.
+  id_document_key  String?
+  id_document_at   DateTime? @db.Timestamptz(6)
   reviewed_at  DateTime? @db.Timestamptz(6)
   reviewed_by  String?
   review_note  String?

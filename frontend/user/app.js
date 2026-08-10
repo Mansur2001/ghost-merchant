@@ -589,9 +589,50 @@ $('joinSubmit').addEventListener('click', async () => {
       : res.error;
     return;
   }
+  // Upload the ID second, using the short-lived token scoped to this request. Doing it as a
+  // separate step keeps the request id off the wire and lets the form succeed even if the
+  // image fails — losing a good applicant because a photo upload timed out would be silly.
+  const idFile = $('joinId').files[0];
+  if (idFile && res.uploadToken) {
+    $('joinStatus').textContent = 'Sending your ID…';
+    try {
+      const up = await fetch(GMConfig.api('/signup/id-document'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': idFile.type || 'application/octet-stream',
+          Authorization: `Bearer ${res.uploadToken}`,
+        },
+        body: idFile,
+      });
+      const upBody = await up.json().catch(() => ({}));
+      if (!up.ok) {
+        $('joinStatus').textContent =
+          `${res.message}\n\nYour ID didn't upload (${upBody.error || 'try again'}) — ` +
+          'we may call you to arrange it.';
+        $('joinName').value = '';
+        $('joinMessage').value = '';
+        return;
+      }
+    } catch {
+      $('joinStatus').textContent =
+        `${res.message}\n\nYour ID didn't upload — we may call you to arrange it.`;
+      return;
+    }
+  }
+
   $('joinStatus').textContent = res.message;
   $('joinName').value = '';
   $('joinMessage').value = '';
+  $('joinId').value = '';
+  $('joinIdHint').textContent = '';
+});
+
+// Reassure before they commit: show the file is attached and how big it is.
+$('joinId').addEventListener('change', () => {
+  const f = $('joinId').files[0];
+  $('joinIdHint').textContent = f
+    ? `${f.name} · ${(f.size / 1024 / 1024).toFixed(1)}MB — deleted once your request is reviewed`
+    : '';
 });
 
 // ── Tiny toast ──

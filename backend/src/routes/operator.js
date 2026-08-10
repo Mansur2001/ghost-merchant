@@ -42,6 +42,7 @@ import {
   reviewAccessRequest,
   AccessRequestError,
 } from '../commands/accessRequests.js';
+import { getObject } from '../storage/objectStore.js';
 
 export const operatorRouter = Router();
 
@@ -234,6 +235,25 @@ operatorRouter.get('/operator/access-requests', operatorOnly, async (req, res, n
     const requests = await listAccessRequests({ includeClosed: req.query.all === '1' });
     res.json({ requests });
   } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/operator/access-requests/:id/id-document — stream the ID image.
+//
+// Operator-only, streamed through the backend so object storage is never browser-reachable,
+// and no-store so it doesn't sit in a disk cache on the dispatch machine.
+operatorRouter.get('/operator/access-requests/:id/id-document', operatorOnly, async (req, res, next) => {
+  try {
+    const request = await prisma.accessRequest.findUnique({ where: { id: BigInt(req.params.id) } });
+    if (!request?.id_document_key) return res.status(404).json({ error: 'not found' });
+    const { body, contentType } = await getObject(request.id_document_key);
+    res.setHeader('Content-Type', contentType || 'application/octet-stream');
+    res.setHeader('Cache-Control', 'private, no-store');
+    body.on('error', () => res.destroy());
+    body.pipe(res);
+  } catch (err) {
+    if (err?.name === 'NoSuchKey') return res.status(404).json({ error: 'not found' });
     next(err);
   }
 });

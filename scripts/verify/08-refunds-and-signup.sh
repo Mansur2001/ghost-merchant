@@ -134,5 +134,39 @@ curl -sk -o /dev/null -X POST -H 'Content-Type: application/json' -H "X-Oracle-S
 chk "an ordinary text is ignored   " "$TX_BEFORE" "$(psql "SELECT count(*) FROM transactions;")"
 
 echo
+echo "── 10. ID verification: the most sensitive data in the system ──"
+# A leaked government ID is identity theft, not an inconvenience. Three properties must hold:
+# only an operator can see it, only the applicant can attach one, and it is DESTROYED once
+# the decision it supports has been made.
+python3 -c "
+import struct,zlib
+def chunk(t,d):
+    c=t+d; return struct.pack('>I',len(d))+c+struct.pack('>I',zlib.crc32(c)&0xffffffff)
+png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',8,8,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(b'\x00'+b'\xd4\xaf\x37'*8))+chunk(b'IEND',b'')
+open('/tmp/verify-id.png','wb').write(png)"
+
+SUB=$(curl -sk -X POST -H 'Content-Type: application/json' -d '{"role":"driver","name":"ID Test","phone":"+12065557777","message":"x"}' $B/signup)
+UPTOK=$(echo "$SUB" | python3 -c "import sys,json;print(json.load(sys.stdin).get('uploadToken',''))")
+chk "submit returns an upload token" "yes" "$([ -n "$UPTOK" ] && echo yes || echo no)"
+chk "  ...but NOT the request id   " "yes" "$(echo "$SUB" | grep -q '\"id\"' && echo no || echo yes)"
+chk "applicant attaches their ID   " 201 "$(code -X POST -H "Authorization: Bearer $UPTOK" -H 'Content-Type: image/png' --data-binary @/tmp/verify-id.png $B/signup/id-document)"
+chk "  ...non-image is refused     " 400 "$(code -X POST -H "Authorization: Bearer $UPTOK" -H 'Content-Type: application/pdf' --data-binary @/tmp/verify-id.png $B/signup/id-document)"
+chk "  ...no token is refused      " 401 "$(code -X POST -H 'Content-Type: image/png' --data-binary @/tmp/verify-id.png $B/signup/id-document)"
+chk "  ...a customer token is too  " 401 "$(code -X POST -H "Authorization: Bearer $UPTOK-tampered" -H 'Content-Type: image/png' --data-binary @/tmp/verify-id.png $B/signup/id-document)"
+
+IDREQ=$(psql "SELECT id FROM access_requests WHERE phone='+12065557777' LIMIT 1;")
+chk "stored, and only the key      " "yes" "$(psql "SELECT CASE WHEN id_document_key IS NOT NULL THEN 'yes' ELSE 'no' END FROM access_requests WHERE id=$IDREQ;")"
+chk "only an operator may view it  " 401 "$(code $B/operator/access-requests/$IDREQ/id-document)"
+chk "  ...operator can             " 200 "$(code -H "Authorization: Bearer $OTOK" $B/operator/access-requests/$IDREQ/id-document)"
+chk "  ...and it is not cached     " "yes" "$(curl -skI -H "Authorization: Bearer $OTOK" $B/operator/access-requests/$IDREQ/id-document | grep -qi 'no-store' && echo yes || echo no)"
+
+# RETENTION — the property that keeps a routine breach from becoming identity theft.
+curl -sk -o /dev/null -X POST -H "Authorization: Bearer $OTOK" -H 'Content-Type: application/json' -d '{"status":"declined"}' $B/operator/access-requests/$IDREQ/review
+chk "decision DESTROYS the ID      " "yes" "$(psql "SELECT CASE WHEN id_document_key IS NULL THEN 'yes' ELSE 'no' END FROM access_requests WHERE id=$IDREQ;")"
+chk "  ...it is gone from storage  " 404 "$(code -H "Authorization: Bearer $OTOK" $B/operator/access-requests/$IDREQ/id-document)"
+chk "  ...but we kept the PROOF    " "yes" "$(psql "SELECT CASE WHEN id_document_at IS NOT NULL THEN 'yes' ELSE 'no' END FROM access_requests WHERE id=$IDREQ;")"
+chk "  ...and who decided          " "yes" "$(psql "SELECT reviewed_by FROM access_requests WHERE id=$IDREQ;" | grep -qi 'operator' && echo yes || echo no)"
+
+echo
 echo "════ $pass passed, $fail failed ════"
 [ "$fail" -eq 0 ]

@@ -94,13 +94,36 @@ async function loadMe() {
   $('pwNag').classList.toggle('hidden', !me.must_change_password);
 }
 
+// Shown only while the system is genuinely new. Disappears on its own as each step is done,
+// so it never becomes furniture an experienced operator has to look past.
+function renderFirstRun({ drivers: driverCount, orders: orderCount }) {
+  const el = $('firstRun');
+  if (!el) return;
+  const steps = [];
+  if (me?.must_change_password) {
+    steps.push('Change your password below — the current one came from the server config file.');
+  }
+  if (driverCount === 0) {
+    steps.push('Add a driver. Until there is one, orders can be paid for but never dispatched.');
+  }
+  if (driverCount > 0 && orderCount === 0) {
+    steps.push('Ready. Place a test order from the customer app to watch it come through.');
+  }
+  el.innerHTML = steps.length
+    ? `<h3 style="margin:0 0 8px;">Getting started</h3><ul style="margin:0;padding-left:18px;">
+       ${steps.map((t) => `<li class="muted" style="margin-bottom:6px;">${t}</li>`).join('')}</ul>`
+    : '';
+  el.classList.toggle('hidden', steps.length === 0);
+}
+
 let drivers = []; // roster with workload stats, kept fresh for the assign picker
 
 async function refreshAll() {
   await loadDrivers();                       // load first so order cards can build the picker
-  await Promise.all([
+  const [orderCount] = await Promise.all([
     loadOrders(), loadUnmatched(), loadOperators(), loadRefunds(), loadAccessRequests(),
   ]);
+  renderFirstRun({ drivers: drivers.length, orders: orderCount ?? 0 });
 }
 
 // ── Operator roster (P0 #5) ──
@@ -198,7 +221,11 @@ async function loadRefunds() {
             <button class="secondary" data-waive="${r.id}">Nothing owed</button>
           </div>
         </div>`).join('')
-    : '<p class="muted">Nothing outstanding — every refund has been settled.</p>';
+    // Careful with the wording: on day one nothing has EVER been settled, so claiming
+    // everything has been is simply false.
+    : `<p class="muted">${res.settled?.length
+        ? 'Nothing outstanding — every refund has been settled.'
+        : 'No refunds owed. This fills up when you fail an order that was already paid for.'}</p>`;
 
   $('refunds').querySelectorAll('[data-settle]').forEach((b) =>
     b.addEventListener('click', async () => {
@@ -266,13 +293,49 @@ async function loadAccessRequests() {
             · ${new Date(r.created_at).toLocaleDateString()}
           </div>
           ${r.message ? `<div style="margin-top:6px;">${escapeHtml(r.message)}</div>` : ''}
+          ${r.id_document_at
+            ? `<div style="margin-top:8px;">
+                 <button class="secondary" data-idreq="${r.id}" style="max-width:170px;">
+                   View ID document</button>
+                 <div class="muted" style="font-size:12px;margin-top:4px;">
+                   Deleted automatically once you approve or decline.</div>
+                 <div data-idimg="${r.id}"></div>
+               </div>`
+            : '<div class="muted" style="margin-top:6px;font-size:13px;">No ID attached.</div>'}
           <div class="row" style="margin-top:8px;">
             <button class="secondary" data-req="${r.id}" data-status="contacted">Called them</button>
             <button data-req="${r.id}" data-status="approved">Approved</button>
             <button class="danger" data-req="${r.id}" data-status="declined">Decline</button>
           </div>
         </div>`).join('')
-    : '<p class="muted">No open requests.</p>';
+    : '<p class="muted">No open requests. People who ask to drive or help run deliveries '
+      + 'appear here for you to approve.</p>';
+
+  // The ID is fetched on demand, not with the list: it is the most sensitive thing here, and
+  // rendering every applicant's document by default would put a wall of government IDs on
+  // screen in a shared office.
+  $('accessRequests').querySelectorAll('[data-idreq]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const id = b.dataset.idreq;
+      const holder = $('accessRequests').querySelector(`[data-idimg="${id}"]`);
+      if (holder.dataset.shown) { // toggle off
+        holder.innerHTML = ''; delete holder.dataset.shown; b.textContent = 'View ID document';
+        return;
+      }
+      try {
+        const r = await fetch(GMConfig.api(`/operator/access-requests/${id}/id-document`), {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!r.ok) return toast('Could not load the ID document.');
+        const url = URL.createObjectURL(await r.blob());
+        holder.innerHTML = `<img src="${url}" alt="ID document"
+          style="max-width:100%;margin-top:8px;border-radius:6px;" />`;
+        holder.querySelector('img').addEventListener('load', () => URL.revokeObjectURL(url), { once: true });
+        holder.dataset.shown = '1';
+        b.textContent = 'Hide ID document';
+      } catch { toast('Could not load the ID document.'); }
+    })
+  );
 
   $('accessRequests').querySelectorAll('[data-req]').forEach((b) =>
     b.addEventListener('click', async () => {
@@ -283,8 +346,10 @@ async function loadAccessRequests() {
       if (out.error) return toast(out.error);
       toast(
         b.dataset.status === 'approved'
-          ? 'Marked approved — now create their account below.'
-          : 'Updated ✓'
+          ? 'Approved — create their account below. Their ID has been deleted.'
+          : b.dataset.status === 'declined'
+            ? 'Declined — their ID has been deleted.'
+            : 'Updated ✓'
       );
       loadAccessRequests();
     })
@@ -321,7 +386,7 @@ function driverOptions() {
 
 async function loadOrders() {
   const res = await api('/operator/orders');
-  if (res.error) { logout(); return; }
+  if (res.error) { logout(); return 0; }
   const orders = res.orders || [];
   $('orders').innerHTML = orders.length
     ? orders.map((o) => `
@@ -342,9 +407,11 @@ async function loadOrders() {
           ${o.status !== 'FAILED_REFUND' ? `<button class="danger" data-act="refund" data-id="${o.id}">Refund / fail</button>` : ''}
         </div>
       </div>`).join('')
-    : '<p class="muted">No active orders.</p>';
+    : '<p class="muted">No active orders. Orders appear here the moment a customer places one — '
+      + 'you don\'t need to refresh.</p>';
   bindOrderButtons();
   orders.forEach((o) => loadCardPhotos(o.id));
+  return orders.length;
 }
 
 // Lazily hydrate each order card with its photo thumbnails (reference + delivery proof).
@@ -442,7 +509,8 @@ async function loadUnmatched() {
         <button data-txassign="${t.id}" style="margin-top:6px;">Mark this order paid</button>
       </div>`;
       }).join('')
-    : '<p class="muted">Nothing to reconcile.</p>';
+    : '<p class="muted">Nothing to reconcile. Payments that arrive without a phone number to '
+      + 'match — Zelle, Cash App, Venmo — land here for you to attach to an order.</p>';
 
   $('unmatched').querySelectorAll('[data-txassign]').forEach((b) =>
     b.addEventListener('click', async () => {

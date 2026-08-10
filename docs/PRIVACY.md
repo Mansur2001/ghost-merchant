@@ -25,10 +25,15 @@ we do not share it with advertisers, and we never see or hold your money.
 | **Delivery location** (GPS, optional) and **landmark** (required) | So a driver can find you. Addresses are unreliable in our service area; the landmark is the primary instruction and the GPS point is an aid. | With the order |
 | **Order contents and chat messages** | To fulfil the order and resolve disputes. | With the order |
 | **Photos you attach** | A reference photo helps the driver find the right item; a delivery-proof photo protects both you and the driver in a dispute. | With the order |
-| **Payment receipt details** (transaction reference, sender number, amount) | To match your EVC Plus / eDahab transfer to your order. | With the order |
+| **Payment receipt details** (transaction reference, sender number or name, amount) | To match your transfer to your order. | With the order |
+| **Photo of an ID** — *only if you apply to be a driver or operator* | Drivers carry other people's money and goods, so we confirm who they are before issuing an account. | **Deleted the moment the application is decided.** Never collected from customers. |
 
 We do **not** collect: your contacts, your location in the background or when the app is
 closed, your browsing or app activity, advertising identifiers, or any biometric data.
+
+**Customers are never asked for an ID.** That only applies to people applying to work as a
+driver or operator, and their document is destroyed as soon as the application is approved or
+declined — we keep only the fact that it was checked, and who checked it.
 
 ## Money
 

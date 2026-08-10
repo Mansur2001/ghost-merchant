@@ -6,6 +6,7 @@ import {
   GetObjectCommand,
   CreateBucketCommand,
   HeadBucketCommand,
+  DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../config.js';
@@ -61,4 +62,10 @@ export async function getObject(key) {
     new GetObjectCommand({ Bucket: config.s3.bucket, Key: key })
   );
   return { body: out.Body, contentType: out.ContentType };
+}
+
+// Delete an object. Used to honour retention promises — an ID document is destroyed once the
+// decision it supports has been made, because keeping it afterwards is pure liability.
+export async function deleteObject(key) {
+  await client.send(new DeleteObjectCommand({ Bucket: config.s3.bucket, Key: key }));
 }

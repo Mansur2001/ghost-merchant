@@ -13,7 +13,8 @@
     "test:watch": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --watch",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
-    "db:verify": "node scripts/verify-constraints.mjs"
+    "db:verify": "node scripts/verify-constraints.mjs",
+    "db:reset-clean": "node src/db/reset-clean.js"
   },
   "jest": {
     "testEnvironment": "node",
