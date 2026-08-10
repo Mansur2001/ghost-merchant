@@ -65,7 +65,10 @@ signupRouter.post(
   }
 );
 
-// POST /api/signup/id-document — attach a photo of an ID to the request just submitted.
+// POST /api/signup/id-document/:side — attach the front or back of an ID.
+//
+// Both sides: the back carries the machine-readable zone, expiry and issuing details, and a
+// front-only photo is trivially a picture of somebody else's card.
 //
 // Raw image bytes, authorised by the short-lived token from the submit response. The token
 // carries the request id, so an applicant can only ever attach to their own application and
@@ -75,7 +78,7 @@ signupRouter.post(
 // logged, only ever shown to an authenticated operator, and DESTROYED when the decision is
 // made.
 signupRouter.post(
-  '/signup/id-document',
+  '/signup/id-document/:side',
   rateLimit({ windowMs: HOUR, max: 20, message: 'too many uploads — try again later' }),
   raw({ type: () => true, limit: '6mb' }),
   async (req, res, next) => {
@@ -86,12 +89,13 @@ signupRouter.post(
         // Generic: distinguishing "expired" from "wrong" tells a prober how the token works.
         return res.status(401).json({ error: 'upload link expired — please submit the form again' });
       }
-      await attachIdDocument({
+      const result = await attachIdDocument({
         requestId: payload.requestId,
+        side: req.params.side,
         bytes: req.body,
         contentType: req.get('Content-Type'),
       });
-      res.status(201).json({ received: true });
+      res.status(201).json({ received: true, ...result });
     } catch (err) {
       if (err instanceof AccessRequestError) {
         return res.status(err.status).json({ error: err.message });

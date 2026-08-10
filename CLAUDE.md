@@ -42,7 +42,7 @@ The plan is rapid shipping with public update posts. That's fine, with guardrail
 5. Speed comes from cutting *scope*, never from cutting the invariants below. If a feature
    can't be done safely this week, ship less of it, not an unsafe version of it.
 
-## Current status — living log (last updated 2026-08-07, P1 done + Android app)
+## Current status — living log (last updated 2026-08-10, outbound SMS path built)
 Read this first when resuming: it's the running snapshot of where the project is, so a new
 session doesn't need re-discovery. Keep it current as work lands.
 
@@ -73,6 +73,8 @@ session doesn't need re-discovery. Keep it current as work lands.
   says so and falls back to the operator's manual path.
 - **GuriKaabe Android app** (`mobile/`) — Capacitor shell over the same three PWAs, builds to
   a 3.8MB debug APK / 2.7MB release AAB. See `mobile/README.md`.
+- **Outbound SMS without a telecom** (2026-08-10) — login codes are queued and the Oracle
+  phone polls for them, so no inbound connectivity or vendor agreement is needed. See P4.
 - **Live verification suite** (`scripts/verify/run-all.sh`, P1 #8) — 153 checks over the real
   HTTP + WebSocket layers, including an actual crash-and-restart of the outbox.
 - **Version control**: initialized 2026-08-06. Was previously untracked inside the home-dir repo.
@@ -293,12 +295,39 @@ Built as **GuriKaabe** in `mobile/`. Read `mobile/README.md` before touching it;
 
 ## P4 — validate on real hardware (do this NOW, in parallel — biggest unknown)
 
-`tel:`+USSD `%23` dialing, Oracle SMS interception, **and the outbound SMS path that delivers
-login codes**. This is now the ONLY thing between the current build and a real launch:
+`tel:`+USSD `%23` dialing, Oracle SMS interception, and the outbound path that delivers login
+codes. All three are **built and verified against the live stack**; none has run on a Somali
+network. That gap is the only thing between this build and a real launch:
 - the backend refuses to boot with `NODE_ENV=production` unless `OTP_TRANSPORT=oracle`;
 - a Play reviewer who cannot receive a login code cannot get past the first screen, and the
   app is rejected as broken.
 See `oracle/README.md`.
+
+### How login codes reach a Somali handset — no telecom integration
+There is deliberately **no Golis/Hormuud A2P agreement**: it needs a registered local company,
+a Somali bank account, and volume pricing this business doesn't have. The code goes out over
+the merchant's own SIM instead, as an ordinary subscriber text.
+
+**The backend never pushes to the phone.** A phone cannot accept inbound connections — carrier
+NAT on mobile data, a router on WiFi — so an address for it would mean a VPN or tunnel, i.e.
+another dependency that can die silently. Direction is inverted: the backend queues
+(`notify/smsQueue.js`, `sms_outbox`), the phone POLLS on the tick it already uses for receipts.
+
+`queue → POST /api/oracle/sms/pending (HMAC) → termux-sms-send → POST /api/oracle/sms/sent`
+
+- Collected rows are **claimed** (`FOR UPDATE SKIP LOCKED` + a 60s claim timeout), so two polls
+  in flight can't send two *different* codes for one login — a customer who then can't sign in.
+- A confirmed send **DELETES** the row. Until then it holds a login code in plaintext; the
+  hashed copy in `otp_codes` is the authoritative one. Undelivered rows are swept after 10
+  minutes — the code died at 5, so it is a credential with no remaining purpose.
+- `isConfigured('oracle')` means **a phone is actually polling**, not that a setting exists.
+  With no phone ever seen, dev falls back to `log` — otherwise every local login silently
+  queues into a black hole and sign-in just stops working with no error.
+- Backlog is visible at `GET /api/operator/sms-queue`. A stalled queue is invisible from the
+  inside: customers don't report it, they conclude the app is broken and leave.
+- **Honest limit:** a subscriber SIM sending hundreds of near-identical texts a day gets
+  rate-limited or blocked. Fine at soft-launch volume; at scale the answer is a commercial
+  agreement, and only the transport module changes.
 
 ## Event delivery (transactional outbox)
 `Command tx { state change + INSERT INTO outbox } → COMMIT → relay → bus → sockets`

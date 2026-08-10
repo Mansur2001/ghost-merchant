@@ -29,6 +29,41 @@ or its account lapses, **Somali logins are unaffected**. The business does not d
 
 That routing is `OTP_TRANSPORT=auto`, which is already set in your `.env`.
 
+### How the Somali half works without any provider
+
+This is the part that sounds impossible, so it's worth being concrete. There is no Golis or
+Hormuud integration, and there is no plan to get one — a commercial A2P agreement needs a
+registered local company, a Somali bank account, and per-message pricing that only makes
+sense at volume you don't have yet.
+
+Instead the login code goes out from **your own SIM**, on the Oracle phone, as an ordinary
+text. To the telecom it is a person sending a message.
+
+```
+customer taps "send me a code"
+  → backend writes the code (hashed) and queues the message
+  → Oracle phone asks "anything to send?"   POST /api/oracle/sms/pending
+  → termux-sms-send  →  the customer's handset
+  → phone reports back                      POST /api/oracle/sms/sent   → the plaintext row is deleted
+```
+
+**The phone asks; the backend never pushes.** That isn't a style choice — a phone can't accept
+inbound connections. On mobile data it's behind carrier-grade NAT, on WiFi behind a router, so
+there is no address to send to without a VPN or tunnel. Polling works from any network with
+nothing configured, and the phone is already polling for incoming receipts anyway.
+
+Signed with `ORACLE_WEBHOOK_SECRET`, the same key as the inbound webhook — an unsigned request
+gets a 401, and so does an operator's token. Nobody reads codes in flight.
+
+**Where this stops working.** A subscriber SIM sending hundreds of near-identical texts a day
+looks like spam, and telecoms rate-limit or block it. At soft-launch volume — a few logins a
+day — it looks like normal use and is fine. If GuriKaabe gets busy enough for that to break,
+that is the point at which a commercial agreement becomes worth its cost, and the only thing
+that changes is one transport module.
+
+`GET /api/operator/sms-queue` shows the backlog. If `pending` is climbing, the phone has
+stopped polling, and customers are experiencing that as "the app won't let me in".
+
 ---
 
 ## Setup
@@ -88,8 +123,9 @@ because the API has already told us exactly what's wrong.
 - [ ] `OTP_TRANSPORT=auto` (or `oracle` for a Somalia-only deployment)
 - [ ] `NODE_ENV=production` — the backend **refuses to boot** on the `log` transport, so a
       production box cannot silently print login codes into its logs
-- [ ] The Oracle SMS path validated on a real Somali SIM (still the P4 blocker — Twilio does
-      not solve it, it only covers `+1`)
+- [ ] The Oracle SMS path validated on a real Somali SIM — the send loop is built and tested
+      against the live stack (`scripts/verify/09-sms-delivery.sh`), but it has never run on a
+      Somali network. Still the P4 blocker; Twilio does not solve it, it only covers `+1`.
 - [ ] Twilio account upgraded off trial if you want to reach *unverified* numbers
 - [ ] Cost sanity check: SMS is a few US cents each. A login costs one message; a customer
       logging in monthly is negligible, but an SMS-bomb against your endpoint would not be.

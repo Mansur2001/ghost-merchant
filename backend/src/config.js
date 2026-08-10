@@ -88,11 +88,11 @@ export const config = {
 
   otp: {
     // 'log'    — dev only, prints the code. Refused under NODE_ENV=production.
-    // 'oracle' — real SMS via the Oracle phone (no vendor). The Somali path.
+    // 'oracle' — real SMS via the Oracle phone (no vendor). The Somali path. Needs no URL:
+    //            the backend queues, and the phone polls for what to send (see notify/smsQueue.js).
     // 'twilio' — real SMS via Twilio. Non-Somali numbers (testing, Play review).
     // 'auto'   — per country: +252 via the Oracle, everything else via Twilio.
     transport: process.env.OTP_TRANSPORT || 'log',
-    oracleSmsUrl: process.env.ORACLE_SMS_URL || '',
     sendTimeoutMs: parseInt(process.env.OTP_SEND_TIMEOUT_MS || '10000', 10),
     twilio: {
       accountSid: process.env.TWILIO_ACCOUNT_SID || '',

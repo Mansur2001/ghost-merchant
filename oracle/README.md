@@ -113,13 +113,31 @@ These cannot be proven in code:
    `ignored (not a receipt)`, paste the real text (amount and number changed) and adjust
    `PROVIDERS` — a server-side change, no phone access needed.
 
-3. **Outbound SMS for login codes.** *Not built.* Somali customers can't receive a login code
-   until this phone also runs a small HTTP listener that accepts `POST {to, text}` signed with
-   `X-Oracle-Signature` and shells out to `termux-sms-send`. US numbers are unaffected — they
-   go through Twilio (`docs/LIVE_SMS_SETUP.md`). Things to check when it is built: the device
-   is reachable from the backend (tailnet/VPN — never expose it to the open internet), send
-   latency is under the 5-minute code TTL, and the telecom doesn't flag automated sends from
-   a subscriber SIM.
+3. **Outbound SMS for login codes.** Built, and it is the same script — `pollOutbound()` in
+   `termux-oracle.js`. This is how a Somali customer receives a login code with no telecom
+   contract: the code goes out over your own SIM at the ordinary subscriber rate.
+
+   **The phone is never listened to.** An earlier design had the backend POST to a listener on
+   this device; that cannot work. On mobile data the phone sits behind carrier-grade NAT and on
+   WiFi behind a router, so nothing on the internet can open a connection to it — you would
+   need a VPN or a tunnel, which is one more dependency to keep alive. So the direction is
+   inverted: the backend queues the message, and **this phone asks for it** on the same tick it
+   already uses to check for receipts.
+
+   ```
+   backend queues → POST /api/oracle/sms/pending (signed) → termux-sms-send → POST /api/oracle/sms/sent
+   ```
+
+   A collected message is *claimed*, so two polls in flight can't send two different codes for
+   one login; a failure is reported and retried; a confirmed send **deletes** the row, because
+   until then it holds a login code in plaintext. Anything undelivered after 10 minutes is
+   swept — the code expired at 5, so it is a credential with no remaining purpose.
+
+   What still needs a real Somali SIM: that send latency stays under the 5-minute code TTL, and
+   that the telecom doesn't rate-limit automated sends from a subscriber SIM. At soft-launch
+   volume this is a handful of texts a day and looks like ordinary use; at scale it is a real
+   constraint, and the honest answer then is a commercial A2P agreement. US numbers don't touch
+   this path at all — they go through Twilio (`docs/LIVE_SMS_SETUP.md`).
 
 ## Operational hardening
 

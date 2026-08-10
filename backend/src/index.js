@@ -22,6 +22,7 @@ import { apiNotFound, errorHandler } from './middleware/errorHandler.js';
 import { disconnect as disconnectDb } from './db/prisma.js';
 import { startBusSubscriber } from './events/bus.js';
 import { startEmailSensor, stopEmailSensor } from './notify/emailSensor.js';
+import { sweepSmsQueue } from './notify/smsQueue.js';
 import { warnIfSingleInstance, closeRedis } from './redis/client.js';
 
 const app = express();
@@ -85,6 +86,8 @@ startOutboxRelay();
 const housekeeping = setInterval(() => {
   sweepExpiredOtps().catch((err) => console.error('OTP sweep failed:', err.message));
   sweepOutbox().catch((err) => console.error('outbox sweep failed:', err.message));
+  // Undelivered login codes are plaintext credentials; don't let them accumulate.
+  sweepSmsQueue().catch((err) => console.error('sms queue sweep failed:', err.message));
 }, 60 * 60 * 1000);
 housekeeping.unref();
 

@@ -30,6 +30,7 @@ import { STATUS } from '../domain/stateMachine.js';
 import { parsePhone } from '../domain/phone.js';
 import { oracleStatus } from '../realtime/oracleMonitor.js';
 import { wakeOutbox, outboxHealth } from '../events/outbox.js';
+import { smsQueueHealth } from '../notify/smsQueue.js';
 import {
   listOutstandingRefunds,
   listSettledRefunds,
@@ -174,6 +175,20 @@ operatorRouter.get('/operator/outbox', operatorOnly, async (req, res, next) => {
   }
 });
 
+// GET /api/operator/sms-queue — login codes waiting for the Oracle phone to send them.
+//
+// This is the one queue whose backlog is invisible from the inside: a customer who never
+// receives their code doesn't file a bug, they just conclude the app is broken and stop. If
+// `pending` is climbing, the phone has stopped polling — check that it is awake, on a
+// network, and running the forwarder.
+operatorRouter.get('/operator/sms-queue', operatorOnly, async (req, res, next) => {
+  try {
+    res.json(await smsQueueHealth());
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ── Refunds: money we owe customers ──
 //
 // The platform never holds funds, so a refund is an operator sending money back from their
@@ -243,11 +258,12 @@ operatorRouter.get('/operator/access-requests', operatorOnly, async (req, res, n
 //
 // Operator-only, streamed through the backend so object storage is never browser-reachable,
 // and no-store so it doesn't sit in a disk cache on the dispatch machine.
-operatorRouter.get('/operator/access-requests/:id/id-document', operatorOnly, async (req, res, next) => {
+operatorRouter.get('/operator/access-requests/:id/id-document/:side', operatorOnly, async (req, res, next) => {
   try {
     const request = await prisma.accessRequest.findUnique({ where: { id: BigInt(req.params.id) } });
-    if (!request?.id_document_key) return res.status(404).json({ error: 'not found' });
-    const { body, contentType } = await getObject(request.id_document_key);
+    const key = req.params.side === 'back' ? request?.id_back_key : request?.id_front_key;
+    if (!key) return res.status(404).json({ error: 'not found' });
+    const { body, contentType } = await getObject(key);
     res.setHeader('Content-Type', contentType || 'application/octet-stream');
     res.setHeader('Cache-Control', 'private, no-store');
     body.on('error', () => res.destroy());

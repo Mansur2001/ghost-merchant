@@ -149,21 +149,24 @@ SUB=$(curl -sk -X POST -H 'Content-Type: application/json' -d '{"role":"driver",
 UPTOK=$(echo "$SUB" | python3 -c "import sys,json;print(json.load(sys.stdin).get('uploadToken',''))")
 chk "submit returns an upload token" "yes" "$([ -n "$UPTOK" ] && echo yes || echo no)"
 chk "  ...but NOT the request id   " "yes" "$(echo "$SUB" | grep -q '\"id\"' && echo no || echo yes)"
-chk "applicant attaches their ID   " 201 "$(code -X POST -H "Authorization: Bearer $UPTOK" -H 'Content-Type: image/png' --data-binary @/tmp/verify-id.png $B/signup/id-document)"
-chk "  ...non-image is refused     " 400 "$(code -X POST -H "Authorization: Bearer $UPTOK" -H 'Content-Type: application/pdf' --data-binary @/tmp/verify-id.png $B/signup/id-document)"
-chk "  ...no token is refused      " 401 "$(code -X POST -H 'Content-Type: image/png' --data-binary @/tmp/verify-id.png $B/signup/id-document)"
-chk "  ...a customer token is too  " 401 "$(code -X POST -H "Authorization: Bearer $UPTOK-tampered" -H 'Content-Type: image/png' --data-binary @/tmp/verify-id.png $B/signup/id-document)"
+chk "applicant attaches their ID   " 201 "$(code -X POST -H "Authorization: Bearer $UPTOK" -H 'Content-Type: image/png' --data-binary @/tmp/verify-id.png $B/signup/id-document/front)"
+chk "  ...non-image is refused     " 400 "$(code -X POST -H "Authorization: Bearer $UPTOK" -H 'Content-Type: application/pdf' --data-binary @/tmp/verify-id.png $B/signup/id-document/front)"
+chk "  ...no token is refused      " 401 "$(code -X POST -H 'Content-Type: image/png' --data-binary @/tmp/verify-id.png $B/signup/id-document/front)"
+chk "  ...a customer token is too  " 401 "$(code -X POST -H "Authorization: Bearer $UPTOK-tampered" -H 'Content-Type: image/png' --data-binary @/tmp/verify-id.png $B/signup/id-document/front)"
 
 IDREQ=$(psql "SELECT id FROM access_requests WHERE phone='+12065557777' LIMIT 1;")
-chk "stored, and only the key      " "yes" "$(psql "SELECT CASE WHEN id_document_key IS NOT NULL THEN 'yes' ELSE 'no' END FROM access_requests WHERE id=$IDREQ;")"
-chk "only an operator may view it  " 401 "$(code $B/operator/access-requests/$IDREQ/id-document)"
-chk "  ...operator can             " 200 "$(code -H "Authorization: Bearer $OTOK" $B/operator/access-requests/$IDREQ/id-document)"
-chk "  ...and it is not cached     " "yes" "$(curl -skI -H "Authorization: Bearer $OTOK" $B/operator/access-requests/$IDREQ/id-document | grep -qi 'no-store' && echo yes || echo no)"
+chk "front stored                  " "yes" "$(psql "SELECT CASE WHEN id_front_key IS NOT NULL THEN 'yes' ELSE 'no' END FROM access_requests WHERE id=$IDREQ;")"
+chk "back can be attached too      " 201 "$(code -X POST -H "Authorization: Bearer $UPTOK" -H 'Content-Type: image/png' --data-binary @/tmp/verify-id.png $B/signup/id-document/back)"
+chk "  ...and stored separately    " "yes" "$(psql "SELECT CASE WHEN id_back_key IS NOT NULL THEN 'yes' ELSE 'no' END FROM access_requests WHERE id=$IDREQ;")"
+chk "an invalid side is refused    " 400 "$(code -X POST -H "Authorization: Bearer $UPTOK" -H 'Content-Type: image/png' --data-binary @/tmp/verify-id.png $B/signup/id-document/sideways)"
+chk "only an operator may view it  " 401 "$(code $B/operator/access-requests/$IDREQ/id-document/front)"
+chk "  ...operator can             " 200 "$(code -H "Authorization: Bearer $OTOK" $B/operator/access-requests/$IDREQ/id-document/front)"
+chk "  ...and it is not cached     " "yes" "$(curl -skI -H "Authorization: Bearer $OTOK" $B/operator/access-requests/$IDREQ/id-document/front | grep -qi 'no-store' && echo yes || echo no)"
 
 # RETENTION — the property that keeps a routine breach from becoming identity theft.
 curl -sk -o /dev/null -X POST -H "Authorization: Bearer $OTOK" -H 'Content-Type: application/json' -d '{"status":"declined"}' $B/operator/access-requests/$IDREQ/review
-chk "decision DESTROYS the ID      " "yes" "$(psql "SELECT CASE WHEN id_document_key IS NULL THEN 'yes' ELSE 'no' END FROM access_requests WHERE id=$IDREQ;")"
-chk "  ...it is gone from storage  " 404 "$(code -H "Authorization: Bearer $OTOK" $B/operator/access-requests/$IDREQ/id-document)"
+chk "decision DESTROYS BOTH sides  " "yes" "$(psql "SELECT CASE WHEN id_front_key IS NULL AND id_back_key IS NULL THEN 'yes' ELSE 'no' END FROM access_requests WHERE id=$IDREQ;")"
+chk "  ...it is gone from storage  " 404 "$(code -H "Authorization: Bearer $OTOK" $B/operator/access-requests/$IDREQ/id-document/front)"
 chk "  ...but we kept the PROOF    " "yes" "$(psql "SELECT CASE WHEN id_document_at IS NOT NULL THEN 'yes' ELSE 'no' END FROM access_requests WHERE id=$IDREQ;")"
 chk "  ...and who decided          " "yes" "$(psql "SELECT reviewed_by FROM access_requests WHERE id=$IDREQ;" | grep -qi 'operator' && echo yes || echo no)"
 

@@ -246,7 +246,10 @@ model AccessRequest {
   // the bytes never leave object storage except streamed to an authenticated operator, and
   // the object is DESTROYED the moment the decision it supports is made. Keeping it after
   // that is pure liability with no purpose.
-  id_document_key  String?
+  // Front AND back: the back carries the machine-readable zone, expiry and issuing details,
+  // and a front-only photo is trivially a picture of someone else's card.
+  id_front_key     String?
+  id_back_key      String?
   id_document_at   DateTime? @db.Timestamptz(6)
   reviewed_at  DateTime? @db.Timestamptz(6)
   reviewed_by  String?
@@ -255,6 +258,32 @@ model AccessRequest {
 
   @@index([created_at], map: "idx_access_requests_created")
   @@map("access_requests")
+}
+
+/// Outbound SMS waiting for the Oracle phone to send.
+///
+/// WHY A QUEUE INSTEAD OF CALLING THE PHONE: the phone cannot accept inbound connections. On
+/// mobile data it sits behind carrier-grade NAT, and on WiFi behind a router — so a backend
+/// on a VPS can never open a socket to it without a VPN or tunnel, which is exactly the extra
+/// dependency this project exists to avoid. Inverting it costs nothing: the Oracle already
+/// polls for incoming messages, so it polls for outgoing ones on the same tick.
+///
+/// PLAINTEXT WARNING: `body` contains a live login code. The hashed copy in otp_codes is the
+/// real record; this row exists only long enough to be delivered and is DELETED on
+/// confirmation, with a sweep for anything the phone never collected. Codes must not
+/// accumulate at rest.
+model SmsOutbox {
+  id         BigInt    @id @default(autoincrement())
+  to         String
+  body       String
+  status     String    @default("pending") // 'pending' | 'sending' | 'failed'
+  attempts   Int       @default(0)
+  last_error String?
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  claimed_at DateTime? @db.Timestamptz(6)
+
+  @@index([created_at], map: "idx_sms_outbox_pending")
+  @@map("sms_outbox")
 }
 
 enum order_status {

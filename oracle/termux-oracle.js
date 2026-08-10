@@ -6,6 +6,11 @@
 // recipient: EVC Plus, eDahab, Zelle, Cash App, Venmo — and forwards them to the backend.
 // Customer/driver/operator conversation never touches this phone; that is the in-app chat.
 //
+// IT ALSO SENDS. Customer login codes go out over THIS SIM — that is what makes SMS login
+// work in Somalia with no telecom integration. The phone POLLS for messages to send rather
+// than the server calling it, because a phone cannot accept inbound connections behind
+// carrier NAT. Same tick, same signed channel, no VPN, no port forwarding.
+//
 // IT DOES NOT PARSE. It forwards the raw message and lets the server decide what it means.
 // Telecoms and banks reword their receipts without warning, and fixing a parser must not
 // require physical access to a handset that may be in another country.
@@ -152,8 +157,37 @@ async function pollSms() {
   }
 }
 
+// ── Outbound: send login codes over this SIM ──
+//
+// A code is only useful for five minutes, so this runs on the same fast tick as the inbox
+// poll. Failures are reported back so the server can retry rather than silently dropping a
+// customer's ability to sign in.
+async function pollOutbound() {
+  const res = await post('/oracle/sms/pending', { limit: 5 });
+  if (!res || !Array.isArray(res.messages) || res.messages.length === 0) return;
+
+  for (const m of res.messages) {
+    try {
+      // termux-sms-send takes the recipient with -n and the text as the trailing argument.
+      await run('termux-sms-send', ['-n', m.to, m.body]);
+      await post('/oracle/sms/sent', { id: m.id, ok: true });
+      // Never log the body — it contains a live login code.
+      console.log(`✉ sent a code to ${m.to.replace(/\d(?=\d{3})/g, '•')}`);
+    } catch (e) {
+      await post('/oracle/sms/sent', { id: m.id, ok: false, error: e.message });
+      console.error(`✗ could not send to ${m.to.replace(/\d(?=\d{3})/g, '•')}: ${e.message}`);
+      // SEND permission is separate from READ. Say so once rather than per message.
+      if (/permission/i.test(e.message)) {
+        fault('sendperm', 'Termux:API needs the SMS *send* permission as well as read.');
+      }
+    }
+  }
+}
+
 setInterval(pollSms, POLL_MS);
+setInterval(pollOutbound, POLL_MS);
 setInterval(() => post('/heartbeat', { ts: Date.now(), device: 'termux' }), 60000);
 post('/heartbeat', { ts: Date.now(), device: 'termux', boot: true });
-console.log('Oracle listening. Forwarding messages from:', SENDERS.join(', '));
+console.log('Oracle listening (receiving receipts + sending login codes).');
+console.log('Forwarding messages from:', SENDERS.join(', '));
 console.log('Backend:', BACKEND);

@@ -166,8 +166,9 @@ VPS IP, and ports **80 + 443 open** (Caddy needs 80 for the ACME HTTP challenge)
 #      USSD_TEMPLATE / TELECOM_SENDER_IDS       # match the live telecom
 #      POSTGRES_PASSWORD, S3_SECRET_KEY         # strong, unique
 #      OTP_TRANSPORT=oracle                     # REQUIRED in prod — the backend refuses to
-#      ORACLE_SMS_URL=<Oracle device endpoint>  # boot with the dev "log" transport, which
+#                                               # boot with the dev "log" transport, which
 #                                               # would print customer login codes to the log.
+#                                               # No address needed: the Oracle phone polls.
 
 # 3. Launch.
 docker compose up -d --build

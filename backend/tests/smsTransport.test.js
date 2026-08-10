@@ -10,7 +10,6 @@ const config = {
   env: 'development',
   otp: {
     transport: 'auto',
-    oracleSmsUrl: '',
     sendTimeoutMs: 5000,
     twilio: { accountSid: '', authToken: '', from: '', messagingServiceSid: '' },
   },
@@ -19,12 +18,22 @@ const config = {
 
 jest.unstable_mockModule('../src/config.js', () => ({ config }));
 
+// The Oracle transport is only usable when a phone is actually polling — a config value
+// can't tell us that, so the sender asks the heartbeat monitor.
+let oracleState = 'not_configured';
+jest.unstable_mockModule('../src/realtime/oracleMonitor.js', () => ({
+  oracleStatus: () => ({ state: oracleState }),
+}));
+jest.unstable_mockModule('../src/notify/smsQueue.js', () => ({
+  queueSms: jest.fn(async () => 1n),
+}));
+
 const { transportFor, sendOtpSms } = await import('../src/notify/smsSender.js');
 
 beforeEach(() => {
+  oracleState = 'not_configured';
   config.env = 'development';
   config.otp.transport = 'auto';
-  config.otp.oracleSmsUrl = '';
   config.otp.twilio = { accountSid: '', authToken: '', from: '', messagingServiceSid: '' };
   global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({}) }));
 });
@@ -56,6 +65,31 @@ describe('explicit transport overrides routing', () => {
   test('a dev box can force the log transport for every number', () => {
     config.otp.transport = 'log';
     expect(transportFor('+252612345678')).toBe('log');
+  });
+});
+
+describe('the Oracle phone', () => {
+  test('with NO phone ever polling, a Somali number falls back to the log in dev', async () => {
+    // Otherwise every local login silently queues a message nobody will ever send, and
+    // sign-in just stops working with no error.
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const { transport } = await sendOtpSms('+252612345678', '123456');
+    expect(transport).toBe('log');
+    warn.mockRestore();
+  });
+
+  test('once a phone is polling, the code is QUEUED for it', async () => {
+    oracleState = 'healthy';
+    const { transport } = await sendOtpSms('+252612345678', '123456');
+    expect(transport).toBe('oracle');
+  });
+
+  test('a phone that WAS polling and went quiet still gets the message queued', async () => {
+    // A locked screen or a dropped tunnel is temporary; the message should wait for it
+    // rather than failing the login outright.
+    oracleState = 'down';
+    const { transport } = await sendOtpSms('+252612345678', '123456');
+    expect(transport).toBe('oracle');
   });
 });
 

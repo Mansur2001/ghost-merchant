@@ -19,6 +19,8 @@
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { parsePhone } from '../domain/phone.js';
+import { queueSms } from './smsQueue.js';
+import { oracleStatus } from '../realtime/oracleMonitor.js';
 
 export class SmsDeliveryError extends Error {}
 
@@ -26,27 +28,17 @@ function sign(body) {
   return crypto.createHmac('sha256', config.oracleWebhookSecret).update(body).digest('hex');
 }
 
+// Queue for the Oracle phone to collect. Deliberately NOT an HTTP call to the device: a
+// phone cannot accept inbound connections (carrier NAT on mobile data, router NAT on WiFi),
+// so calling it would require a VPN or tunnel. The phone polls instead — see notify/smsQueue.js.
+//
+// This is the path that makes SMS login work in Somalia with NO telecom integration: the code
+// goes out over the merchant's own SIM at normal subscriber rates.
 async function sendViaOracle(phone, text) {
-  if (!config.otp.oracleSmsUrl) {
-    throw new SmsDeliveryError('oracle transport selected but ORACLE_SMS_URL is not set');
-  }
-  const body = JSON.stringify({ to: phone, text, sentAt: new Date().toISOString() });
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), config.otp.sendTimeoutMs);
-  try {
-    const res = await fetch(config.otp.oracleSmsUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Oracle-Signature': sign(body) },
-      body,
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new SmsDeliveryError(`oracle SMS send failed: HTTP ${res.status}`);
-  } catch (err) {
-    if (err instanceof SmsDeliveryError) throw err;
-    throw new SmsDeliveryError(`oracle SMS send failed: ${err.message}`);
-  } finally {
-    clearTimeout(timer);
-  }
+  await queueSms({ to: phone, body: text });
+  // Queued, not delivered. The phone collects within one poll (a few seconds), well inside
+  // the 5-minute code TTL. If the phone is offline the message expires unsent and is swept,
+  // which is visible to the operator as a growing queue rather than a silent failure.
 }
 
 // Twilio's REST API over plain HTTPS + basic auth. No SDK on purpose: the SDK is ~10MB of
@@ -120,7 +112,16 @@ export function transportFor(phone) {
 
 // Is the transport actually usable, or is it selected but unconfigured?
 function isConfigured(transport) {
-  if (transport === 'oracle') return Boolean(config.otp.oracleSmsUrl);
+  // "Configured" for the Oracle means a PHONE IS ACTUALLY COLLECTING, not that a setting is
+  // present — queuing itself needs nothing but a database, so a config check would always
+  // pass and every login would silently queue a message nobody sends.
+  //
+  // Three states, and the middle one matters:
+  //   healthy        — a phone is polling. Queue it; it goes out in seconds.
+  //   down           — a phone WAS polling and went quiet. Still queue: it is probably a
+  //                    tunnel or a screen lock, and the message waits for it.
+  //   not_configured — no phone has ever polled. Queuing would be a black hole.
+  if (transport === 'oracle') return oracleStatus().state !== 'not_configured';
   if (transport === 'twilio') {
     const t = config.otp.twilio;
     return Boolean(t.accountSid && t.authToken && (t.from || t.messagingServiceSid));

@@ -589,33 +589,38 @@ $('joinSubmit').addEventListener('click', async () => {
       : res.error;
     return;
   }
-  // Upload the ID second, using the short-lived token scoped to this request. Doing it as a
-  // separate step keeps the request id off the wire and lets the form succeed even if the
-  // image fails — losing a good applicant because a photo upload timed out would be silly.
-  const idFile = $('joinId').files[0];
-  if (idFile && res.uploadToken) {
-    $('joinStatus').textContent = 'Sending your ID…';
-    try {
-      const up = await fetch(GMConfig.api('/signup/id-document'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': idFile.type || 'application/octet-stream',
-          Authorization: `Bearer ${res.uploadToken}`,
-        },
-        body: idFile,
-      });
-      const upBody = await up.json().catch(() => ({}));
-      if (!up.ok) {
-        $('joinStatus').textContent =
-          `${res.message}\n\nYour ID didn't upload (${upBody.error || 'try again'}) — ` +
-          'we may call you to arrange it.';
-        $('joinName').value = '';
-        $('joinMessage').value = '';
-        return;
+  // Upload the ID sides second, using the short-lived token scoped to this request. Doing it
+  // as a separate step keeps the request id off the wire, and lets the application succeed
+  // even if a photo fails — losing a good applicant because an upload timed out would be silly.
+  const sides = [
+    ['front', $('joinIdFront').files[0]],
+    ['back', $('joinIdBack').files[0]],
+  ].filter(([, f]) => f);
+
+  if (sides.length && res.uploadToken) {
+    const failed = [];
+    for (const [side, file] of sides) {
+      $('joinStatus').textContent = `Sending the ${side} of your ID…`;
+      try {
+        const up = await fetch(GMConfig.api(`/signup/id-document/${side}`), {
+          method: 'POST',
+          headers: {
+            'Content-Type': file.type || 'application/octet-stream',
+            Authorization: `Bearer ${res.uploadToken}`,
+          },
+          body: file,
+        });
+        if (!up.ok) {
+          const b = await up.json().catch(() => ({}));
+          failed.push(`${side} (${b.error || 'failed'})`);
+        }
+      } catch {
+        failed.push(`${side} (no connection)`);
       }
-    } catch {
+    }
+    if (failed.length) {
       $('joinStatus').textContent =
-        `${res.message}\n\nYour ID didn't upload — we may call you to arrange it.`;
+        `${res.message}\n\nCouldn't upload: ${failed.join(', ')} — we may call you to arrange it.`;
       return;
     }
   }
@@ -623,17 +628,23 @@ $('joinSubmit').addEventListener('click', async () => {
   $('joinStatus').textContent = res.message;
   $('joinName').value = '';
   $('joinMessage').value = '';
-  $('joinId').value = '';
+  $('joinIdFront').value = '';
+  $('joinIdBack').value = '';
   $('joinIdHint').textContent = '';
 });
 
-// Reassure before they commit: show the file is attached and how big it is.
-$('joinId').addEventListener('change', () => {
-  const f = $('joinId').files[0];
-  $('joinIdHint').textContent = f
-    ? `${f.name} · ${(f.size / 1024 / 1024).toFixed(1)}MB — deleted once your request is reviewed`
-    : '';
-});
+// Say which sides are attached, so nobody submits thinking both went in when one didn't.
+function updateIdHint() {
+  const front = $('joinIdFront').files[0];
+  const back = $('joinIdBack').files[0];
+  if (!front && !back) { $('joinIdHint').textContent = ''; return; }
+  const parts = [];
+  if (front) parts.push('front ✓'); else parts.push('front missing');
+  if (back) parts.push('back ✓'); else parts.push('back missing');
+  $('joinIdHint').textContent = `${parts.join(' · ')} — deleted once your request is reviewed`;
+}
+$('joinIdFront').addEventListener('change', updateIdHint);
+$('joinIdBack').addEventListener('change', updateIdHint);
 
 // ── Tiny toast ──
 let toastTimer;

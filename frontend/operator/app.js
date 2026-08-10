@@ -295,11 +295,12 @@ async function loadAccessRequests() {
           ${r.message ? `<div style="margin-top:6px;">${escapeHtml(r.message)}</div>` : ''}
           ${r.id_document_at
             ? `<div style="margin-top:8px;">
-                 <button class="secondary" data-idreq="${r.id}" style="max-width:170px;">
-                   View ID document</button>
+                 <button class="secondary" data-idreq="${r.id}" data-side="front" style="max-width:120px;">ID front</button>
+                 <button class="secondary" data-idreq="${r.id}" data-side="back" style="max-width:120px;">ID back</button>
                  <div class="muted" style="font-size:12px;margin-top:4px;">
-                   Deleted automatically once you approve or decline.</div>
-                 <div data-idimg="${r.id}"></div>
+                   Both sides deleted automatically once you approve or decline.</div>
+                 <div data-idimg="${r.id}-front"></div>
+                 <div data-idimg="${r.id}-back"></div>
                </div>`
             : '<div class="muted" style="margin-top:6px;font-size:13px;">No ID attached.</div>'}
           <div class="row" style="margin-top:8px;">
@@ -317,22 +318,23 @@ async function loadAccessRequests() {
   $('accessRequests').querySelectorAll('[data-idreq]').forEach((b) =>
     b.addEventListener('click', async () => {
       const id = b.dataset.idreq;
-      const holder = $('accessRequests').querySelector(`[data-idimg="${id}"]`);
+      const side = b.dataset.side;
+      const holder = $('accessRequests').querySelector(`[data-idimg="${id}-${side}"]`);
       if (holder.dataset.shown) { // toggle off
-        holder.innerHTML = ''; delete holder.dataset.shown; b.textContent = 'View ID document';
+        holder.innerHTML = ''; delete holder.dataset.shown; b.textContent = `ID ${side}`;
         return;
       }
       try {
-        const r = await fetch(GMConfig.api(`/operator/access-requests/${id}/id-document`), {
+        const r = await fetch(GMConfig.api(`/operator/access-requests/${id}/id-document/${side}`), {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (!r.ok) return toast('Could not load the ID document.');
+        if (!r.ok) return toast(`No ${side} image was uploaded.`);
         const url = URL.createObjectURL(await r.blob());
-        holder.innerHTML = `<img src="${url}" alt="ID document"
+        holder.innerHTML = `<img src="${url}" alt="ID ${side}"
           style="max-width:100%;margin-top:8px;border-radius:6px;" />`;
         holder.querySelector('img').addEventListener('load', () => URL.revokeObjectURL(url), { once: true });
         holder.dataset.shown = '1';
-        b.textContent = 'Hide ID document';
+        b.textContent = `Hide ${side}`;
       } catch { toast('Could not load the ID document.'); }
     })
   );

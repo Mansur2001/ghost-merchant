@@ -69,7 +69,10 @@ export async function submitAccessRequest({ role, name, phone, message }) {
 const ID_MIME = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic' };
 const MAX_ID_BYTES = 6 * 1024 * 1024;
 
-export async function attachIdDocument({ requestId, bytes, contentType }) {
+const ID_SIDES = new Set(['front', 'back']);
+
+export async function attachIdDocument({ requestId, side, bytes, contentType }) {
+  if (!ID_SIDES.has(side)) throw new AccessRequestError('side must be front or back');
   if (!bytes || !bytes.length) throw new AccessRequestError('no image received');
   if (bytes.length > MAX_ID_BYTES) throw new AccessRequestError('image is too large (max 6MB)');
   const ext = ID_MIME[String(contentType || '').toLowerCase()];
@@ -83,20 +86,25 @@ export async function attachIdDocument({ requestId, bytes, contentType }) {
     throw new AccessRequestError('this request has already been decided', 409);
   }
 
-  const key = `id-documents/${requestId}-${crypto.randomUUID()}.${ext}`;
+  const field = side === 'front' ? 'id_front_key' : 'id_back_key';
+  const key = `id-documents/${requestId}-${side}-${crypto.randomUUID()}.${ext}`;
   await putObject(key, bytes, contentType);
 
   // Replacing an earlier upload destroys the old object rather than orphaning it — copies of
   // someone's passport accumulating in a bucket is exactly the liability we are avoiding.
-  if (request.id_document_key) {
-    await deleteObject(request.id_document_key).catch(() => {});
-  }
+  if (request[field]) await deleteObject(request[field]).catch(() => {});
 
-  await prisma.accessRequest.update({
+  const updated = await prisma.accessRequest.update({
     where: { id: request.id },
-    data: { id_document_key: key, id_document_at: new Date() },
+    data: { [field]: key, id_document_at: new Date() },
   });
-  return { ok: true };
+  return {
+    ok: true,
+    // So the form can tell the applicant what is still missing rather than leaving them
+    // guessing whether the second photo registered.
+    haveFront: Boolean(updated.id_front_key),
+    haveBack: Boolean(updated.id_back_key),
+  };
 }
 
 // The reviewer's queue: open requests, oldest first.
@@ -133,17 +141,22 @@ export async function reviewAccessRequest({ requestId, status, note, reviewedBy 
       },
     });
 
-    // RETENTION: the ID existed to support THIS decision. Once it is made, destroy it.
-    // Holding someone's government ID indefinitely serves no purpose and turns a routine
-    // breach into identity theft. The row keeps `id_document_at` as proof it was checked.
-    if (['approved', 'declined'].includes(status) && existing?.id_document_key) {
-      await deleteObject(existing.id_document_key).catch((err) =>
-        console.error('failed to delete ID document:', err.message)
-      );
-      await prisma.accessRequest.update({
-        where: { id: updated.id },
-        data: { id_document_key: null },
-      });
+    // RETENTION: the ID existed to support THIS decision. Once it is made, destroy BOTH
+    // sides. Holding someone's government ID indefinitely serves no purpose and turns a
+    // routine breach into identity theft. The row keeps `id_document_at` as proof it was
+    // checked and `reviewed_by` as who checked it.
+    if (['approved', 'declined'].includes(status)) {
+      for (const key of [existing?.id_front_key, existing?.id_back_key].filter(Boolean)) {
+        await deleteObject(key).catch((err) =>
+          console.error('failed to delete ID document:', err.message)
+        );
+      }
+      if (existing?.id_front_key || existing?.id_back_key) {
+        await prisma.accessRequest.update({
+          where: { id: updated.id },
+          data: { id_front_key: null, id_back_key: null },
+        });
+      }
     }
 
     return updated;

@@ -92,15 +92,18 @@
         <label for="joinMessage">Anything we should know? (optional)</label>
         <textarea id="joinMessage" placeholder="Which area you cover, whether you have a motorbike, when you're free…"></textarea>
 
-        <label for="joinId">Photo of your ID</label>
+        <label>Photo of your ID — both sides</label>
         <p class="muted" style="margin:0 0 8px;font-size:13px;">
           Drivers carry other people's money and goods, so we check who you are before handing
-          over an account. Any government ID is fine. Your photo is shown only to the person
-          reviewing your request and is <strong>deleted as soon as they decide</strong> — we
-          don't keep it.
+          over an account. Any government ID is fine. Your photos are shown only to the person
+          reviewing your request and are <strong>deleted as soon as they decide</strong> — we
+          don't keep them.
         </p>
-        <input id="joinId" type="file" accept="image/*" capture="environment" />
-        <div class="muted" id="joinIdHint" style="font-size:13px;"></div>
+        <label for="joinIdFront" class="muted" style="font-size:13px;">Front</label>
+        <input id="joinIdFront" type="file" accept="image/*" capture="environment" />
+        <label for="joinIdBack" class="muted" style="font-size:13px;margin-top:8px;">Back</label>
+        <input id="joinIdBack" type="file" accept="image/*" capture="environment" />
+        <div class="muted" id="joinIdHint" style="font-size:13px;margin-top:6px;"></div>
 
         <button id="joinSubmit" type="button">Send my request</button>
         <div class="muted" id="joinStatus" style="margin-top:10px;"></div>

@@ -10,6 +10,7 @@ import { rawBodySaver, verifyOracleSignature } from '../middleware/hmac.js';
 import { recordAndMatchPayment } from '../commands/payments.js';
 import { recordHeartbeat } from '../realtime/oracleMonitor.js';
 import { parseReceipt } from '../domain/receipts.js';
+import { claimPendingSms, confirmSms } from '../notify/smsQueue.js';
 
 export const webhookRouter = Router();
 
@@ -67,4 +68,40 @@ webhookRouter.post('/webhook', rawJson, verifyOracleSignature, async (req, res) 
 webhookRouter.post('/heartbeat', rawJson, verifyOracleSignature, (req, res) => {
   recordHeartbeat(req.body || {});
   res.json({ ok: true });
+});
+
+// ── Outbound SMS, collected by the phone ──
+//
+// The phone POLLS for messages to send rather than the backend calling it, because a phone
+// cannot accept inbound connections behind carrier NAT. Both endpoints are HMAC-signed with
+// the same shared secret as the webhook.
+//
+// POST because the signature is computed over a request BODY — a signed GET would need a
+// different scheme for no benefit.
+
+// POST /api/oracle/sms/pending — "anything for me to send?"
+webhookRouter.post('/oracle/sms/pending', rawJson, verifyOracleSignature, async (req, res, next) => {
+  try {
+    const limit = Math.min(Number(req.body?.limit) || 5, 20);
+    const messages = await claimPendingSms(limit);
+    // The response carries live login codes, so it is never logged and never cached.
+    res.set('Cache-Control', 'no-store');
+    res.json({ messages });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/oracle/sms/sent — "I sent it" (or "I couldn't").
+// A confirmed message is DELETED, not marked sent: there is no reason to keep a plaintext
+// login code once it has been delivered.
+webhookRouter.post('/oracle/sms/sent', rawJson, verifyOracleSignature, async (req, res, next) => {
+  try {
+    const { id, ok, error } = req.body || {};
+    if (!id) return res.status(400).json({ error: 'id required' });
+    const result = await confirmSms({ id, ok: ok !== false, error });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    next(err);
+  }
 });

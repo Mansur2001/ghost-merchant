@@ -1,6 +1,6 @@
 # GuriKaabe — Privacy Policy
 
-**Last updated: 7 August 2026**
+**Last updated: 10 August 2026**
 
 > **You must publish this at a public URL before submitting to Google Play** — the Play
 > Console requires a link, and the Data Safety form's answers must match what this says.
@@ -26,14 +26,15 @@ we do not share it with advertisers, and we never see or hold your money.
 | **Order contents and chat messages** | To fulfil the order and resolve disputes. | With the order |
 | **Photos you attach** | A reference photo helps the driver find the right item; a delivery-proof photo protects both you and the driver in a dispute. | With the order |
 | **Payment receipt details** (transaction reference, sender number or name, amount) | To match your transfer to your order. | With the order |
-| **Photo of an ID** — *only if you apply to be a driver or operator* | Drivers carry other people's money and goods, so we confirm who they are before issuing an account. | **Deleted the moment the application is decided.** Never collected from customers. |
+| **Photos of an ID, front and back** — *only if you apply to be a driver or operator* | Drivers carry other people's money and goods, so we confirm who they are before issuing an account. | **Both images are deleted the moment the application is decided.** Never collected from customers. |
 
 We do **not** collect: your contacts, your location in the background or when the app is
 closed, your browsing or app activity, advertising identifiers, or any biometric data.
 
 **Customers are never asked for an ID.** That only applies to people applying to work as a
-driver or operator, and their document is destroyed as soon as the application is approved or
-declined — we keep only the fact that it was checked, and who checked it.
+driver or operator, and both images are destroyed as soon as the application is approved or
+declined — we keep only the fact that it was checked, and who checked it. We do not keep a
+copy after the decision, so a future breach cannot expose the ID of someone who applied.
 
 ## Money
 
