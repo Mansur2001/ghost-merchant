@@ -24,6 +24,8 @@ function setStatus(orderId, status) {
 // Live Somali-number hint on the login field.
 if (window.SomPhone) SomPhone.attach({ input: $('msisdn'), hint: $('phoneHint') });
 
+// A rejected fetch means the request never got an answer (offline, DNS, timeout) — that is
+// categorically different from the server saying no, and the queue treats it differently.
 const api = (path, opts = {}) =>
   fetch(GMConfig.api(path), {
     ...opts,
@@ -32,7 +34,9 @@ const api = (path, opts = {}) =>
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(opts.headers || {}),
     },
-  }).then((r) => r.json());
+  })
+    .then((r) => r.json())
+    .catch(() => ({ error: 'No connection.', offline: true }));
 
 // ── Login ──
 $('loginBtn').addEventListener('click', async () => {
@@ -48,6 +52,50 @@ $('loginBtn').addEventListener('click', async () => {
 $('refreshBtn').addEventListener('click', loadQueue);
 $('backBtn').addEventListener('click', showQueue);
 
+// ── Offline queue plumbing ──
+// Replays queued writes through the same authenticated transport the app uses live. For a
+// state transition we also report the order's CURRENT status, so the policy can recognise a
+// replay that already landed instead of calling it a conflict.
+async function sendQueued(item) {
+  const res = await fetch(GMConfig.api(item.path), {
+    method: item.method,
+    headers: {
+      'Content-Type': item.contentType,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: item.body,
+  });
+  let currentStatus = null;
+  if (res.status === 409 && item.orderId) {
+    try {
+      const look = await fetch(GMConfig.api(`/driver/orders/${item.orderId}`), {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then((r) => r.json());
+      currentStatus = look?.order?.status || null;
+    } catch { /* leave null: the policy then treats 409 as a real conflict */ }
+  }
+  return { status: res.status, currentStatus };
+}
+
+function flushQueue() {
+  if (!token || !navigator.onLine) return;
+  GMQueue.flush(sendQueued).then(({ sent }) => {
+    if (sent > 0) { loadQueue(); if (current) openDetail(current.id); }
+  });
+}
+
+function renderSyncState(stats) {
+  const el = $('syncState');
+  if (!el) return;
+  const d = GMSync.describe(stats);
+  el.textContent = d.tone === 'ok' ? '' : d.text;
+  el.className = 'sync-state ' + d.tone;
+  el.classList.toggle('hidden', d.tone === 'ok');
+}
+
+window.addEventListener('online', flushQueue);
+setInterval(flushQueue, 15000);
+
 function showQueue() {
   $('loginView').classList.add('hidden');
   $('detailView').classList.add('hidden');
@@ -60,10 +108,15 @@ function showQueue() {
   $('logoutBtn').classList.remove('hidden');
   loadQueue();
   connectSocket();
+  GMQueue.onChange(renderSyncState);
+  flushQueue();
 }
 
 // Logout: drop the session token and return to the PIN login screen.
 $('logoutBtn').addEventListener('click', () => {
+  // The queue holds THIS driver's writes; leaving them for the next person to sign in would
+  // replay someone else's actions under a new identity.
+  GMQueue.clear();
   sessionStorage.removeItem('driverToken');
   token = null;
   if (ws) { ws.onclose = null; ws.close(); ws = null; }
@@ -178,15 +231,60 @@ function renderActions() {
   );
 }
 
+// The state a given action moves the order to. Needed so the sync policy can tell "this
+// already landed, the response was just lost" from a real conflict.
+const ACTION_TARGET = {
+  secured: 'IN_TRANSIT',
+  delivered: 'DELIVERED',
+  failed: 'FAILED_REFUND',
+};
+
 async function doAction(action) {
   const body = action === 'failed' ? JSON.stringify({ reason: 'driver reported failure' }) : undefined;
-  const res = await api(`/driver/orders/${current.id}/${action}`, { method: 'POST', body });
-  if (res.error) return toast(res.error);
+  const path = `/driver/orders/${current.id}/${action}`;
+  const target = ACTION_TARGET[action];
+
+  // Offline: queue it and move the UI anyway. A driver standing in a dead zone has finished
+  // the delivery — the app must not make them wait for a bar of signal to say so.
+  if (!navigator.onLine) {
+    await GMQueue.enqueue({
+      method: 'POST', path, body: body || null,
+      label: action === 'delivered' ? 'Mark delivered'
+        : action === 'secured' ? 'Items secured' : 'Report failure',
+      orderId: current.id, transitionTo: target,
+    });
+    applyOptimistic(target);
+    return toast('Saved — will send when you have signal.');
+  }
+
+  const res = await api(path, { method: 'POST', body });
+  if (res.error) {
+    // The request left the phone but got no answer: queue rather than lose the action.
+    if (res.offline) {
+      await GMQueue.enqueue({
+        method: 'POST', path, body: body || null,
+        label: action, orderId: current.id, transitionTo: target,
+      });
+      applyOptimistic(target);
+      return toast('Saved — will send when you have signal.');
+    }
+    return toast(res.error);
+  }
   current = res.order;
   $('dStatus').textContent = current.status;
   setStatus(current.id, current.status);
   renderActions();
   toast('Updated ✓');
+}
+
+// Move the local view forward before the server has confirmed. The server is still the
+// authority — if it later rejects, the queue surfaces "couldn't sync" rather than pretending.
+function applyOptimistic(status) {
+  if (!current || !status) return;
+  current.status = status;
+  $('dStatus').textContent = `${status} (waiting to send)`;
+  setStatus(current.id, status);
+  renderActions();
 }
 
 $('adjustBtn').addEventListener('click', async () => {

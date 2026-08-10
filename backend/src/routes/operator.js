@@ -272,9 +272,9 @@ operatorRouter.post('/operator/orders/:id/refund', operatorOnly, async (req, res
 
 // POST /api/operator/orders/:id/message — operator joins the chat thread.
 operatorRouter.post('/operator/orders/:id/message', operatorOnly, async (req, res) => {
-  const { body } = req.body || {};
+  const { body, clientId } = req.body || {};
   if (!body) return res.status(400).json({ error: 'body required' });
-  const message = await postMessage({ orderId: req.params.id, sender: 'operator', body });
+  const message = await postMessage({ orderId: req.params.id, sender: 'operator', body, clientId });
   res.json({ message });
 });
 

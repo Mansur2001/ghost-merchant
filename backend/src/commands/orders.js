@@ -123,16 +123,35 @@ export async function assignDriver(orderId, driverId, { client } = {}) {
 
 // Post a chat/timeline message. Accepts an existing transaction client so it can be part of
 // a larger atomic change (see transitionOrder).
-export async function postMessage({ orderId, sender, body }, { client } = {}) {
-  const message = await inTransaction(client, async (tx) => {
+//
+// `clientId` is an optional client-minted UUID that makes the write idempotent. The offline
+// queue replays messages when the network returns, and without it a message whose response
+// was lost is re-sent and appears twice — the customer sees themselves stutter, and the
+// transcript is wrong in exactly the situation (a dispute) where it matters most.
+export async function postMessage({ orderId, sender, body, clientId }, { client } = {}) {
+  if (clientId != null && !isUuid(clientId)) throw new Error('clientId must be a UUID');
+
+  const result = await inTransaction(client, async (tx) => {
     const { rows } = await tx.query(
-      `INSERT INTO messages(order_id, sender, body) VALUES ($1, $2, $3) RETURNING *`,
-      [orderId, sender, body]
+      `INSERT INTO messages(order_id, sender, body, client_id) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (client_id) WHERE client_id IS NOT NULL DO NOTHING
+       RETURNING *`,
+      [orderId, sender, body, clientId ?? null]
     );
+
+    // Conflict: this exact message already landed, so this is a replay. Return the original
+    // and emit nothing — re-broadcasting would push a duplicate into every open thread.
+    if (rows.length === 0) {
+      const { rows: existing } = await tx.query('SELECT * FROM messages WHERE client_id = $1', [
+        clientId,
+      ]);
+      return { message: existing[0], created: false };
+    }
+
     await enqueue(tx, EVENTS.MESSAGE_POSTED, { orderId, message: rows[0] });
-    return rows[0];
+    return { message: rows[0], created: true };
   });
 
-  if (!client) wakeOutbox();
-  return message;
+  if (!client && result.created) wakeOutbox();
+  return result.message;
 }

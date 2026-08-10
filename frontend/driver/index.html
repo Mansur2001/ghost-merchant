@@ -20,6 +20,9 @@
     <div class="statusbar hidden" id="statusbar">
       <span class="sb-dot"></span>
       <span class="sb-text" id="sbText"></span>
+      <!-- Offline queue state. Hidden while everything is saved: a permanent green badge
+           trains people to ignore it, and this only matters when it is not green. -->
+      <span class="sync-state hidden" id="syncState"></span>
       <span class="sb-time" id="sbTime"></span>
     </div>
     <main>
@@ -77,6 +80,8 @@
   </div>
   <script src="/shared/config.js"></script>
   <script src="/shared/ids.js"></script>
+  <script src="/shared/syncPolicy.js"></script>
+  <script src="/shared/queue.js"></script>
   <script src="/shared/phone.js"></script>
   <script src="/driver/app.js"></script>
 </body>

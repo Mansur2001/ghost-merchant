@@ -20,6 +20,9 @@ function setSession(newToken, phone) {
   localStorage.setItem(PHONE_KEY, phone);
 }
 function clearSession() {
+  // The queue holds this customer's unsent writes; carrying them into another session would
+  // replay one person's messages under another identity.
+  if (window.GMQueue) GMQueue.clear();
   token = null;
   myPhone = null;
   localStorage.removeItem(TOKEN_KEY);
@@ -33,7 +36,14 @@ function clearSession() {
 async function api(path, opts = {}) {
   const headers = { ...(opts.headers || {}) };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(GMConfig.api(path), { ...opts, headers });
+  let res;
+  try {
+    res = await fetch(GMConfig.api(path), { ...opts, headers });
+  } catch {
+    // No answer at all — offline, DNS, timeout. Categorically different from the server
+    // saying no, and the offline queue treats it differently.
+    return { error: 'No connection.', offline: true };
+  }
   if (res.status === 401 && token) {
     clearSession();
     showView('authView');
@@ -314,6 +324,42 @@ async function loadPhotos(orderId) {
   } catch { /* ignore */ }
 }
 
+// ── Offline queue ──
+// Replays queued writes when the network returns. Customer-side writes are chat messages and
+// order creation, both carrying a client-minted UUID, so a replay of something that already
+// landed is a no-op on the server rather than a duplicate.
+async function sendQueued(item) {
+  const res = await fetch(GMConfig.api(item.path), {
+    method: item.method,
+    headers: {
+      'Content-Type': item.contentType,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: item.body,
+  });
+  return { status: res.status };
+}
+
+function flushQueue() {
+  if (!token || !navigator.onLine) return;
+  GMQueue.flush(sendQueued).then(({ sent }) => {
+    if (sent > 0 && order) loadThread();
+  });
+}
+
+function renderSyncState(stats) {
+  const el = $('syncState');
+  if (!el) return;
+  const d = GMSync.describe(stats);
+  el.textContent = d.tone === 'ok' ? '' : d.text;
+  el.className = 'sync-state ' + d.tone;
+  el.classList.toggle('hidden', d.tone === 'ok');
+}
+
+window.addEventListener('online', flushQueue);
+setInterval(flushQueue, 15000);
+GMQueue.onChange(renderSyncState);
+
 // ── Realtime socket: authenticate, then subscribe to THIS order ──
 // A browser can't set headers on a WebSocket handshake and a token in the query string ends
 // up in every access log, so the token goes in the first frame instead. The server drops
@@ -332,6 +378,7 @@ function connectSocket() {
     const m = JSON.parse(ev.data);
     if (m.type === 'authenticated') {
       if (order) ws.send(JSON.stringify({ type: 'subscribe', orderId: order.id }));
+      flushQueue(); // a live socket is the most reliable signal the network is actually back
     } else if (m.type === 'auth_error') {
       clearSession();
       showView('authView');
@@ -377,8 +424,19 @@ async function loadThread() {
   (messages || []).forEach(appendMessage);
 }
 function appendMessage(m) {
+  // A message we optimistically rendered comes back over the socket once it lands. Replace
+  // the placeholder rather than showing the customer their own message twice.
+  if (m.client_id) {
+    const existing = $('thread').querySelector(`[data-client-id="${m.client_id}"]`);
+    if (existing) {
+      existing.classList.remove('queued');
+      existing.textContent = m.body;
+      return;
+    }
+  }
   const div = document.createElement('div');
-  div.className = `msg ${m.sender}`;
+  div.className = `msg ${m.sender}${m.queued ? ' queued' : ''}`;
+  if (m.clientId || m.client_id) div.dataset.clientId = m.clientId || m.client_id;
   div.textContent = m.body;
   $('thread').appendChild(div);
   $('thread').scrollTop = $('thread').scrollHeight;
@@ -389,12 +447,29 @@ async function sendChat() {
   const body = $('chatInput').value.trim();
   if (!body || !order) return;
   $('chatInput').value = '';
+
+  // A client-minted id makes the write idempotent: if the response is lost and the queue
+  // replays it, the server keeps the original instead of duplicating the message.
+  const clientId = GMIds.newId();
+  const payload = JSON.stringify({ body, clientId });
+  const path = `/orders/${order.id}/messages`;
+
+  // Show it immediately, greyed, so the thread never feels like it swallowed the message.
+  appendMessage({ sender: 'user', body, queued: true, clientId });
+
+  if (!navigator.onLine) {
+    await GMQueue.enqueue({ method: 'POST', path, body: payload, label: 'Send message', orderId: order.id });
+    return;
+  }
   // `sender` is derived server-side from the session — a client can't label its own message.
-  await api(`/orders/${order.id}/messages`, {
+  const res = await api(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ body }),
+    body: payload,
   });
+  if (res.offline) {
+    await GMQueue.enqueue({ method: 'POST', path, body: payload, label: 'Send message', orderId: order.id });
+  }
 }
 
 // ── Header navigation: Home (landing) + FAQ ──

@@ -17,7 +17,9 @@ export async function getOrderTimeline(orderId) {
 
 export async function getMessages(orderId) {
   const { rows } = await query(
-    `SELECT id, sender, body, created_at FROM messages
+    // client_id goes to the browser so it can reconcile a message it rendered optimistically
+    // while offline with the real row, instead of showing the customer their own text twice.
+    `SELECT id, sender, body, client_id, created_at FROM messages
       WHERE order_id = $1 ORDER BY created_at ASC`,
     [orderId]
   );

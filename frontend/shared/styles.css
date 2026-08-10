@@ -155,3 +155,21 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 details { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-top: 10px; }
 details summary { cursor: pointer; font-weight: 600; }
 details p { margin: 8px 0 2px; }
+
+
+/* ── Offline write queue indicator ──
+   Shown only when there is something to say. `error` means a queued change was refused by
+   the server and needs the driver's attention — never let that state be silent. */
+.sync-state {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  margin-left: 8px;
+}
+.sync-state.pending { background: rgba(212, 175, 55, .18); color: var(--accent); }
+.sync-state.error   { background: rgba(220, 80, 70, .18);  color: var(--danger); }
+.sync-state.ok      { display: none; }
+
+/* A queued row in the customer's thread, not yet acknowledged by the server. */
+.msg.queued { opacity: .6; font-style: italic; }

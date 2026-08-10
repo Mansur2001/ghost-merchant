@@ -150,11 +150,12 @@ ordersRouter.get(
 // role — a client can no longer label its own message 'system' or 'operator'.
 ordersRouter.post('/orders/:id/messages', requireAuth, requireOrderAccess, async (req, res) => {
   try {
-    const { body } = req.body || {};
+    const { body, clientId } = req.body || {};
     if (!body) return res.status(400).json({ error: 'body required' });
     const sender = senderForRole(req.auth.role);
     if (!sender) return res.status(403).json({ error: 'forbidden' });
-    const message = await postMessage({ orderId: req.params.id, sender, body });
+    // clientId makes a replayed (offline-queued) message land exactly once.
+    const message = await postMessage({ orderId: req.params.id, sender, body, clientId });
     res.status(201).json({ message });
   } catch (err) {
     res.status(400).json({ error: err.message });

@@ -48,13 +48,30 @@ for suite in scripts/verify/0*.sh; do
   bash "$suite" || total_fail=$((total_fail + 1))
 done
 
-# The socket suite is Node (needs `ws` from backend/node_modules).
-reset_stack
-echo
-echo "═══ 05-websocket.mjs ═══"
-cp scripts/verify/05-websocket.mjs backend/.verify-ws.mjs
-(cd backend && NODE_TLS_REJECT_UNAUTHORIZED=0 node .verify-ws.mjs) || total_fail=$((total_fail + 1))
-rm -f backend/.verify-ws.mjs
+# Node suites run from backend/ so `ws` resolves from backend/node_modules.
+run_node_suite() {
+  local suite="$1"
+  reset_stack
+  echo
+  echo "═══ $(basename "$suite") ═══"
+  cp "$suite" backend/.verify-tmp.mjs
+  (cd backend && NODE_TLS_REJECT_UNAUTHORIZED=0 node .verify-tmp.mjs) || total_fail=$((total_fail + 1))
+  rm -f backend/.verify-tmp.mjs
+}
+
+run_node_suite scripts/verify/05-websocket.mjs
+
+# The multi-instance suite only means anything with the stack scaled up, and scaling is a
+# deliberate act — skip it rather than reporting a failure that is really "not configured".
+instances=$(docker compose ps backend --format '{{.Name}}' | wc -l | tr -d ' ')
+if [ "$instances" -ge 2 ]; then
+  run_node_suite scripts/verify/06-multi-instance.mjs
+else
+  echo
+  echo "═══ 06-multi-instance.mjs ═══"
+  echo "  SKIP  only $instances backend instance running."
+  echo "        Run: docker compose up -d --scale backend=2  (then re-run this script)"
+fi
 
 echo
 if [ "$total_fail" -eq 0 ]; then
