@@ -71,36 +71,84 @@ const SENDERS = (process.env.TELECOM_SENDER_IDS ||
   'EVCPlus,EVC,Hormuud,eDahab,Somtel,Zelle,CashApp,Venmo,Chase,BofA'
 ).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
 
+// Repeated identical failures are logged ONCE with a diagnosis, not every four seconds.
+// A poll loop that prints the same stack trace forever buries the one line that tells you
+// what is actually wrong.
+let lastFault = null;
+function fault(kind, detail) {
+  if (lastFault === kind) return;
+  lastFault = kind;
+  console.error(`\n✗ ${detail}\n  (this message won't repeat until something changes)\n`);
+}
+
 async function pollSms() {
+  let stdout = '';
   try {
-    const { stdout } = await run('termux-sms-list', ['-l', '25', '-t', 'inbox']);
-    const messages = JSON.parse(stdout);
-
-    for (const m of messages) {
-      const from = String(m.number || m.sender || '');
-      if (!SENDERS.some((s) => from.toLowerCase().includes(s))) continue;
-
-      // Dedupe locally so a poll every few seconds doesn't re-send the same message. The
-      // backend also dedupes on a UNIQUE receipt id, so this is politeness, not correctness.
-      const key = `${m.received}-${m.body}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-
-      // Forward RAW. No parsing here — see the header.
-      const res = await post('/webhook', {
-        senderId: from,
-        body: m.body,
-        receivedAt: m.received,
-      });
-
-      if (!res) console.log('→ FAILED to reach backend');
-      else if (res.recognised === false) console.log(`· ignored (not a receipt) from ${from}`);
-      else if (res.duplicate) console.log(`· already seen (${res.provider})`);
-      else if (res.matched) console.log(`✓ payment matched (${res.provider})`);
-      else console.log(`! payment recorded but NOT matched (${res.provider}) — operator must reconcile`);
-    }
+    ({ stdout } = await run('termux-sms-list', ['-l', '25', '-t', 'inbox']));
   } catch (e) {
-    console.error('poll error', e.message);
+    return fault(
+      'exec',
+      `Could not run termux-sms-list: ${e.message}\n` +
+        '  Install the bridge:  pkg install termux-api\n' +
+        '  AND the separate Termux:API *app* from F-Droid — the pkg alone is not enough.'
+    );
+  }
+
+  const text = String(stdout).trim();
+
+  // The usual failure: the command exists and exits 0, but prints nothing because the
+  // Termux:API app is missing or the SMS permission was never granted. That looks like
+  // success to the shell and like a JSON parse error here.
+  if (!text) {
+    return fault(
+      'empty',
+      'termux-sms-list returned NOTHING.\n' +
+        '  * Is the Termux:API *app* installed (separate from the termux-api package)?\n' +
+        '  * Settings > Apps > Termux:API > Permissions > SMS > Allow\n' +
+        '  * Both Termux and Termux:API must come from the SAME source (F-Droid).'
+    );
+  }
+
+  let messages;
+  try {
+    messages = JSON.parse(text);
+  } catch {
+    // Show what actually came back — usually a permission prompt or an error line, and
+    // seeing it is the whole diagnosis.
+    return fault('json', `termux-sms-list did not return JSON. It said:\n  ${text.slice(0, 200)}`);
+  }
+  if (!Array.isArray(messages)) {
+    return fault('shape', `Expected a list of messages, got: ${text.slice(0, 200)}`);
+  }
+
+  // Recovered.
+  if (lastFault) {
+    console.log('✓ SMS access is working again.');
+    lastFault = null;
+  }
+
+  for (const m of messages) {
+    const from = String(m.number || m.sender || '');
+    if (!SENDERS.some((s) => from.toLowerCase().includes(s))) continue;
+
+    // Dedupe locally so polling every few seconds doesn't re-send the same message. The
+    // backend also dedupes on a UNIQUE receipt id, so this is politeness, not correctness.
+    const key = `${m.received}-${m.body}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    // Forward RAW. No parsing here — see the header.
+    const res = await post('/webhook', {
+      senderId: from,
+      body: m.body,
+      receivedAt: m.received,
+    });
+
+    if (!res) console.log('→ FAILED to reach backend');
+    else if (res.recognised === false) console.log(`· ignored (not a receipt) from ${from}`);
+    else if (res.duplicate) console.log(`· already seen (${res.provider})`);
+    else if (res.matched) console.log(`✓ payment matched (${res.provider})`);
+    else console.log(`! payment recorded but NOT matched (${res.provider}) — operator must reconcile`);
   }
 }
 

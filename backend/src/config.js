@@ -102,6 +102,21 @@ export const config = {
     },
   },
 
+  // Payment sensing over email — the Oracle's job without the phone. Every US rail emails
+  // the same notification it texts, and the server can read a mailbox directly: no handset,
+  // no APK, no Android permissions. Unset = disabled.
+  emailSensor: {
+    host: process.env.IMAP_HOST || '',
+    port: parseInt(process.env.IMAP_PORT || '993', 10),
+    secure: (process.env.IMAP_SECURE || 'true') === 'true',
+    user: process.env.IMAP_USER || '',
+    password: process.env.IMAP_PASSWORD || '',
+    mailbox: process.env.IMAP_MAILBOX || 'INBOX',
+    pollSeconds: parseInt(process.env.IMAP_POLL_SECONDS || '30', 10),
+    // A first run must not replay a year of old notifications into the reconcile queue.
+    lookbackHours: parseInt(process.env.IMAP_LOOKBACK_HOURS || '24', 10),
+  },
+
   // Shown on the access-request page so someone who can't or won't use the form has a person
   // to contact. Public by design — it is the owner's business contact.
   owner: {

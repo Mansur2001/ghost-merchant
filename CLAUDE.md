@@ -116,6 +116,16 @@ touches it; that is the in-app chat over WebSocket.
 - **A receipt is evidence, not proof**: sender IDs are spoofable. What holds is the narrow
   match (number + exact amount + an order actually waiting), the reconcile queue for anything
   ambiguous, and `telecom_receipt_id UNIQUE` so a replay can never credit twice.
+- **Email sensing is the same job without the phone** (`notify/emailSensor.js`). Every US rail
+  emails the notification it also texts, so the server reads a mailbox over IMAP and feeds the
+  SAME parsers. No Android device, no APK, no permissions granted by hand — which is three
+  manual steps that each fail silently. Somali rails still need the phone; they text, they
+  don't email. Both can run at once: the same payment over both transports produces the same
+  receipt id, so it cannot credit twice. Setup: `docs/EMAIL_SENSOR_SETUP.md`.
+- **A payment REQUEST is not a payment.** "X requests $25 from you" has the same sender, brand
+  and amount as a real receipt; booking it would let someone mark an order paid by asking for
+  money rather than sending it. `NOT_A_PAYMENT` gates that, along with declines, refunds and
+  marketing.
 - **Running with no Oracle is supported.** At low volume an operator reads the merchant phone
   and taps "Mark as paid". The dead-man's switch arms itself only once an Oracle has actually
   reported, so a deployment without one shows "Payments: manual" rather than a permanent red

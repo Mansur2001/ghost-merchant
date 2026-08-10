@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 # One-command Oracle install for Termux.
 #
 #   curl -fsSL http://<laptop-lan-ip>:8000/install.sh | bash

@@ -21,6 +21,7 @@ import { requestLog } from './middleware/requestLog.js';
 import { apiNotFound, errorHandler } from './middleware/errorHandler.js';
 import { disconnect as disconnectDb } from './db/prisma.js';
 import { startBusSubscriber } from './events/bus.js';
+import { startEmailSensor, stopEmailSensor } from './notify/emailSensor.js';
 import { warnIfSingleInstance, closeRedis } from './redis/client.js';
 
 const app = express();
@@ -71,6 +72,9 @@ startOracleMonitor();
 // Cross-instance event delivery. Without Redis this is a no-op and the bus stays in-process.
 warnIfSingleInstance();
 startBusSubscriber();
+
+// Payment sensing over email. No-op unless IMAP credentials are set.
+startEmailSensor();
 
 // The relay turns committed outbox rows into bus events. Started before listen() so any
 // events left undelivered by a previous crash go out before we take new traffic.
@@ -140,6 +144,7 @@ async function shutdown(signal) {
   const timeout = new Promise((resolve) => setTimeout(resolve, 10_000).unref?.());
   await Promise.race([closed, timeout]);
 
+  await stopEmailSensor().catch(() => {});
   await closeRedis();
   await disconnectDb().catch(() => {});
   console.log('shutdown complete');

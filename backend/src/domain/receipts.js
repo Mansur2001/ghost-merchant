@@ -30,6 +30,12 @@ function readAmount(body) {
   return decimal ? decimal[1].replace(/,/g, '') : null;
 }
 
+// Language that means money did NOT arrive. Checked before anything else, because these
+// messages otherwise look exactly like receipts: same sender, same brand name, same dollar
+// amount. A payment REQUEST booked as a payment received would let someone mark an order paid
+// by asking for money rather than sending it.
+const NOT_A_PAYMENT = /\b(request(s|ed|ing)?|reminder|invoice|declined|cancell?ed|refunded to|failed|expired|pending your approval)\b/i;
+
 // Each provider: how to recognise its messages, and how to read one.
 //
 // `senderIds` are matched case-insensitively against the SMS sender field. `test` is a second
@@ -40,6 +46,8 @@ const PROVIDERS = [
     label: 'EVC Plus',
     country: 'SO',
     senderIds: ['evcplus', 'evc', 'hormuud'],
+    // Same rail, arriving by email instead of SMS.
+    emailFrom: [],
     test: /you have received/i,
     // "You have received $5.50 from 61XXXXXXX. Ref: ABC123XYZ"
     parse: (body) => ({
@@ -53,6 +61,7 @@ const PROVIDERS = [
     label: 'eDahab',
     country: 'SO',
     senderIds: ['edahab', 'somtel'],
+    emailFrom: [],
     test: /received|waxaad heshay/i,
     parse: (body) => ({
       amount: readAmount(body),
@@ -65,7 +74,8 @@ const PROVIDERS = [
     label: 'Zelle',
     country: 'US',
     senderIds: ['zelle', '09876', 'chase', 'bofa', 'wellsfargo'],
-    test: /zelle|sent you|you received/i,
+    emailFrom: ['zellepay.com', 'chase.com', 'bankofamerica.com', 'wellsfargo.com'],
+    test: /(sent you|you received)/i,
     // "John Smith sent you $25.00 with Zelle. Ref 1234ABCD"
     // Zelle identifies people by NAME, not number — see senderName below.
     parse: (body) => ({
@@ -79,7 +89,8 @@ const PROVIDERS = [
     label: 'Cash App',
     country: 'US',
     senderIds: ['cashapp', 'cash app', 'square'],
-    test: /cash app|sent you/i,
+    emailFrom: ['cash.app', 'square.com', 'squareup.com'],
+    test: /sent you/i,
     // "$John sent you $25.00 on Cash App. #ABC123"
     parse: (body) => ({
       amount: readAmount(body),
@@ -92,7 +103,8 @@ const PROVIDERS = [
     label: 'Venmo',
     country: 'US',
     senderIds: ['venmo', '86753'],
-    test: /venmo|paid you/i,
+    emailFrom: ['venmo.com'],
+    test: /paid you/i,
     // "John Smith paid you $25.00 - Venmo. ID: 1234567890"
     parse: (body) => ({
       amount: readAmount(body),
@@ -104,13 +116,23 @@ const PROVIDERS = [
 
 export const PROVIDER_IDS = PROVIDERS.map((p) => p.id);
 
-// Which provider, if any, sent this. `senderId` is the SMS "from" field.
+// Which provider, if any, sent this. `senderId` is the SMS "from" field, or an email address.
+//
+// The transport doesn't change what the message MEANS: a Zelle payment notification says the
+// same thing whether it arrived as an SMS on the merchant phone or as an email to the
+// merchant's inbox. So the same providers recognise both, and everything downstream —
+// matching, the reconcile queue, the unique receipt id — is shared.
 export function identifyProvider(senderId, body = '') {
   const from = String(senderId || '').toLowerCase();
   const text = String(body || '');
+  // "requests $25.00 from you" is not money arriving.
+  if (NOT_A_PAYMENT.test(text)) return null;
   return (
     PROVIDERS.find(
-      (p) => p.senderIds.some((s) => from.includes(s)) && p.test.test(text)
+      (p) =>
+        (p.senderIds.some((s) => from.includes(s)) ||
+          (p.emailFrom || []).some((d) => from.includes(d))) &&
+        p.test.test(text)
     ) || null
   );
 }

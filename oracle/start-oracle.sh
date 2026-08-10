@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 # Start the Oracle on the Termux phone.
 #
 # Why this exists: `export FOO=bar` only lasts for the current Termux session. Close the app,
@@ -6,8 +6,11 @@
 # "ORACLE_WEBHOOK_SECRET required" — which reads like the script is broken when really the
 # variables just went away. Keep the settings here instead and run this.
 #
-#   chmod +x start-oracle.sh
-#   ./start-oracle.sh
+#   bash start-oracle.sh
+#
+# Use `bash start-oracle.sh` rather than `./start-oracle.sh` if you hit
+# "No such file or directory" — that message is about the INTERPRETER on line 1, not this
+# file, and running it through bash explicitly skips the shebang entirely.
 
 # ── EDIT THESE THREE ──────────────────────────────────────────────────────────
 
@@ -52,11 +55,25 @@ fi
 echo "Backend OK."
 
 echo "Checking SMS access (grant the permission prompt if it appears) ..."
-if ! termux-sms-list -l 1 >/dev/null 2>&1; then
-  echo "Can't read SMS. Grant Termux:API the SMS permission:"
-  echo "  Android Settings > Apps > Termux:API > Permissions > SMS > Allow"
-  exit 1
-fi
-echo "SMS OK."
+# Exit code alone is not enough: with the Termux:API app missing, termux-sms-list exits 0 and
+# prints NOTHING, which then surfaces as an "unexpected token" JSON error every four seconds.
+SMS_OUT="$(termux-sms-list -l 1 2>&1)"
+case "$SMS_OUT" in
+  \[*)
+    echo "SMS OK."
+    ;;
+  "")
+    echo "termux-sms-list returned nothing."
+    echo "  * Install the Termux:API APP from F-Droid (separate from the termux-api package)."
+    echo "  * Settings > Apps > Termux:API > Permissions > SMS > Allow"
+    echo "  * Termux and Termux:API must come from the SAME source."
+    exit 1
+    ;;
+  *)
+    echo "termux-sms-list did not return a message list. It said:"
+    echo "  ${SMS_OUT}" | head -3
+    exit 1
+    ;;
+esac
 
 exec node termux-oracle.js
