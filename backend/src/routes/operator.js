@@ -343,7 +343,7 @@ operatorRouter.post('/operator/transactions/:txId/assign', operatorOnly, async (
       if (!rows[0]) throw new Error('order not found');
       if (rows[0].status === STATUS.PENDING_PAYMENT) {
         await transitionOrder(orderId, STATUS.PAID_UNASSIGNED, actorLabel(req.auth),
-          'manual receipt assign', { client });
+          'manual receipt assign', { client: tx });
       }
     });
     wakeOutbox();

@@ -397,28 +397,65 @@ function bindOrderButtons() {
   );
 }
 
+// Payments we can see but couldn't attribute. Every US rail lands here by design: Zelle and
+// friends name the payer instead of giving a phone number, and guessing from the amount alone
+// would mark the wrong customer's order paid.
 async function loadUnmatched() {
-  const res = await api('/operator/transactions/unmatched');
+  const [res, orderRes] = await Promise.all([
+    api('/operator/transactions/unmatched'),
+    api('/operator/orders'),
+  ]);
   const txs = res.transactions || [];
+  const pending = (orderRes.orders || []).filter((o) => o.status === 'PENDING_PAYMENT');
+
+  // Picking the order is a CHOICE FROM A LIST, not a typed id. Order ids are UUIDs now —
+  // asking someone to transcribe 9110aafa-fd8f-4469-8592-4d5f944952e3 from one panel to
+  // another is a mis-keyed character away from crediting a stranger's order.
+  const orderOptions = (amount) => {
+    if (!pending.length) return '<option value="">— no orders awaiting payment —</option>';
+    const exact = pending.filter((o) => Number(o.total_amount) === Number(amount));
+    const rest = pending.filter((o) => Number(o.total_amount) !== Number(amount));
+    const opt = (o, mark) =>
+      `<option value="${o.id}">${mark}#${GMIds.shortId(o.id)} · $${Number(o.total_amount).toFixed(2)} · ${escapeHtml(o.user_phone)}</option>`;
+    return (
+      '<option value="">Choose the order this paid for…</option>' +
+      // Same-amount orders float to the top — that's the likely answer, but it is still the
+      // operator confirming it, not the system assuming it.
+      exact.map((o) => opt(o, '✓ same amount — ')).join('') +
+      rest.map((o) => opt(o, '')).join('')
+    );
+  };
+
   $('unmatched').innerHTML = txs.length
-    ? txs.map((t) => `
+    ? txs.map((t) => {
+        const who = t.sender_name || t.sender_msisdn;
+        const rail = t.provider ? `<span class="badge pending">${escapeHtml(t.provider)}</span> ` : '';
+        return `
       <div class="card" style="background:var(--panel-2);">
-        <div>$${Number(t.amount).toFixed(2)} from ${t.sender_msisdn}</div>
-        <div class="muted">receipt ${t.telecom_receipt_id}</div>
-        <div class="row" style="margin-top:8px;">
-          <input placeholder="order # to bind" data-txin="${t.id}" />
-          <button data-txassign="${t.id}" style="max-width:120px;">Assign</button>
+        <div class="row" style="align-items:center;">
+          <div><strong>$${Number(t.amount).toFixed(2)}</strong> from ${escapeHtml(who)}</div>
+          <span style="margin-left:auto;">${rail}</span>
         </div>
-      </div>`).join('')
+        <div class="muted">${new Date(t.created_at).toLocaleString()} · ${escapeHtml(t.telecom_receipt_id)}</div>
+        ${t.sender_name ? '<div class="muted">Named payer, no phone number — confirm which order this is.</div>' : ''}
+        <select data-txin="${t.id}" style="margin-top:8px;">${orderOptions(t.amount)}</select>
+        <button data-txassign="${t.id}" style="margin-top:6px;">Mark this order paid</button>
+      </div>`;
+      }).join('')
     : '<p class="muted">Nothing to reconcile.</p>';
+
   $('unmatched').querySelectorAll('[data-txassign]').forEach((b) =>
     b.addEventListener('click', async () => {
       const txId = b.dataset.txassign;
-      const orderId = $('unmatched').querySelector(`[data-txin="${txId}"]`).value.trim();
-      if (!orderId) return toast('Enter an order number.');
-      const res = await api(`/operator/transactions/${txId}/assign`, { method: 'POST', body: JSON.stringify({ orderId }) });
-      if (res.error) return toast(res.error);
-      toast('Reconciled ✓'); refreshAll();
+      const orderId = $('unmatched').querySelector(`[data-txin="${txId}"]`).value;
+      if (!orderId) return toast('Choose which order this payment was for.');
+      const out = await api(`/operator/transactions/${txId}/assign`, {
+        method: 'POST',
+        body: JSON.stringify({ orderId }),
+      });
+      if (out.error) return toast(out.error);
+      toast('Reconciled ✓');
+      refreshAll();
     })
   );
 }
