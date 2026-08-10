@@ -11,7 +11,7 @@
 // still showing "awaiting payment" — the single worst state this system can be in, because
 // the customer has paid and nothing in the app agrees. Receipt + transition + events now
 // commit together or not at all.
-import { withTransaction } from '../db/pool.js';
+import { withCriticalTransaction } from '../db/prisma.js';
 import { transitionOrder } from './orders.js';
 import { STATUS } from '../domain/stateMachine.js';
 import { parsePhone } from '../domain/phone.js';
@@ -26,47 +26,51 @@ export async function recordAndMatchPayment({ receiptId, senderMsisdn, amount, r
   const parsed = parsePhone(senderMsisdn);
   const sender = parsed.valid ? parsed.e164 : String(senderMsisdn || '');
 
-  const outcome = await withTransaction(async (client) => {
+  // CP path: a payment must be linearizable and durable before we acknowledge it.
+  const outcome = await withCriticalTransaction(async (tx) => {
     // Idempotency: if we've seen this receipt, do nothing (duplicate SMS webhook).
-    const dup = await client.query(
-      'SELECT id, order_id, matched FROM transactions WHERE telecom_receipt_id = $1',
-      [receiptId]
-    );
-    if (dup.rowCount > 0) {
-      return { duplicate: true, transaction: dup.rows[0], orderId: dup.rows[0].order_id };
-    }
+    const dup = await tx.transaction.findUnique({
+      where: { telecom_receipt_id: receiptId },
+      select: { id: true, order_id: true, matched: true },
+    });
+    if (dup) return { duplicate: true, transaction: dup, orderId: dup.order_id };
 
-    // Find a single pending order matching sender + amount.
-    // FOR UPDATE matters: two receipts for the same amount arriving together would otherwise
-    // both read the order as PENDING_PAYMENT and both try to claim it. Locking here makes the
-    // second one re-read after the first commits, find no PENDING_PAYMENT order, and record
-    // itself as unmatched for the operator — instead of blowing up and losing the receipt.
-    const match = await client.query(
-      `SELECT id FROM orders
-        WHERE user_phone = $1 AND total_amount = $2 AND status = $3
-        ORDER BY created_at DESC
-        LIMIT 2
-        FOR UPDATE`,
-      [sender, amount, STATUS.PENDING_PAYMENT]
-    );
+    // RAW, and it must stay raw: Prisma has no row-lock API. Two receipts for the same
+    // amount arriving together would otherwise both read the order as PENDING_PAYMENT and
+    // both try to claim it. Locking here makes the second re-read after the first commits,
+    // find no pending order, and record itself as unmatched for the operator — instead of
+    // blowing up and losing the receipt.
+    const candidates = await tx.$queryRaw`
+      SELECT id FROM orders
+       WHERE user_phone = ${sender}
+         AND total_amount = ${String(amount)}::numeric
+         AND status = 'PENDING_PAYMENT'::order_status
+       ORDER BY created_at DESC
+       LIMIT 2
+       FOR UPDATE
+    `;
 
     // Ambiguous (2+) -> record but leave unmatched for the operator.
-    const matchedOrderId = match.rowCount === 1 ? match.rows[0].id : null;
+    const matchedOrderId = candidates.length === 1 ? candidates[0].id : null;
 
-    const { rows } = await client.query(
-      `INSERT INTO transactions(order_id, telecom_receipt_id, sender_msisdn, amount, raw_sms, matched)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING *`,
-      [matchedOrderId, receiptId, sender, amount, rawSms || null, matchedOrderId != null]
-    );
+    const transaction = await tx.transaction.create({
+      data: {
+        order_id: matchedOrderId,
+        telecom_receipt_id: receiptId,
+        sender_msisdn: sender,
+        amount,
+        raw_sms: rawSms || null,
+        matched: matchedOrderId != null,
+      },
+    });
 
     if (matchedOrderId) {
       // Same transaction: we already hold the order's row lock and know it is
       // PENDING_PAYMENT, so this transition cannot legally fail.
       await transitionOrder(matchedOrderId, STATUS.PAID_UNASSIGNED, 'system', 'payment matched', {
-        client,
+        client: tx,
       });
-      await enqueue(client, EVENTS.PAYMENT_RECEIVED, {
+      await enqueue(tx, EVENTS.PAYMENT_RECEIVED, {
         orderId: matchedOrderId,
         amount,
         receiptId,
@@ -75,9 +79,9 @@ export async function recordAndMatchPayment({ receiptId, senderMsisdn, amount, r
 
     return {
       duplicate: false,
-      transaction: rows[0],
+      transaction,
       orderId: matchedOrderId,
-      ambiguous: match.rowCount > 1,
+      ambiguous: candidates.length > 1,
     };
   });
 

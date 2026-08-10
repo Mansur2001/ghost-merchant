@@ -1,5 +1,5 @@
 // CQRS write side for operator accounts.
-import { query, withTransaction } from '../db/pool.js';
+import { prisma, withTransaction } from '../db/prisma.js';
 import { hashSecret, verifySecret } from '../middleware/auth.js';
 import { normalizeUsername, validateUsername, validatePassword } from '../domain/operator.js';
 import { config } from '../config.js';
@@ -20,15 +20,20 @@ export async function createOperator({ username, displayName, password, createdB
   if (!p.valid) throw new OperatorError(p.reason);
 
   try {
-    const { rows } = await query(
-      `INSERT INTO operators(username, display_name, password_hash, created_by)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, username, display_name, active, created_at`,
-      [u.username, String(displayName || u.username).slice(0, 80), hashSecret(p.password), createdBy || null]
-    );
-    return rows[0];
+    return await prisma.operator.create({
+      data: {
+        username: u.username,
+        display_name: String(displayName || u.username).slice(0, 80),
+        password_hash: hashSecret(p.password),
+        created_by: createdBy || null,
+      },
+      select: { id: true, username: true, display_name: true, active: true, created_at: true },
+    });
   } catch (err) {
-    if (err.code === '23505') throw new OperatorError('that username is already taken', 409);
+    // P2002 is Prisma's unique-constraint violation (Postgres 23505).
+    if (err.code === 'P2002' || err.code === '23505') {
+      throw new OperatorError('that username is already taken', 409);
+    }
     throw err;
   }
 }
@@ -38,11 +43,7 @@ export async function createOperator({ username, displayName, password, createdB
 // staff roster, which is exactly what an attacker wants before a phishing attempt).
 export async function verifyOperatorLogin(username, password) {
   const name = normalizeUsername(username);
-  const { rows } = await query(
-    'SELECT * FROM operators WHERE username = $1 AND active = true',
-    [name]
-  );
-  const operator = rows[0];
+  const operator = await prisma.operator.findFirst({ where: { username: name, active: true } });
 
   if (!operator) {
     // Spend comparable time on the miss so response timing doesn't leak account existence.
@@ -51,17 +52,20 @@ export async function verifyOperatorLogin(username, password) {
   }
   if (!verifySecret(String(password ?? ''), operator.password_hash)) return null;
 
-  await query('UPDATE operators SET last_login_at = now() WHERE id = $1', [operator.id]);
+  await prisma.operator.update({ where: { id: operator.id }, data: { last_login_at: new Date() } });
   return operator;
 }
 
 // Change your own password. Requires the current one, so a walked-away unlocked session
 // can't be used to lock the real operator out of their own account.
 export async function changeOwnPassword({ operatorId, currentPassword, newPassword }) {
-  return withTransaction(async (client) => {
-    const { rows } = await client.query('SELECT * FROM operators WHERE id = $1 FOR UPDATE', [
-      operatorId,
-    ]);
+  const id = BigInt(operatorId);
+  return withTransaction(async (tx) => {
+    // RAW, and it must stay raw: FOR UPDATE. Two concurrent changes would otherwise both
+    // verify against the OLD hash and the second would silently overwrite the first.
+    const rows = await tx.$queryRaw`
+      SELECT id, username, password_hash FROM operators WHERE id = ${id} FOR UPDATE
+    `;
     const operator = rows[0];
     if (!operator) throw new OperatorError('account not found', 404);
     if (!verifySecret(String(currentPassword ?? ''), operator.password_hash)) {
@@ -72,10 +76,10 @@ export async function changeOwnPassword({ operatorId, currentPassword, newPasswo
     if (verifySecret(p.password, operator.password_hash)) {
       throw new OperatorError('new password must be different from the current one');
     }
-    await client.query(
-      'UPDATE operators SET password_hash = $1, must_change_password = false WHERE id = $2',
-      [hashSecret(p.password), operatorId]
-    );
+    await tx.operator.update({
+      where: { id },
+      data: { password_hash: hashSecret(p.password), must_change_password: false },
+    });
     return { ok: true };
   });
 }
@@ -89,27 +93,28 @@ export async function setOperatorActive(operatorId, active, actingOperatorId) {
   if (!active) {
     // Refuse to remove the last way in. Locking every operator out of a running delivery
     // business is a worse outage than any account we might want disabled.
-    const { rows } = await query(
-      'SELECT count(*)::int AS n FROM operators WHERE active = true AND id <> $1',
-      [operatorId]
-    );
-    if (rows[0].n === 0) throw new OperatorError('cannot deactivate the last active operator', 409);
+    const others = await prisma.operator.count({
+      where: { active: true, id: { not: BigInt(operatorId) } },
+    });
+    if (others === 0) throw new OperatorError('cannot deactivate the last active operator', 409);
   }
-  const { rows } = await query(
-    `UPDATE operators SET active = $1 WHERE id = $2
-     RETURNING id, username, display_name, active`,
-    [active, operatorId]
-  );
-  if (!rows[0]) throw new OperatorError('account not found', 404);
-  return rows[0];
+  try {
+    return await prisma.operator.update({
+      where: { id: BigInt(operatorId) },
+      data: { active },
+      select: { id: true, username: true, display_name: true, active: true },
+    });
+  } catch (err) {
+    if (err.code === 'P2025') throw new OperatorError('account not found', 404);
+    throw err;
+  }
 }
 
 // First-boot bootstrap: if the roster is empty, seed one account from the environment so a
 // fresh deployment is reachable at all. Flagged must_change_password — the env value is in
 // .env, shell history and possibly a screenshot, so it is a delivery mechanism, not a secret.
 export async function ensureBootstrapOperator() {
-  const { rows } = await query('SELECT count(*)::int AS n FROM operators');
-  if (rows[0].n > 0) return null;
+  if ((await prisma.operator.count()) > 0) return null;
 
   const username = config.bootstrapOperator.username;
   const password = config.operatorPassword;
@@ -122,18 +127,27 @@ export async function ensureBootstrapOperator() {
     throw new OperatorError(`bootstrap operator: ${p.reason}`);
   }
 
-  const { rows: created } = await query(
-    `INSERT INTO operators(username, display_name, password_hash, must_change_password, created_by)
-     VALUES ($1, $2, $3, true, 'system:bootstrap')
-     ON CONFLICT (username) DO NOTHING
-     RETURNING id, username`,
-    [username, 'Bootstrap operator', hashSecret(p.password)]
-  );
-  if (created[0]) {
+  let created = null;
+  try {
+    created = await prisma.operator.create({
+      data: {
+        username,
+        display_name: 'Bootstrap operator',
+        password_hash: hashSecret(p.password),
+        must_change_password: true,
+        created_by: 'system:bootstrap',
+      },
+      select: { id: true, username: true },
+    });
+  } catch (err) {
+    // Another instance won the race to bootstrap; that's a success, not an error.
+    if (err.code !== 'P2002') throw err;
+  }
+  if (created) {
     console.warn(
       `[bootstrap] created operator "${username}" from OPERATOR_PASSWORD. ` +
         'Sign in and change this password — it is flagged must_change_password.'
     );
   }
-  return created[0] || null;
+  return created;
 }

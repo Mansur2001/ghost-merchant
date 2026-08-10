@@ -2,7 +2,7 @@
 // edge-case failures (Oracle down, wrong amount, ambiguous match) into a recoverable
 // business rather than a broken one.
 import { Router } from 'express';
-import { query, withTransaction } from '../db/pool.js';
+import { prisma, withTransaction } from '../db/prisma.js';
 import {
   signToken,
   requireRole,
@@ -232,15 +232,16 @@ operatorRouter.post('/operator/transactions/:txId/assign', operatorOnly, async (
     // Binding the receipt and marking the order paid is one decision, so it's one
     // transaction: a crash between them would leave a receipt claimed against an order that
     // still reads "awaiting payment" — the money-received-but-app-disagrees state.
-    await withTransaction(async (client) => {
-      const { rowCount } = await client.query(
-        'UPDATE transactions SET order_id = $1, matched = true WHERE id = $2',
-        [orderId, req.params.txId]
-      );
-      if (rowCount === 0) throw new Error('receipt not found');
-      const { rows } = await client.query('SELECT status FROM orders WHERE id = $1 FOR UPDATE', [
-        orderId,
-      ]);
+    await withTransaction(async (tx) => {
+      const { count } = await tx.transaction.updateMany({
+        where: { id: BigInt(req.params.txId) },
+        data: { order_id: orderId, matched: true },
+      });
+      if (count === 0) throw new Error('receipt not found');
+      // RAW: FOR UPDATE, so a concurrent auto-match can't transition the same order twice.
+      const rows = await tx.$queryRaw`
+        SELECT status FROM orders WHERE id = ${orderId}::uuid FOR UPDATE
+      `;
       if (!rows[0]) throw new Error('order not found');
       if (rows[0].status === STATUS.PENDING_PAYMENT) {
         await transitionOrder(orderId, STATUS.PAID_UNASSIGNED, actorLabel(req.auth),
@@ -287,13 +288,13 @@ operatorRouter.post('/operator/drivers', operatorOnly, async (req, res) => {
     }
     const phone = parsePhone(msisdn);
     if (!phone.valid) return res.status(400).json({ error: `driver number: ${phone.reason}` });
-    const { rows } = await query(
-      `INSERT INTO drivers(name, msisdn, pin_hash) VALUES ($1, $2, $3)
-       ON CONFLICT (msisdn) DO UPDATE SET name = EXCLUDED.name, pin_hash = EXCLUDED.pin_hash
-       RETURNING id, name, msisdn`,
-      [name, phone.e164, hashSecret(String(pin))]
-    );
-    res.status(201).json({ driver: rows[0] });
+    const driver = await prisma.driver.upsert({
+      where: { msisdn: phone.e164 },
+      update: { name, pin_hash: hashSecret(String(pin)) },
+      create: { name, msisdn: phone.e164, pin_hash: hashSecret(String(pin)) },
+      select: { id: true, name: true, msisdn: true },
+    });
+    res.status(201).json({ driver });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

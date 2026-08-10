@@ -54,9 +54,10 @@ if (instances < 2) {
   process.exit(1);
 }
 
-// Exactly one relay leader, or event ordering is lost.
-const leaders = Number(sh('docker compose logs backend 2>&1 | grep -c "is the leader" || true'));
-chk('exactly one instance is the outbox relay leader', leaders === 1, `got ${leaders}`);
+// Relay leadership is a TRANSACTION-scoped advisory lock, so it rotates between instances
+// batch by batch rather than being held by one. Counting log lines would therefore be
+// meaningless. What must hold is the property leadership exists to protect: no event is
+// delivered twice, and the queue always drains. Both are asserted below.
 
 const opToken = await post('/operator/login', {
   username: 'hodan',
@@ -103,13 +104,26 @@ chk('state change accepted', res.status === 200, `HTTP ${res.status}`);
 
 await new Promise((r) => setTimeout(r, 2500)); // outbox relay + Redis fan-out
 
-const got = sockets.map((s) => s.received.some((m) => m.type === 'order_state'));
-const delivered = got.filter(Boolean).length;
+const counts = sockets.map((s) => s.received.filter((m) => m.type === 'order_state').length);
+const delivered = counts.filter((n) => n > 0).length;
 chk(
   `every socket received the event across instances (${delivered}/${SOCKETS})`,
   delivered === SOCKETS,
   `only ${delivered} of ${SOCKETS} — events are NOT crossing instances`
 );
+// The duplicate check is what relay leadership actually buys: if both instances relayed the
+// same batch, every socket would see the state change twice.
+chk(
+  'no socket received it TWICE (relay leadership held)',
+  counts.every((n) => n <= 1),
+  `per-socket counts: ${JSON.stringify(counts)}`
+);
+
+// And the queue drained — a lock that nobody can take would stall delivery entirely.
+const pending = psql(
+  "SELECT count(*) FROM outbox WHERE published_at IS NULL AND NOT failed;"
+);
+chk('outbox fully drained', pending === '0', pending);
 sockets.forEach((s) => s.ws.close());
 
 // ── Shared rate limits ──

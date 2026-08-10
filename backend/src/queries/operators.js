@@ -1,22 +1,34 @@
 // CQRS read side for operator accounts. Never selects password_hash — a read model has no
 // business carrying a credential, and this is the query the roster UI renders.
-import { query } from '../db/pool.js';
+import { prisma } from '../db/prisma.js';
+
+const PUBLIC_FIELDS = {
+  id: true,
+  username: true,
+  display_name: true,
+  active: true,
+  must_change_password: true,
+  last_login_at: true,
+  created_at: true,
+  created_by: true,
+};
 
 export async function listOperators() {
-  const { rows } = await query(
-    `SELECT id, username, display_name, active, must_change_password, last_login_at,
-            created_at, created_by
-       FROM operators
-      ORDER BY active DESC, username ASC`
-  );
-  return rows;
+  return prisma.operator.findMany({
+    select: PUBLIC_FIELDS,
+    orderBy: [{ active: 'desc' }, { username: 'asc' }],
+  });
 }
 
 export async function getOperatorById(id) {
-  const { rows } = await query(
-    `SELECT id, username, display_name, active, must_change_password, last_login_at
-       FROM operators WHERE id = $1`,
-    [id]
-  );
-  return rows[0] || null;
+  let key;
+  try {
+    key = BigInt(id);
+  } catch {
+    return null;
+  }
+  return prisma.operator.findUnique({
+    where: { id: key },
+    select: { ...PUBLIC_FIELDS, created_by: false },
+  });
 }

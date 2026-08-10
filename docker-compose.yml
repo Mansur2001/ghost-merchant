@@ -3,6 +3,11 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    # Bound to LOOPBACK only. The Prisma CLI (introspect, migrate, studio) runs on the host
+    # rather than in the container, so it needs a reachable port — but 127.0.0.1 means it is
+    # not exposed off this machine. On the VPS, remove this mapping entirely.
+    ports:
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}

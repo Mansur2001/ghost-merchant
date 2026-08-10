@@ -16,11 +16,38 @@ export const config = {
     .map((s) => s.trim()),
 
   db: {
+    // Prisma takes a single connection URL. Built from the same pieces the rest of the stack
+    // uses so there is one place to change credentials, with DATABASE_URL as an override for
+    // the CLI and for a managed database that hands you a URL directly.
+    get url() {
+      if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
+      const host = process.env.POSTGRES_HOST || 'postgres';
+      const port = process.env.POSTGRES_PORT || '5432';
+      const name = process.env.POSTGRES_DB || 'ghost_merchant';
+      const user = encodeURIComponent(process.env.POSTGRES_USER || 'ghost');
+      const pass = encodeURIComponent(process.env.POSTGRES_PASSWORD || 'ghost');
+      return `postgresql://${user}:${pass}@${host}:${port}/${name}?schema=public`;
+    },
     host: process.env.POSTGRES_HOST || 'postgres',
     port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
     database: process.env.POSTGRES_DB || 'ghost_merchant',
     user: process.env.POSTGRES_USER || 'ghost',
     password: process.env.POSTGRES_PASSWORD || 'ghost',
+
+    // Per-operation CAP choice (see db/pool.js).
+    //
+    // apCommit  — chat, photos, tracking. 'local' returns without waiting for a replica, so
+    //             these stay responsive when the standby is slow. Availability over strict
+    //             durability, for data a customer can retype.
+    // cpCommit  — money and state transitions. With a synchronous standby configured, set
+    //             this to 'remote_apply' so an acknowledged payment survives losing the
+    //             primary. Without a standby, 'on' (flush to local disk) is the strongest
+    //             available guarantee and is the correct default.
+    apCommit: process.env.PG_AP_COMMIT || 'local',
+    cpCommit: process.env.PG_CP_COMMIT || 'on',
+    // How long a critical write may wait before we refuse it. Under a synchronous-replication
+    // partition the commit would otherwise hang forever; this turns that into a loud 503.
+    criticalTimeoutMs: parseInt(process.env.PG_CRITICAL_TIMEOUT_MS || '5000', 10),
   },
 
   s3: {

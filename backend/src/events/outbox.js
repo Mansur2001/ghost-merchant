@@ -12,7 +12,7 @@
 //      a SINGLE relay with a Postgres advisory lock (see "Relay leadership" below). Without
 //      that, two backends each claim a different subset via SKIP LOCKED and publish
 //      concurrently — a customer could see "delivered" before "in transit".
-import { pool, query, withTransaction } from '../db/pool.js';
+import { prisma, withTransaction } from '../db/prisma.js';
 import { publish } from './bus.js';
 
 const POLL_INTERVAL_MS = 1000; // floor on delivery latency if nothing calls wake()
@@ -23,14 +23,17 @@ const RETENTION_DAYS = 7; // keep delivered rows around; they're the "why did th
 // Write an event inside the caller's transaction. `client` is mandatory and checked, because
 // the failure mode of getting this wrong is silent and only shows up during an outage.
 export async function enqueue(client, eventName, payload) {
-  if (!client || typeof client.query !== 'function') {
-    throw new Error('enqueue requires the transaction client — pass the tx client, not the pool');
+  // The check is on the Prisma transaction client's model API. Passing the base client would
+  // commit the row independently of the state change it describes — silently reintroducing
+  // the exact bug the outbox exists to fix.
+  if (!client || typeof client.outbox?.create !== 'function') {
+    throw new Error('enqueue requires the transaction client — pass the tx client, not the base client');
   }
-  const { rows } = await client.query(
-    'INSERT INTO outbox(event_name, payload) VALUES ($1, $2) RETURNING id',
-    [eventName, JSON.stringify(payload ?? {})]
-  );
-  return rows[0].id;
+  const row = await client.outbox.create({
+    data: { event_name: eventName, payload: payload ?? {} },
+    select: { id: true },
+  });
+  return row.id;
 }
 
 // Publish one batch of committed-but-undelivered events.
@@ -39,39 +42,45 @@ export async function enqueue(client, eventName, payload) {
 // the same row. The whole batch runs in one transaction: if the process dies mid-batch, the
 // marks roll back and the events are redelivered — at-least-once, by design.
 export async function relayOnce({ batchSize = BATCH_SIZE } = {}) {
-  return withTransaction(async (client) => {
-    const { rows } = await client.query(
-      `SELECT id, event_name, payload, attempts
-         FROM outbox
-        WHERE published_at IS NULL AND NOT failed
-        ORDER BY id
-        LIMIT $1
-        FOR UPDATE SKIP LOCKED`,
-      [batchSize]
-    );
+  return withTransaction(async (tx) => {
+    // Only one instance relays at a time; the lock is released when this transaction ends.
+    if (!(await claimRelayLock(tx))) return { fetched: 0, delivered: 0, skipped: true };
+
+    // RAW, and it must stay raw: FOR UPDATE SKIP LOCKED has no Prisma equivalent. It is what
+    // stops a second relay (or a second instance) from double-processing the same row.
+    const rows = await tx.$queryRaw`
+      SELECT id, event_name, payload, attempts
+        FROM outbox
+       WHERE published_at IS NULL AND NOT failed
+       ORDER BY id
+       LIMIT ${batchSize}
+       FOR UPDATE SKIP LOCKED
+    `;
 
     let delivered = 0;
     for (const row of rows) {
       try {
         publish(row.event_name, row.payload);
-        await client.query('UPDATE outbox SET published_at = now() WHERE id = $1', [row.id]);
+        // eslint-disable-next-line no-await-in-loop
+        await tx.outbox.update({ where: { id: row.id }, data: { published_at: new Date() } });
         delivered += 1;
       } catch (err) {
-        const attempts = row.attempts + 1;
+        const attempts = Number(row.attempts) + 1;
         // A poison event must not wedge the queue forever. After MAX_ATTEMPTS we park it and
         // move on: Postgres remains the source of truth, and clients resync on reload, so a
         // stuck relay is worse than one dropped notification.
         const giveUp = attempts >= MAX_ATTEMPTS;
-        await client.query(
-          'UPDATE outbox SET attempts = $1, last_error = $2, failed = $3 WHERE id = $4',
-          [attempts, String(err?.message).slice(0, 500), giveUp, row.id]
-        );
+        // eslint-disable-next-line no-await-in-loop
+        await tx.outbox.update({
+          where: { id: row.id },
+          data: { attempts, last_error: String(err?.message).slice(0, 500), failed: giveUp },
+        });
         console.error(
           JSON.stringify({
             t: new Date().toISOString(),
             level: 'error',
             msg: giveUp ? 'outbox event PARKED after repeated failures' : 'outbox publish failed',
-            outboxId: row.id,
+            outboxId: String(row.id),
             event: row.event_name,
             attempts,
             error: err?.message,
@@ -89,78 +98,65 @@ export async function relayOnce({ batchSize = BATCH_SIZE } = {}) {
 // Delete long-delivered rows. Kept for a week first: when someone asks "why did this order
 // flip to DISPATCHED at 3am", this table is the answer.
 export async function sweepOutbox() {
-  const { rowCount } = await query(
-    `DELETE FROM outbox
-      WHERE published_at IS NOT NULL AND published_at < now() - ($1 || ' days')::interval`,
-    [String(RETENTION_DAYS)]
-  );
-  return rowCount;
+  const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  const { count } = await prisma.outbox.deleteMany({
+    where: { published_at: { not: null, lt: cutoff } },
+  });
+  return count;
 }
 
 // How far behind the relay is. Surfaced to the operator dashboard: a growing backlog means
 // clients are seeing stale state, which looks exactly like "the app is broken".
 export async function outboxHealth() {
-  const { rows } = await query(
-    `SELECT
-       count(*) FILTER (WHERE published_at IS NULL AND NOT failed)::int AS pending,
-       count(*) FILTER (WHERE failed)::int                             AS parked,
-       COALESCE(EXTRACT(EPOCH FROM (now() - min(created_at)
-         FILTER (WHERE published_at IS NULL AND NOT failed))), 0)::int AS oldest_pending_seconds
-     FROM outbox`
-  );
-  return rows[0];
+  const [pending, parked, oldest] = await Promise.all([
+    prisma.outbox.count({ where: { published_at: null, failed: false } }),
+    prisma.outbox.count({ where: { failed: true } }),
+    prisma.outbox.findFirst({
+      where: { published_at: null, failed: false },
+      orderBy: { created_at: 'asc' },
+      select: { created_at: true },
+    }),
+  ]);
+  return {
+    pending,
+    parked,
+    oldest_pending_seconds: oldest
+      ? Math.max(0, Math.round((Date.now() - oldest.created_at.getTime()) / 1000))
+      : 0,
+  };
 }
 
 // ── Relay leadership ──
 //
-// Ordering is by `id`, and that only holds with ONE relay. Two instances both claiming rows
-// with SKIP LOCKED each get a different subset and publish them concurrently, so a customer
-// could see "delivered" before "in transit".
+// Ordering is by `id`, and that only holds with ONE relay running at a time. Two instances
+// both claiming rows with SKIP LOCKED each get a different subset and publish concurrently,
+// so a customer could see "delivered" before "in transit".
 //
-// So exactly one instance relays at a time, elected by a Postgres session-scoped advisory
-// lock. No new infrastructure, and no split brain: the lock lives in the same database as the
-// truth it protects, and it is released AUTOMATICALLY if the holder dies or its connection
-// drops — which is precisely the failure a lease-with-timeout scheme has to hand-roll.
+// A TRANSACTION-SCOPED advisory lock gives us that: whoever holds it relays this batch, and
+// it is released automatically at commit — or at rollback, or if the process dies mid-batch.
+// There is no lease to expire, no held connection, and no split brain, because the lock lives
+// in the same database as the truth it protects.
 //
-// The non-leaders idle. Failover costs at most one poll interval.
+// (This was a session-scoped lock while the data layer was raw `pg`, which needed a
+// connection pinned for the process lifetime. Prisma's pool doesn't expose one — and the
+// transaction-scoped form turns out to be the better design anyway: leadership is per batch,
+// so failover is instant instead of waiting for a dead holder's connection to time out.)
 const RELAY_LOCK_KEY = 0x60057; // arbitrary but fixed: "ghost" in leetspeak
-let lockClient = null;
-let isLeader = false;
 
-async function tryBecomeLeader() {
-  if (isLeader) return true;
-  try {
-    // A dedicated connection, held for as long as we lead: advisory locks are scoped to the
-    // session, so returning this client to the pool would release the lock.
-    if (!lockClient) lockClient = await pool.connect();
-    const { rows } = await lockClient.query('SELECT pg_try_advisory_lock($1) AS ok', [
-      RELAY_LOCK_KEY,
-    ]);
-    isLeader = rows[0].ok === true;
-    if (isLeader) console.log('outbox relay: this instance is the leader');
-    return isLeader;
-  } catch (err) {
-    // Connection died — drop it so the next tick reconnects and re-contests the lock.
-    console.error('outbox relay: leadership check failed:', err.message);
-    try { lockClient?.release(); } catch { /* already gone */ }
-    lockClient = null;
-    isLeader = false;
-    return false;
-  }
-}
-
-async function releaseLeadership() {
-  if (!lockClient) return;
-  try {
-    if (isLeader) await lockClient.query('SELECT pg_advisory_unlock($1)', [RELAY_LOCK_KEY]);
-  } catch { /* the session is going away anyway */ }
-  try { lockClient.release(); } catch { /* already released */ }
-  lockClient = null;
-  isLeader = false;
-}
-
+let lastLeaderState = false;
 export function isRelayLeader() {
-  return isLeader;
+  return lastLeaderState;
+}
+
+// Try to take the relay lock inside `tx`. Returns false if another instance holds it.
+async function claimRelayLock(tx) {
+  const rows = await tx.$queryRaw`SELECT pg_try_advisory_xact_lock(${RELAY_LOCK_KEY}) AS ok`;
+  const ok = rows[0]?.ok === true;
+  if (ok !== lastLeaderState) {
+    lastLeaderState = ok;
+    if (ok) console.log('outbox relay: this instance is relaying');
+  }
+  return ok;
 }
 
 // ── Relay loop ──
@@ -175,7 +171,6 @@ async function drain() {
     pendingWake = true;
     return;
   }
-  if (!(await tryBecomeLeader())) return; // another instance is relaying
   running = true;
   try {
     // Keep going while full batches come back, so a backlog clears promptly instead of one
@@ -210,10 +205,10 @@ export function startOutboxRelay() {
   console.log('Outbox relay started');
 }
 
-export async function stopOutboxRelay() {
+export function stopOutboxRelay() {
   if (timer) clearInterval(timer);
   timer = null;
-  // Hand leadership over immediately rather than making the next instance wait for our
-  // connection to time out — a rolling deploy should not pause event delivery.
-  await releaseLeadership();
+  lastLeaderState = false;
+  // Nothing to hand over: the advisory lock is transaction-scoped, so it was already released
+  // when the last batch committed.
 }

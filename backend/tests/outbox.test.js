@@ -4,28 +4,51 @@
 import { jest, describe, test, expect, beforeEach } from '@jest/globals';
 
 const publish = jest.fn();
-let queryImpl;
-const client = { query: (sql, params) => queryImpl(sql, params) };
-const poolQuery = jest.fn();
 
-// The relay holds a DEDICATED connection for its advisory lock (a session-scoped lock is
-// released the moment the client goes back to the pool), so the fake pool hands out a client
-// whose query() answers the leadership probe.
+// Fake Prisma transaction client.
+//  * `$queryRaw` serves both the leadership probe (pg_try_advisory_xact_lock) and the
+//    SKIP LOCKED batch fetch, so it dispatches on the SQL text.
+//  * `outbox.update` records what the relay marked, which is what the tests assert on.
+let pendingRows = [];
 let leadershipGranted = true;
-const lockClient = {
-  query: jest.fn(async (sql) => {
-    if (/pg_try_advisory_lock/.test(sql)) return { rows: [{ ok: leadershipGranted }] };
-    if (/pg_advisory_unlock/.test(sql)) return { rows: [{}] };
-    throw new Error(`unexpected lock query: ${sql}`);
+let updates = [];
+
+const tx = {
+  $executeRawUnsafe: jest.fn(async () => 0),
+  $queryRaw: jest.fn(async (strings) => {
+    const sql = Array.isArray(strings) ? strings.join('') : String(strings);
+    if (/pg_try_advisory_xact_lock/.test(sql)) return [{ ok: leadershipGranted }];
+    if (/FROM outbox/.test(sql)) return pendingRows;
+    throw new Error(`unexpected raw query: ${sql}`);
   }),
-  release: jest.fn(),
+  outbox: {
+    create: jest.fn(async ({ data }) => ({ id: 7n, ...data })),
+    update: jest.fn(async ({ where, data }) => {
+      if (data.published_at) updates.push({ kind: 'published', id: where.id });
+      else {
+        updates.push({
+          kind: 'retry',
+          attempts: data.attempts,
+          error: data.last_error,
+          failed: data.failed,
+          id: where.id,
+        });
+      }
+      return {};
+    }),
+  },
 };
 
-jest.unstable_mockModule('../src/db/pool.js', () => ({
-  pool: { connect: async () => lockClient },
-  withTransaction: async (fn) => fn(client),
-  query: poolQuery,
-  inTransaction: (c, fn) => (c ? fn(c) : fn(client)),
+const prismaMock = {
+  outbox: { count: jest.fn(), findFirst: jest.fn(), deleteMany: jest.fn() },
+};
+
+jest.unstable_mockModule('../src/db/prisma.js', () => ({
+  prisma: prismaMock,
+  withTransaction: async (fn) => fn(tx),
+  withCriticalTransaction: async (fn) => fn(tx),
+  inTransaction: (c, fn) => (c ? fn(c) : fn(tx)),
+  WriteUnavailableError: class extends Error {},
 }));
 jest.unstable_mockModule('../src/events/bus.js', () => ({
   publish,
@@ -34,37 +57,32 @@ jest.unstable_mockModule('../src/events/bus.js', () => ({
 
 const { enqueue, relayOnce, outboxHealth, sweepOutbox } = await import('../src/events/outbox.js');
 
-// Fake outbox table: rows the relay will SELECT, plus a record of the UPDATEs it issues.
+// Stage the rows the relay will fetch; returns the log of marks it makes.
 function tableWith(rows) {
-  const updates = [];
-  queryImpl = (sql, params) => {
-    if (/SELECT id, event_name/.test(sql)) return { rows, rowCount: rows.length };
-    if (/UPDATE outbox SET published_at/.test(sql)) {
-      updates.push({ kind: 'published', id: params[0] });
-      return { rowCount: 1 };
-    }
-    if (/UPDATE outbox SET attempts/.test(sql)) {
-      updates.push({ kind: 'retry', attempts: params[0], error: params[1], failed: params[2], id: params[3] });
-      return { rowCount: 1 };
-    }
-    throw new Error(`unexpected query: ${sql}`);
-  };
+  pendingRows = rows;
+  updates = [];
   return updates;
 }
 
 beforeEach(() => {
   publish.mockReset();
-  poolQuery.mockReset();
+  leadershipGranted = true;
+  pendingRows = [];
+  updates = [];
+  tx.outbox.update.mockClear();
+  prismaMock.outbox.count.mockReset();
+  prismaMock.outbox.findFirst.mockReset();
+  prismaMock.outbox.deleteMany.mockReset();
 });
 
 describe('enqueue', () => {
   test('writes the event using the caller transaction client', async () => {
-    const captured = [];
-    const tx = { query: (sql, params) => { captured.push({ sql, params }); return { rows: [{ id: 7 }] }; } };
     const id = await enqueue(tx, 'order.state_changed', { orderId: 1, to: 'DELIVERED' });
-    expect(id).toBe(7);
-    expect(captured[0].sql).toMatch(/INSERT INTO outbox/);
-    expect(JSON.parse(captured[0].params[1])).toEqual({ orderId: 1, to: 'DELIVERED' });
+    expect(id).toBe(7n);
+    expect(tx.outbox.create).toHaveBeenCalledWith({
+      data: { event_name: 'order.state_changed', payload: { orderId: 1, to: 'DELIVERED' } },
+      select: { id: true },
+    });
   });
 
   test('REFUSES to run without a transaction client', async () => {
@@ -75,11 +93,10 @@ describe('enqueue', () => {
     await expect(enqueue(undefined, 'x', {})).rejects.toThrow(/transaction client/);
   });
 
-  test('serializes a null/undefined payload rather than writing NULL', async () => {
-    const captured = [];
-    const tx = { query: (sql, params) => { captured.push(params); return { rows: [{ id: 1 }] }; } };
+  test('stores an empty object rather than NULL for a missing payload', async () => {
+    tx.outbox.create.mockClear();
     await enqueue(tx, 'x');
-    expect(captured[0][1]).toBe('{}');
+    expect(tx.outbox.create.mock.calls[0][0].data.payload).toEqual({});
   });
 });
 
@@ -110,14 +127,13 @@ describe('relayOnce', () => {
   });
 
   test('locks rows so a second relay cannot double-deliver', async () => {
-    let seenSql = '';
-    queryImpl = (sql) => {
-      if (/SELECT id, event_name/.test(sql)) { seenSql = sql; return { rows: [], rowCount: 0 }; }
-      throw new Error('unexpected');
-    };
+    tableWith([]);
     await relayOnce();
-    expect(seenSql).toMatch(/FOR UPDATE SKIP LOCKED/);
-    expect(seenSql).toMatch(/published_at IS NULL AND NOT failed/);
+    const sql = tx.$queryRaw.mock.calls
+      .map(([strings]) => (Array.isArray(strings) ? strings.join('') : ''))
+      .join(' ');
+    expect(sql).toMatch(/FOR UPDATE SKIP LOCKED/);
+    expect(sql).toMatch(/published_at IS NULL AND NOT failed/);
   });
 
   test('an empty queue is a no-op', async () => {
@@ -193,71 +209,65 @@ describe('relayOnce', () => {
 
 describe('outboxHealth', () => {
   test('reports backlog depth and age', async () => {
-    poolQuery.mockResolvedValue({ rows: [{ pending: 3, parked: 1, oldest_pending_seconds: 42 }] });
-    expect(await outboxHealth()).toEqual({ pending: 3, parked: 1, oldest_pending_seconds: 42 });
+    prismaMock.outbox.count.mockResolvedValueOnce(3).mockResolvedValueOnce(1);
+    prismaMock.outbox.findFirst.mockResolvedValue({ created_at: new Date(Date.now() - 42_000) });
+    const health = await outboxHealth();
+    expect(health.pending).toBe(3);
+    expect(health.parked).toBe(1);
+    expect(health.oldest_pending_seconds).toBeGreaterThanOrEqual(41);
+  });
+
+  test('an empty queue reports zero age, not a negative or NaN', async () => {
+    prismaMock.outbox.count.mockResolvedValue(0);
+    prismaMock.outbox.findFirst.mockResolvedValue(null);
+    expect(await outboxHealth()).toEqual({ pending: 0, parked: 0, oldest_pending_seconds: 0 });
   });
 });
 
 describe('sweepOutbox', () => {
   test('only deletes rows that were actually delivered', async () => {
-    poolQuery.mockResolvedValue({ rowCount: 12 });
+    prismaMock.outbox.deleteMany.mockResolvedValue({ count: 12 });
     expect(await sweepOutbox()).toBe(12);
-    const [sql] = poolQuery.mock.calls[0];
-    expect(sql).toMatch(/published_at IS NOT NULL/);
+    const { where } = prismaMock.outbox.deleteMany.mock.calls[0][0];
     // An undelivered row must never be swept — that would silently lose the event.
-    expect(sql).not.toMatch(/published_at IS NULL/);
+    expect(where.published_at.not).toBeNull();
+    expect(where.published_at.lt).toBeInstanceOf(Date);
   });
 });
 
 // ── Relay leadership ──
-// Ordering by id only holds with ONE relay. Two instances each claiming a different subset
-// via SKIP LOCKED would publish concurrently, and a customer could see "delivered" before
-// "in transit". Leadership is what prevents that once more than one backend runs.
+// Ordering by id only holds with ONE relay running at a time. Two instances each claiming a
+// different subset via SKIP LOCKED would publish concurrently, and a customer could see
+// "delivered" before "in transit". The lock is transaction-scoped, so it is released at
+// commit — no lease to expire and nothing to release on shutdown.
 describe('relay leadership', () => {
-  test('the relay claims a Postgres advisory lock on its dedicated connection', async () => {
-    const { startOutboxRelay, stopOutboxRelay, isRelayLeader } =
-      await import('../src/events/outbox.js');
-    leadershipGranted = true;
-    lockClient.query.mockClear();
+  test('the relay takes a transaction-scoped advisory lock before reading', async () => {
     tableWith([]);
-
-    startOutboxRelay();
-    await new Promise((r) => setTimeout(r, 20));
-
-    expect(lockClient.query.mock.calls.some(([sql]) => /pg_try_advisory_lock/.test(sql))).toBe(true);
-    expect(isRelayLeader()).toBe(true);
-    await stopOutboxRelay();
+    await relayOnce();
+    const sql = tx.$queryRaw.mock.calls
+      .map(([strings]) => (Array.isArray(strings) ? strings.join('') : ''))
+      .join(' ');
+    expect(sql).toMatch(/pg_try_advisory_xact_lock/);
   });
 
-  test('an instance that loses the election does not relay', async () => {
-    // The whole point: the non-leader must publish NOTHING, or ordering is lost.
-    jest.resetModules();
+  test('an instance that loses the election publishes NOTHING', async () => {
+    // The whole point: a second relay must not deliver, or ordering is lost.
     leadershipGranted = false;
-    publish.mockClear();
-    const mod = await import('../src/events/outbox.js');
-    tableWith([{ id: 1, event_name: 'order.state_changed', payload: {}, attempts: 0 }]);
+    tableWith([{ id: 1n, event_name: 'order.state_changed', payload: {}, attempts: 0 }]);
 
-    mod.startOutboxRelay();
-    await new Promise((r) => setTimeout(r, 30));
+    const out = await relayOnce();
 
-    expect(mod.isRelayLeader()).toBe(false);
+    expect(out).toEqual({ fetched: 0, delivered: 0, skipped: true });
     expect(publish).not.toHaveBeenCalled();
-    await mod.stopOutboxRelay();
-    leadershipGranted = true;
   });
 
-  test('shutdown releases the lock so failover does not wait for a connection timeout', async () => {
-    jest.resetModules();
+  test('the winner relays normally', async () => {
     leadershipGranted = true;
-    const mod = await import('../src/events/outbox.js');
-    tableWith([]);
-    mod.startOutboxRelay();
-    await new Promise((r) => setTimeout(r, 20));
-    lockClient.query.mockClear();
+    tableWith([{ id: 1n, event_name: 'order.state_changed', payload: { orderId: 'x' }, attempts: 0 }]);
 
-    await mod.stopOutboxRelay();
+    const out = await relayOnce();
 
-    expect(lockClient.query.mock.calls.some(([sql]) => /pg_advisory_unlock/.test(sql))).toBe(true);
-    expect(mod.isRelayLeader()).toBe(false);
+    expect(out.delivered).toBe(1);
+    expect(publish).toHaveBeenCalledWith('order.state_changed', { orderId: 'x' });
   });
 });

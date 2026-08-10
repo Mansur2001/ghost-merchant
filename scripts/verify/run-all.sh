@@ -14,8 +14,8 @@
 set -u
 cd "$(dirname "$0")/../.."
 
-if ! curl -sk -o /dev/null --max-time 3 https://localhost/api/health; then
-  echo "Stack is not up. Run: docker compose up -d --build"
+if [ "$(curl -sk -o /dev/null -w '%{http_code}' --max-time 3 https://localhost/api/health)" != "200" ]; then
+  echo "Stack is not up (or still booting). Run: docker compose up -d --build"
   exit 1
 fi
 
@@ -28,8 +28,12 @@ reset_stack() {
   docker compose exec -T redis sh -c \
     'redis-cli --scan --pattern "rl:*" | xargs -r redis-cli DEL' >/dev/null 2>&1 || true
   docker compose restart backend >/dev/null 2>&1
-  for _ in $(seq 1 30); do
-    curl -sk -o /dev/null --max-time 2 https://localhost/api/health && break
+  # Wait for a real 200. `curl` exits 0 on a 502 too — Caddy answers even while the backend is
+  # still starting — so testing the exit code alone lets the suite race a booting backend and
+  # report a wall of false failures. Boot now includes `prisma migrate deploy`, so this got
+  # slower and the bug became visible.
+  for _ in $(seq 1 60); do
+    [ "$(curl -sk -o /dev/null -w '%{http_code}' --max-time 2 https://localhost/api/health)" = "200" ] && break
     sleep 1
   done
   docker compose exec -T backend npm run seed >/dev/null 2>&1

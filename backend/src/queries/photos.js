@@ -1,19 +1,27 @@
 // CQRS read side for photos. Metadata only — the bytes are streamed separately.
-import { query } from '../db/pool.js';
+import { prisma } from '../db/prisma.js';
 
 export async function listPhotos(orderId) {
-  const { rows } = await query(
-    `SELECT id, order_id, kind, object_key, content_type, uploaded_by, created_at
-       FROM order_photos WHERE order_id = $1 ORDER BY created_at ASC`,
-    [orderId]
-  );
-  return rows;
+  return prisma.orderPhoto.findMany({
+    where: { order_id: orderId },
+    select: {
+      id: true, order_id: true, kind: true, object_key: true,
+      content_type: true, uploaded_by: true, created_at: true,
+    },
+    orderBy: { created_at: 'asc' },
+  });
 }
 
 export async function getPhoto(photoId) {
-  const { rows } = await query(
-    `SELECT id, order_id, kind, object_key, content_type FROM order_photos WHERE id = $1`,
-    [photoId]
-  );
-  return rows[0] || null;
+  // The id comes off the URL, so it is untrusted text against a BIGINT column.
+  let key;
+  try {
+    key = BigInt(photoId);
+  } catch {
+    return null; // malformed id reads the same as "no such photo"
+  }
+  return prisma.orderPhoto.findUnique({
+    where: { id: key },
+    select: { id: true, order_id: true, kind: true, object_key: true, content_type: true },
+  });
 }

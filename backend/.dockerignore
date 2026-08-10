@@ -1,0 +1,6 @@
+node_modules
+npm-debug.log
+# Host-only connection string for the Prisma CLI (points at 127.0.0.1). Inside the container
+# the database is at `postgres:5432`, so shipping this file makes `migrate deploy` fail at boot.
+prisma/.env
+.env

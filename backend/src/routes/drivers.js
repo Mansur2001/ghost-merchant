@@ -1,6 +1,6 @@
 // Driver PWA routes. PIN login -> token; queue; state transitions; item adjustments.
 import { Router, raw } from 'express';
-import { query } from '../db/pool.js';
+import { prisma } from '../db/prisma.js';
 import { verifySecret, signToken, requireRole } from '../middleware/auth.js';
 import { requireOrderAccess } from '../middleware/authorize.js';
 import { rateLimit } from '../middleware/rateLimit.js';
@@ -31,11 +31,7 @@ driversRouter.post('/driver/login', ...loginLimits, async (req, res) => {
   const { msisdn, pin } = req.body || {};
   const phone = parsePhone(msisdn);
   const lookup = phone.valid ? phone.e164 : msisdn;
-  const { rows } = await query(
-    'SELECT * FROM drivers WHERE msisdn = $1 AND active = true',
-    [lookup]
-  );
-  const driver = rows[0];
+  const driver = await prisma.driver.findFirst({ where: { msisdn: lookup, active: true } });
   if (!driver || !verifySecret(String(pin || ''), driver.pin_hash)) {
     return res.status(401).json({ error: 'invalid credentials' });
   }
@@ -133,10 +129,10 @@ driversRouter.post('/driver/orders/:id/delivery-proof', ...myOrder, rawImage, as
 driversRouter.post('/driver/orders/:id/adjust', ...myOrder, async (req, res) => {
   try {
     const { items, note } = req.body || {};
-    await query('UPDATE orders SET items = $1, updated_at = now() WHERE id = $2', [
-      JSON.stringify(items || []),
-      req.params.id,
-    ]);
+    await prisma.order.update({
+      where: { id: req.params.id },
+      data: { items: items || [], updated_at: new Date() },
+    });
     await postMessage({
       orderId: req.params.id,
       sender: 'driver',

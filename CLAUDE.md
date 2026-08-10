@@ -441,7 +441,17 @@ Once there's a VPS, these are the rules that keep a fast-shipping cadence from l
 
 ## Conventions
 - ES modules everywhere (`"type": "module"`). Node 20+.
-- No ORM — parameterized `pg` queries via `db/pool.js` (`query`, `withTransaction`).
+- **Prisma** owns the schema and ordinary queries (`prisma/schema.prisma`, `db/prisma.js`).
+  Migrations are `prisma migrate deploy`, run automatically on container boot.
+  ⚠️ **schema.prisma is NOT the whole schema.** Partial indexes and CHECK constraints live in
+  raw migration SQL because Prisma cannot express them — including
+  `idx_messages_client_id`, the UNIQUE that makes offline message replay idempotent. Rebuild
+  from schema.prisma alone and they vanish silently. `npm run db:verify` asserts they exist.
+- **Raw SQL survives where Postgres semantics ARE the feature**, via `$queryRaw` inside an
+  interactive transaction (single pinned connection): `FOR UPDATE` row locks, the outbox's
+  `FOR UPDATE SKIP LOCKED`, `pg_try_advisory_xact_lock` for relay leadership, the conditional
+  OTP upsert, and `SET LOCAL synchronous_commit`. Don't "modernize" these into the model API —
+  each one is load-bearing and the comment above it says why.
 - Object storage through `storage/objectStore.js` (S3 SDK pointed at MinIO). Don't add the
   AWS-hosted S3 — it breaks the sovereignty requirement. Use presigned URLs, never expose
   storage creds to the browser.

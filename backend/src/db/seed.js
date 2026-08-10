@@ -6,7 +6,7 @@
 //   docker compose exec backend npm run seed
 //
 // Refuses to run against NODE_ENV=production unless SEED_FORCE=1 (it wipes domain tables).
-import { pool } from './pool.js';
+import { prisma } from './prisma.js';
 import { hashSecret } from '../middleware/auth.js';
 import { putObject } from '../storage/objectStore.js';
 
@@ -71,48 +71,57 @@ const ORDERS = [
 ];
 
 async function seed() {
-  const client = await pool.connect();
-  const photoJobs = []; // { orderId, kind, key } to upload after the DB commit
-  try {
-    await client.query('BEGIN');
+  const photoJobs = []; // { orderId, kind, ... } to upload after the DB commit
 
-    // Reset to a clean slate with deterministic ids/sequences.
-    await client.query(
-      `TRUNCATE outbox, otp_codes, order_photos, order_events, messages, transactions, orders,
-                drivers, users, operators
-       RESTART IDENTITY CASCADE`
-    );
+  await prisma.$transaction(async (tx) => {
+    // Reset to a clean slate with deterministic sequences. Raw because Prisma has no
+    // TRUNCATE ... RESTART IDENTITY CASCADE — and deleteMany() in dependency order would be
+    // both slower and easy to get subtly wrong as the schema grows.
+    await tx.$executeRawUnsafe(`
+      TRUNCATE outbox, otp_codes, order_photos, order_events, messages, transactions,
+               refunds, orders, drivers, users, operators
+      RESTART IDENTITY CASCADE
+    `);
 
-    for (const phone of USERS) {
-      await client.query('INSERT INTO users(phone_number) VALUES ($1)', [phone]);
-    }
+    await tx.user.createMany({ data: USERS.map((phone_number) => ({ phone_number })) });
+
+    await tx.operator.createMany({
+      data: OPERATORS.map((o) => ({
+        username: o.username,
+        display_name: o.displayName,
+        password_hash: hashSecret(o.password),
+        created_by: 'system:seed',
+      })),
+    });
 
     const driverIds = [];
-    for (const o of OPERATORS) {
-      await client.query(
-        `INSERT INTO operators(username, display_name, password_hash, created_by)
-         VALUES ($1, $2, $3, 'system:seed')`,
-        [o.username, o.displayName, hashSecret(o.password)]
-      );
-    }
-
     for (const d of DRIVERS) {
-      const { rows } = await client.query(
-        'INSERT INTO drivers(name, msisdn, pin_hash) VALUES ($1, $2, $3) RETURNING id',
-        [d.name, d.msisdn, hashSecret(d.pin)]
-      );
-      driverIds.push(rows[0].id);
+      // eslint-disable-next-line no-await-in-loop
+      const created = await tx.driver.create({
+        data: { name: d.name, msisdn: d.msisdn, pin_hash: hashSecret(d.pin) },
+        select: { id: true },
+      });
+      driverIds.push(created.id);
     }
 
     let receiptSeq = 1;
     for (const o of ORDERS) {
       const driverId = o.driverIdx ? driverIds[o.driverIdx - 1] : null;
-      const { rows } = await client.query(
-        `INSERT INTO orders(user_phone, status, total_amount, items, lat, lng, landmark_text, driver_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-        [o.phone, o.status, o.amount, JSON.stringify(o.items), o.lat, o.lng, o.landmark, driverId]
-      );
-      const orderId = rows[0].id;
+      // eslint-disable-next-line no-await-in-loop
+      const order = await tx.order.create({
+        data: {
+          user_phone: o.phone,
+          status: o.status,
+          total_amount: o.amount,
+          items: o.items,
+          lat: o.lat,
+          lng: o.lng,
+          landmark_text: o.landmark,
+          driver_id: driverId,
+        },
+        select: { id: true },
+      });
+      const orderId = order.id;
 
       // Synthesize the audit trail for the path this order has walked.
       const path = PATHS[o.status];
@@ -120,34 +129,53 @@ async function seed() {
       for (const to of path) {
         const actor = ['DISPATCHED', 'IN_TRANSIT', 'DELIVERED'].includes(to) && driverId
           ? `driver:${driverId}` : 'system';
-        await client.query(
-          `INSERT INTO order_events(order_id, from_status, to_status, actor, note)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [orderId, from, to, actor, 'seed']
-        );
+        // eslint-disable-next-line no-await-in-loop
+        await tx.orderEvent.create({
+          data: { order_id: orderId, from_status: from, to_status: to, actor, note: 'seed' },
+        });
         from = to;
       }
 
       // A couple of chat messages so the thread isn't empty.
-      await client.query(
-        `INSERT INTO messages(order_id, sender, body) VALUES ($1, 'user', $2)`,
-        [orderId, o.items[0].text]
-      );
+      const messages = [{ order_id: orderId, sender: 'user', body: o.items[0].text }];
       if (o.status !== 'PENDING_PAYMENT') {
-        await client.query(
-          `INSERT INTO messages(order_id, sender, body) VALUES ($1, 'system', $2)`,
-          [orderId, 'Payment confirmed. We are coordinating your delivery.']
-        );
+        messages.push({
+          order_id: orderId,
+          sender: 'system',
+          body: 'Payment confirmed. We are coordinating your delivery.',
+        });
       }
+      // eslint-disable-next-line no-await-in-loop
+      await tx.message.createMany({ data: messages });
 
       // Matched receipt for every order that has been paid.
       if (o.status !== 'PENDING_PAYMENT' && o.status !== 'FAILED_REFUND') {
-        await client.query(
-          `INSERT INTO transactions(order_id, telecom_receipt_id, sender_msisdn, amount, raw_sms, matched)
-           VALUES ($1, $2, $3, $4, $5, true)`,
-          [orderId, `SEED-RCPT-${receiptSeq++}`, o.phone, o.amount,
-           `You have received $${o.amount} from ${o.phone}. Ref SEED-RCPT.`]
-        );
+        // eslint-disable-next-line no-await-in-loop
+        await tx.transaction.create({
+          data: {
+            order_id: orderId,
+            telecom_receipt_id: `SEED-RCPT-${receiptSeq++}`,
+            sender_msisdn: o.phone,
+            amount: o.amount,
+            raw_sms: `You have received $${o.amount} from ${o.phone}. Ref SEED-RCPT.`,
+            matched: true,
+          },
+        });
+      }
+
+      // An outstanding refund on the failed order, so the reconciliation queue has a real
+      // item: money we owe a customer that has not gone back yet.
+      if (o.status === 'FAILED_REFUND') {
+        // eslint-disable-next-line no-await-in-loop
+        await tx.refund.create({
+          data: {
+            order_id: orderId,
+            amount: o.amount,
+            reason: 'seed: order failed after payment',
+            status: 'owed',
+            created_by: 'system:seed',
+          },
+        });
       }
 
       if (o.refPhoto) photoJobs.push({ orderId, kind: 'order_ref', label: 'Reference', bg: '#e6c65c' });
@@ -155,43 +183,49 @@ async function seed() {
     }
 
     // One unmatched receipt so the operator's reconcile queue has a real item to resolve.
-    await client.query(
-      `INSERT INTO transactions(order_id, telecom_receipt_id, sender_msisdn, amount, raw_sms, matched)
-       VALUES (NULL, 'SEED-UNMATCHED-1', '+252612345678', '99.00',
-               'You have received $99.00 from +252612345678. Ref SEED-UNMATCHED.', false)`
-    );
-
-    await client.query('COMMIT');
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
+    await tx.transaction.create({
+      data: {
+        order_id: null,
+        telecom_receipt_id: 'SEED-UNMATCHED-1',
+        sender_msisdn: '+252612345678',
+        amount: '99.00',
+        raw_sms: 'You have received $99.00 from +252612345678. Ref SEED-UNMATCHED.',
+        matched: false,
+      },
+    });
+  }, { timeout: 30000 });
 
   // Photos: upload bytes to MinIO, then index them. Deterministic keys → idempotent overwrite.
   for (const job of photoJobs) {
-    const ext = 'svg';
-    const key = `orders/${job.orderId}/${job.kind}.${ext}`;
+    const key = `orders/${job.orderId}/${job.kind}.svg`;
     try {
+      // eslint-disable-next-line no-await-in-loop
       await putObject(key, svgPhoto(job.label, job.bg), 'image/svg+xml');
-      await pool.query(
-        `INSERT INTO order_photos(order_id, kind, object_key, content_type, uploaded_by)
-         VALUES ($1, $2, $3, 'image/svg+xml', 'system')
-         ON CONFLICT (object_key) DO UPDATE SET created_at = now()`,
-        [job.orderId, job.kind, key]
-      );
+      // eslint-disable-next-line no-await-in-loop
+      await prisma.orderPhoto.upsert({
+        where: { object_key: key },
+        update: { created_at: new Date() },
+        create: {
+          order_id: job.orderId,
+          kind: job.kind,
+          object_key: key,
+          content_type: 'image/svg+xml',
+          uploaded_by: 'system',
+        },
+      });
     } catch (err) {
       console.warn(`⚠ photo seed skipped for order ${job.orderId} (${job.kind}): ${err.message}`);
     }
   }
 
-  const { rows } = await pool.query('SELECT status, count(*) FROM orders GROUP BY status ORDER BY status');
+  const counts = await prisma.order.groupBy({ by: ['status'], _count: { _all: true } });
   console.log('Seed complete. Orders by status:');
-  for (const r of rows) console.log(`  ${r.status.padEnd(16)} ${r.count}`);
+  for (const c of counts.sort((a, b) => a.status.localeCompare(b.status))) {
+    console.log(`  ${c.status.padEnd(16)} ${c._count._all}`);
+  }
   console.log(`Drivers: ${DRIVERS.map((d) => `${d.name}/${d.pin}`).join(', ')}`);
   console.log(`Operators: ${OPERATORS.map((o) => `${o.username}/${o.password}`).join(', ')}`);
-  await pool.end();
+  await prisma.$disconnect();
 }
 
 seed().catch((err) => { console.error('Seed failed:', err); process.exit(1); });

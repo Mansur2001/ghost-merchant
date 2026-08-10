@@ -2,10 +2,16 @@
 // SAME transaction as the state change (events/outbox.js), and — for status changes — is
 // validated by the state machine and recorded in the audit log.
 //
-// Events are no longer published directly from here. `publish()` after `COMMIT` is two steps
-// with a crash-shaped gap between them; the outbox closes it. Commands enqueue, then call
+// Events are never published directly from here. `publish()` after `COMMIT` is two steps with
+// a crash-shaped gap between them; the outbox closes it. Commands enqueue, then call
 // wakeOutbox() after the transaction returns so the relay delivers immediately.
-import { withTransaction, inTransaction, query } from '../db/pool.js';
+//
+// WHERE RAW SQL SURVIVES THE PRISMA MIGRATION, and why:
+//   * `SELECT ... FOR UPDATE` — Prisma has no row-lock API. Without the lock, two concurrent
+//     transitions both read the old status and both pass the state-machine check.
+//   * conditional `ON CONFLICT ... DO NOTHING` against a PARTIAL unique index — Prisma's
+//     upsert can't target one, and that index is what makes offline replay idempotent.
+import { prisma, withCriticalTransaction, inTransaction } from '../db/prisma.js';
 import { assertTransition, AUTO_RESPONSES } from '../domain/stateMachine.js';
 import { normalizeMsisdnOrThrow } from '../domain/phone.js';
 import { EVENTS } from '../events/bus.js';
@@ -17,48 +23,55 @@ import { enqueue, wakeOutbox } from '../events/outbox.js';
 // `id` may be supplied by the client (a UUID it minted itself). That makes creation
 // IDEMPOTENT: a flaky mobile connection that retries a request whose response was lost gets
 // the original order back instead of silently creating a second one the customer then pays
-// for twice. It is also the mechanism the offline write queue (P2) will use.
+// for twice. It is also what the offline write queue relies on.
 //
 // The client chooses the id, never the owner: the phone still comes from the verified session.
 export async function createOrder({ id, userPhone, items, totalAmount, lat, lng, landmark }) {
   if (!userPhone) throw new Error('userPhone required');
   if (!landmark || !landmark.trim()) throw new Error('landmark is mandatory');
   if (id != null && !isUuid(id)) throw new Error('id must be a UUID');
-  // Enforce the phone rules server-side; store canonical E.164 as the identity.
   const phone = normalizeMsisdnOrThrow(userPhone);
   const orderId = id || newOrderId();
 
-  const result = await withTransaction(async (client) => {
-    await client.query(
-      `INSERT INTO users(phone_number) VALUES ($1)
-       ON CONFLICT (phone_number) DO NOTHING`,
-      [phone]
-    );
-    const { rows } = await client.query(
-      `INSERT INTO orders(id, user_phone, items, total_amount, lat, lng, landmark_text)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (id) DO NOTHING
-       RETURNING *`,
-      [orderId, phone, JSON.stringify(items || []), totalAmount, lat, lng, landmark]
-    );
+  // CP path: an order is what every other write hangs off, so it must be durable before the
+  // customer is told it exists and asked to pay for it.
+  const result = await withCriticalTransaction(async (tx) => {
+    await tx.user.upsert({
+      where: { phone_number: phone },
+      update: {},
+      create: { phone_number: phone },
+    });
 
-    // Conflict: this id already exists, so it's a retry. Return the existing order — but only
-    // to its owner. Otherwise supplying someone else's order id would leak their order.
-    if (rows.length === 0) {
-      const { rows: existing } = await client.query('SELECT * FROM orders WHERE id = $1', [orderId]);
-      if (!existing[0] || existing[0].user_phone !== phone) {
-        throw new Error('id already in use');
-      }
-      return { order: existing[0], created: false };
+    const existing = await tx.order.findUnique({ where: { id: orderId } });
+    if (existing) {
+      // A retry. Return the original — but only to its owner, or supplying someone else's
+      // order id would leak their order.
+      if (existing.user_phone !== phone) throw new Error('id already in use');
+      return { order: existing, created: false };
     }
 
-    const created = rows[0];
-    await client.query(
-      `INSERT INTO order_events(order_id, from_status, to_status, actor, note)
-       VALUES ($1, NULL, 'PENDING_PAYMENT', 'system', 'order created')`,
-      [created.id]
-    );
-    await enqueue(client, EVENTS.ORDER_CREATED, { orderId: created.id, order: created });
+    const created = await tx.order.create({
+      data: {
+        id: orderId,
+        user_phone: phone,
+        items: items || [],
+        total_amount: totalAmount,
+        lat: lat ?? null,
+        lng: lng ?? null,
+        landmark_text: landmark,
+      },
+    });
+
+    await tx.orderEvent.create({
+      data: {
+        order_id: created.id,
+        from_status: null,
+        to_status: 'PENDING_PAYMENT',
+        actor: 'system',
+        note: 'order created',
+      },
+    });
+    await enqueue(tx, EVENTS.ORDER_CREATED, { orderId: created.id, order: created });
     return { order: created, created: true };
   });
 
@@ -73,23 +86,29 @@ export async function createOrder({ id, userPhone, items, totalAmount, lat, lng,
 // Pass `client` to enlist in an existing transaction — payment matching does this so the
 // receipt, the transition and both events commit as one unit.
 export async function transitionOrder(orderId, toStatus, actor = 'system', note = null, { client } = {}) {
-  const result = await inTransaction(client, async (tx) => {
-    // Lock the row so concurrent transitions can't race.
-    const { rows } = await tx.query('SELECT * FROM orders WHERE id = $1 FOR UPDATE', [orderId]);
-    const order = rows[0];
+  // CP path: order state is the single source of truth, so a transition is acknowledged only
+  // once it is durable. When nested in a caller's transaction, that caller chose the level.
+  const run = client ? (fn) => fn(client) : withCriticalTransaction;
+
+  const result = await run(async (tx) => {
+    // RAW, and it must stay raw: Prisma has no row-lock API. Without FOR UPDATE two
+    // concurrent transitions both read the old status, both pass assertTransition, and the
+    // second silently overwrites the first — an order could go DELIVERED then IN_TRANSIT.
+    const locked = await tx.$queryRaw`
+      SELECT id, status FROM orders WHERE id = ${orderId}::uuid FOR UPDATE
+    `;
+    const order = locked[0];
     if (!order) throw new Error(`order ${orderId} not found`);
 
     assertTransition(order.status, toStatus); // throws on illegal transition
 
-    const { rows: updated } = await tx.query(
-      `UPDATE orders SET status = $1, updated_at = now() WHERE id = $2 RETURNING *`,
-      [toStatus, orderId]
-    );
-    await tx.query(
-      `INSERT INTO order_events(order_id, from_status, to_status, actor, note)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [orderId, order.status, toStatus, actor, note]
-    );
+    const updated = await tx.order.update({
+      where: { id: orderId },
+      data: { status: toStatus, updated_at: new Date() },
+    });
+    await tx.orderEvent.create({
+      data: { order_id: orderId, from_status: order.status, to_status: toStatus, actor, note },
+    });
     await enqueue(tx, EVENTS.ORDER_STATE_CHANGED, {
       orderId,
       from: order.status,
@@ -102,7 +121,7 @@ export async function transitionOrder(orderId, toStatus, actor = 'system', note 
     const auto = AUTO_RESPONSES[toStatus];
     if (auto) await postMessage({ orderId, sender: 'system', body: auto }, { client: tx });
 
-    return { previous: order, order: updated[0] };
+    return { previous: order, order: updated };
   });
 
   // If we're nested inside someone else's transaction, THEY wake the relay after committing —
@@ -113,12 +132,11 @@ export async function transitionOrder(orderId, toStatus, actor = 'system', note 
 
 // Assign a driver (does not itself change status; pairs with a DISPATCHED transition).
 export async function assignDriver(orderId, driverId, { client } = {}) {
-  const run = (tx) =>
-    tx.query('UPDATE orders SET driver_id = $1, updated_at = now() WHERE id = $2', [
-      driverId,
-      orderId,
-    ]);
-  return client ? run(client) : run({ query });
+  const db = client || prisma;
+  return db.order.update({
+    where: { id: orderId },
+    data: { driver_id: BigInt(driverId), updated_at: new Date() },
+  });
 }
 
 // Post a chat/timeline message. Accepts an existing transaction client so it can be part of
@@ -132,24 +150,26 @@ export async function postMessage({ orderId, sender, body, clientId }, { client 
   if (clientId != null && !isUuid(clientId)) throw new Error('clientId must be a UUID');
 
   const result = await inTransaction(client, async (tx) => {
-    const { rows } = await tx.query(
-      `INSERT INTO messages(order_id, sender, body, client_id) VALUES ($1, $2, $3, $4)
-       ON CONFLICT (client_id) WHERE client_id IS NOT NULL DO NOTHING
-       RETURNING *`,
-      [orderId, sender, body, clientId ?? null]
-    );
+    // RAW, and it must stay raw: the uniqueness lives in a PARTIAL index
+    // (`WHERE client_id IS NOT NULL`), which Prisma's upsert cannot target. Doing a
+    // find-then-create instead would race two replays into two rows.
+    const inserted = await tx.$queryRaw`
+      INSERT INTO messages(order_id, sender, body, client_id)
+      VALUES (${orderId}::uuid, ${sender}, ${body}, ${clientId ?? null}::uuid)
+      ON CONFLICT (client_id) WHERE client_id IS NOT NULL DO NOTHING
+      RETURNING *
+    `;
 
     // Conflict: this exact message already landed, so this is a replay. Return the original
     // and emit nothing — re-broadcasting would push a duplicate into every open thread.
-    if (rows.length === 0) {
-      const { rows: existing } = await tx.query('SELECT * FROM messages WHERE client_id = $1', [
-        clientId,
-      ]);
-      return { message: existing[0], created: false };
+    if (inserted.length === 0) {
+      const existing = await tx.message.findFirst({ where: { client_id: clientId } });
+      return { message: existing, created: false };
     }
 
-    await enqueue(tx, EVENTS.MESSAGE_POSTED, { orderId, message: rows[0] });
-    return { message: rows[0], created: true };
+    const message = inserted[0];
+    await enqueue(tx, EVENTS.MESSAGE_POSTED, { orderId, message });
+    return { message, created: true };
   });
 
   if (!client && result.created) wakeOutbox();
