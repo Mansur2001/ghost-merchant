@@ -1,4 +1,4 @@
-# CLAUDE.md — Ghost Merchant
+# CLAUDE.md — GuriKaabe
 
 Guidance for Claude Code (and humans) working in this repo.
 
@@ -302,6 +302,15 @@ network. That gap is the only thing between this build and a real launch:
 - a Play reviewer who cannot receive a login code cannot get past the first screen, and the
   app is rejected as broken.
 See `oracle/README.md`.
+
+### Phone verification is moving to MISSED CALLS (design: `docs/MISSED_CALL_VERIFICATION.md`)
+Sending an SMS makes verification an infrastructure problem — an A2P agreement we can't get, or
+a SIM that eventually looks like spam. **Inverting it removes the sending entirely**: the
+customer calls a number we own from the phone they're registering and hangs up; the caller ID
+IS the proof. No code, no queue, no per-message cost, nothing to throttle. It also kills OTP
+phishing by construction — with no code in the system, "never tell anyone your code" becomes
+unconditionally true. Reuses the existing `tel:`/ACTION_DIAL path, the Oracle poll loop, and
+the one-live-challenge rule. The SMS path below stays as the fallback and for `+1`.
 
 ### How login codes reach a Somali handset — no telecom integration
 There is deliberately **no Golis/Hormuud A2P agreement**: it needs a registered local company,

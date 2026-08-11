@@ -1,4 +1,4 @@
-# Ghost Merchant — Sovereign Delivery Coordination MVP
+# GuriKaabe — Sovereign Delivery Coordination MVP
 
 A zero-integration, local-first delivery coordination platform for the East African market
 (EVC Plus / eDahab via USSD `tel:` bridging + Android SMS Oracle). Fully self-hosted, no

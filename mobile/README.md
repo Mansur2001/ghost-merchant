@@ -1,6 +1,6 @@
 # GuriKaabe — Android app
 
-A Capacitor shell around the three Ghost Merchant PWAs. The web apps stay the single source
+A Capacitor shell around the three GuriKaabe PWAs. The web apps stay the single source
 of truth: `build-www.mjs` copies `frontend/` into `www/` rather than forking it, so a fix to
 the customer flow ships to web and Android from the same file.
 

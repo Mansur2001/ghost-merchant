@@ -119,7 +119,7 @@ async function boot() {
     console.error('MinIO bucket init failed (continuing):', err.message);
   }
   server.listen(config.port, () => {
-    console.log(`Ghost Merchant backend listening on :${config.port} (${config.env})`);
+    console.log(`GuriKaabe backend listening on :${config.port} (${config.env})`);
   });
 }
 

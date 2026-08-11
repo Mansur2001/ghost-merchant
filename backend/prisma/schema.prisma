@@ -1,4 +1,4 @@
-// Ghost Merchant data model.
+// GuriKaabe data model.
 //
 // ⚠️ THIS FILE IS NOT THE WHOLE SCHEMA. Prisma cannot express several things this system
 // depends on, and they live as raw SQL inside the migrations instead:

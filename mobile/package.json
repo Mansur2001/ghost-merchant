@@ -2,7 +2,7 @@
   "name": "gurikaabe-mobile",
   "version": "0.1.0",
   "private": true,
-  "description": "GuriKaabe \u2014 Android shell (Capacitor) around the Ghost Merchant PWAs.",
+  "description": "GuriKaabe \u2014 Android shell (Capacitor) around the GuriKaabe PWAs.",
   "type": "module",
   "scripts": {
     "build": "node build-www.mjs && node configure-android.mjs",
