@@ -303,7 +303,7 @@ network. That gap is the only thing between this build and a real launch:
   app is rejected as broken.
 See `oracle/README.md`.
 
-### Phone verification is moving to MISSED CALLS (design: `docs/MISSED_CALL_VERIFICATION.md`)
+### Phone verification by MISSED CALL — BUILT (`docs/MISSED_CALL_VERIFICATION.md`)
 Sending an SMS makes verification an infrastructure problem — an A2P agreement we can't get, or
 a SIM that eventually looks like spam. **Inverting it removes the sending entirely**: the
 customer calls a number we own from the phone they're registering and hangs up; the caller ID
@@ -311,6 +311,23 @@ IS the proof. No code, no queue, no per-message cost, nothing to throttle. It al
 phishing by construction — with no code in the system, "never tell anyone your code" becomes
 unconditionally true. Reuses the existing `tel:`/ACTION_DIAL path, the Oracle poll loop, and
 the one-live-challenge rule. The SMS path below stays as the fallback and for `+1`.
+
+- **The TICKET is the security property, not a convenience.** With a passcode an attacker who
+  opens a challenge for someone else's number gets nothing — the code goes to the victim's
+  handset. Here there is no secret in flight, so the attacker is waiting for *a call from that
+  number*, which the victim may make for their own reasons. A session is therefore handed only
+  to the client holding the ticket that opened the challenge, never to "whoever asks about this
+  number". Deleting that check silently breaks the whole scheme.
+- Three rules hold it together: **latest open wins** (`phone` is the PK, so a victim's own
+  attempt replaces an attacker's challenge rather than racing it); **a call matching no live
+  challenge is DISCARDED**, never banked for a later challenge to draw on; **verification is
+  single-use**.
+- `VERIFY_CALL_NUMBER` unset = the flow is advertised as unavailable (`GET /api/auth/methods`)
+  and clients fall back to SMS. Never hardcode "Somali numbers call" in a client — whether a
+  call-capable device exists is deployment config, and a dead button is worse than no button.
+- **Android is the weak part**: a call only reaches the log after ringing out (20–30s). A USB
+  GSM modem reports caller ID on the first ring (`AT+CLIP`) and rejects instantly (`ATH`). If
+  this becomes the primary path, the modem is the right hardware.
 
 ### How login codes reach a Somali handset — no telecom integration
 There is deliberately **no Golis/Hormuud A2P agreement**: it needs a registered local company,

@@ -159,6 +159,103 @@ async function verifyCode() {
   toast('Phone verified ✓');
 }
 
+// ── Missed-call verification ──
+//
+// The inverse of a passcode: instead of us sending a secret to the phone and asking for it
+// back, the customer's phone reaches us and the caller ID is the proof. Nothing is sent, so
+// there is no code to intercept, no per-message cost, and no queue that can stall.
+//
+// The ticket returned by /call/start is this client's claim on the challenge — it is what
+// makes the session ours rather than "whoever asks about this number". Held in memory only:
+// it must not outlive the tab, and it is never shown to the customer.
+let callTicket = null;
+let callPollTimer = null;
+
+async function loadAuthMethods() {
+  const res = await api('/auth/methods');
+  // Whether a call-capable device exists is deployment configuration, not something the
+  // client can assume — a dead "call to verify" button is worse than no button.
+  if (res && res.call) $('callStep').classList.remove('hidden');
+}
+loadAuthMethods();
+
+function stopCallPolling() {
+  if (callPollTimer) clearInterval(callPollTimer);
+  callPollTimer = null;
+  callTicket = null;
+}
+
+async function startCallVerification() {
+  if (!phoneValid) return toast('Enter a valid mobile number.');
+  $('callVerifyBtn').disabled = true;
+  $('otpStatus').textContent = '';
+
+  const res = await api('/auth/call/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone: phoneE164 }),
+  });
+  $('callVerifyBtn').disabled = false;
+
+  if (res.error || !res.ticket) {
+    $('otpStatus').textContent = res.retryAfter
+      ? `${res.error}. Try again in ${res.retryAfter}s.`
+      : res.error || 'Could not start verification.';
+    return;
+  }
+
+  callTicket = res.ticket;
+  $('callInstructions').classList.remove('hidden');
+  $('callVerifyBtn').classList.add('hidden');
+  // Same permission-free dialer launch the USSD payment flow uses (ACTION_DIAL on Android).
+  // A plain voice call also works on iOS, where USSD from a tel: link is blocked — so this is
+  // the more portable half of the app.
+  $('callLink').href = `tel:${res.callNumber}`;
+  $('callLink').textContent = `Tap to call ${res.callNumber}`;
+  $('callWaiting').textContent = 'Waiting for your call…';
+
+  const interval = res.pollIntervalMs || 2000;
+  callPollTimer = setInterval(() => pollCallStatus(), interval);
+  pollCallStatus();
+}
+
+async function pollCallStatus() {
+  if (!callTicket) return;
+  const res = await api('/auth/call/status', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone: phoneE164, ticket: callTicket }),
+  });
+
+  if (res.status === 'verified' && res.token) {
+    stopCallPolling();
+    $('callInstructions').classList.add('hidden');
+    $('callVerifyBtn').classList.remove('hidden');
+    setSession(res.token, res.phone);
+    $('signedInAs').textContent = res.phone;
+    showView('startView');
+    toast('Phone verified ✓');
+    return;
+  }
+
+  // A 401 here means the challenge expired or was replaced (someone re-opened one for this
+  // number). Stop rather than polling a dead ticket forever, and say what to do next.
+  if (res.error) {
+    stopCallPolling();
+    $('callWaiting').textContent = 'That verification expired — tap to try again.';
+    $('callInstructions').classList.add('hidden');
+    $('callVerifyBtn').classList.remove('hidden');
+  }
+}
+
+$('callVerifyBtn').addEventListener('click', startCallVerification);
+$('callCancelBtn').addEventListener('click', () => {
+  stopCallPolling();
+  $('callInstructions').classList.add('hidden');
+  $('callVerifyBtn').classList.remove('hidden');
+  requestCode();
+});
+
 $('sendCodeBtn').addEventListener('click', requestCode);
 $('resendBtn').addEventListener('click', requestCode);
 $('verifyBtn').addEventListener('click', verifyCode);

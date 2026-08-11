@@ -123,7 +123,22 @@
         <label for="phone">Your phone number (this is your identity)</label>
         <input id="phone" type="tel" inputmode="tel" placeholder="61 234 5678" autocomplete="tel" />
         <div class="phone-hint muted" id="phoneHint">Enter your mobile number</div>
-        <button id="sendCodeBtn" type="button">Send me a code</button>
+        <!-- Missed-call verification is the primary path where a call-capable device is
+             configured. Nothing is sent to the customer: the caller ID IS the proof, which
+             is why it costs nothing, cannot be throttled by a telecom, and leaves no code
+             for anyone pretending to be support to ask for. -->
+        <div id="callStep" class="hidden">
+          <button id="callVerifyBtn" type="button">Verify by calling — it's free</button>
+          <div id="callInstructions" class="hidden">
+            <p class="muted">Call the number below from <strong>this phone</strong>, then hang up
+              as soon as it rings. We never answer, so you are never charged.</p>
+            <a id="callLink" class="paylink" href="#">Tap to call</a>
+            <p class="muted" id="callWaiting">Waiting for your call…</p>
+            <button class="secondary" id="callCancelBtn" type="button">Use a text code instead</button>
+          </div>
+        </div>
+
+        <button id="sendCodeBtn" type="button">Send me a code by text</button>
 
         <div id="codeStep" class="hidden">
           <label for="codeInput">Enter the 6-digit code we sent you</label>
@@ -205,6 +220,12 @@
           <h3 style="margin:0;">FAQ</h3>
           <button class="secondary" id="faqBack" type="button" style="max-width:90px;margin:0;">← Back</button>
         </div>
+        <details><summary>Why am I calling instead of getting a code?</summary>
+          <p class="muted">Because it is faster and it costs you nothing. Your call proves you're
+          holding the phone you're signing up with — that's all a code was ever doing. Hang up as
+          soon as it rings; we never answer, so you are never charged.
+          <strong>We will never call you and ask for a code or a PIN.</strong></p></details>
+
         <details open><summary>What is GuriKaabe?</summary>
           <p class="muted">A local-first way to order goods from the market and have a driver bring them to you. You pay the driver directly from your own phone — no bank account or foreign app needed.</p></details>
         <details><summary>How do I pay?</summary>

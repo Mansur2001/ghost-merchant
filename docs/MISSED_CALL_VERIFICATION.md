@@ -1,6 +1,13 @@
 # Verifying a phone number without sending anything
 
-**Status: design sketch. Not built.**
+**Status: BUILT.** Backend, Oracle device side, and the customer PWA. Verified by
+`scripts/verify/10-missed-call-auth.sh` (36 live checks) and `backend/tests/callChallenge.test.js`
+(15 unit tests). What has *not* happened is a real call over a Somali network — see
+"Open questions" at the end, which is still where the risk lives.
+
+Set `VERIFY_CALL_NUMBER` to the Oracle device's own MSISDN to enable it. Left blank, the flow
+is advertised as unavailable via `GET /api/auth/methods` and clients fall back to SMS
+passcodes, so a deployment without a call-capable device is supported rather than broken.
 
 ## Why replace the passcode
 
@@ -31,7 +38,7 @@ prepaid balances are thin, and SMS delivery is unreliable. That is this market.
      ├─────────────────────────────────►│                                │
      │                                  │  open a challenge for that     │
      │                                  │  number, mint a claim ticket   │
-     │   { callNumber, ticket, 5 min }  │                                │
+     │  { callNumber, ticket, 10 min }  │                                │
      │◄─────────────────────────────────┤                                │
      │                                  │                                │
      │  taps "Call to verify"  →  tel: link opens the dialer, pre-filled  │
@@ -67,6 +74,17 @@ Almost everything. This is a smaller change than the SMS queue was.
 why iPhone users have to copy the dial string by hand; a plain voice call from a `tel:` link
 works fine on iOS. Verification would be the *more* portable half of the app.
 
+## Where it lives
+
+| | |
+|---|---|
+| `domain/callChallenge.js` | Ticket generation, hashing, TTLs. Pure, unit-tested. |
+| `commands/callAuth.js` | `startCallChallenge`, `recordInboundCall`, `pollCallChallenge`. |
+| `routes/auth.js` | `GET /auth/methods`, `POST /auth/call/start`, `POST /auth/call/status`. |
+| `routes/webhook.js` | `POST /oracle/calls` — HMAC-signed, the device's only surface. |
+| `oracle/termux-oracle.js` | `pollCalls()` on the existing tick. |
+| `frontend/user/` | Call button, `tel:` link, polling, and the FAQ entry. |
+
 ## Data model
 
 A new table rather than bending `otp_codes`, because the shapes genuinely differ: there is no
@@ -74,14 +92,14 @@ secret sent to the user, and the thing held by the client is a claim ticket, not
 
 ```prisma
 model CallChallenge {
-  id          String    @id @default(uuid()) @db.Uuid
-  phone       String    // E.164, the number being proven
-  ticket_hash String    // scrypt. The client's claim on this challenge — see below.
-  verified_at DateTime? @db.Timestamptz(6)
-  expires_at  DateTime  @db.Timestamptz(6)
-  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+  phone        String    @id   // E.164. The PK, not a surrogate id — see below.
+  ticket_hash  String          // scrypt. The client's claim on this challenge.
+  verified_at  DateTime? @db.Timestamptz(6)
+  expires_at   DateTime  @db.Timestamptz(6)
+  last_open_at DateTime  @default(now()) @db.Timestamptz(6)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
 
-  @@unique([phone])     // one live challenge per number — same rule as otp_codes
+  @@index([expires_at], map: "idx_call_challenge_expires")
   @@map("call_challenges")
 }
 ```
@@ -104,7 +122,7 @@ Three rules close it:
    phone number" — it resolves one specific challenge, and only a client presenting that
    challenge's ticket gets a token. An attacker's challenge cannot hand a token to a browser
    that never started it.
-2. **Latest request wins.** `@@unique([phone])` plus upsert means a victim starting their own
+2. **Latest request wins.** `phone` as the primary key plus a conditional upsert means a victim starting their own
    verification *replaces* the attacker's challenge and invalidates its ticket. The only way
    an attacker's ticket survives to be resolved is if the victim calls the number without
    having requested verification — and the number is only ever shown inside that flow.

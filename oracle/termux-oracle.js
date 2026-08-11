@@ -184,10 +184,75 @@ async function pollOutbound() {
   }
 }
 
+// ── Inbound calls: missed-call verification ──
+//
+// The customer calls this phone from the number they are registering and hangs up. The caller
+// ID is the proof — nothing is ever sent to them, which is why this path needs no telecom
+// agreement, costs nothing per verification, and has no queue that can stall.
+//
+// We report WHO rang and let the server decide what it means, exactly as with receipts: a
+// matching rule that needs changing must not require physically holding this handset.
+//
+// ANDROID'S LIMITATION, and it is a real one: a call only appears in the log once it has
+// finished ringing out, so the customer waits 20-30 seconds. A USB GSM modem reports caller ID
+// on the FIRST ring (AT+CLIP) and can hang up instantly with ATH — sub-second, and the call
+// never connects so it cannot cost the customer anything. If missed-call becomes the primary
+// path, the modem is the right hardware. See docs/MISSED_CALL_VERIFICATION.md.
+const seenCalls = new Set();
+
+async function pollCalls() {
+  let log;
+  try {
+    const { stdout } = await run('termux-telephony-calllog', []);
+    log = JSON.parse(stdout || '[]');
+  } catch (e) {
+    // Same permission surface as the inbox poll; say it once rather than every tick.
+    if (/not found|ENOENT/i.test(e.message)) {
+      fault('callapi', 'termux-telephony-calllog missing — install the Termux:API *app*.');
+    } else if (/permission/i.test(e.message)) {
+      fault('callperm', 'Termux:API needs the phone/call-log permission.');
+    }
+    return;
+  }
+  if (!Array.isArray(log)) return;
+
+  const cutoff = Date.now() - 10 * 60 * 1000; // a challenge is dead after 10 minutes anyway
+  const fresh = [];
+  for (const entry of log) {
+    // INCOMING covers a call we answered; MISSED and REJECTED are the normal shapes here,
+    // since the phone is left to ring out. BLOCKED never reaches the network stack we want.
+    const type = String(entry.type || '').toUpperCase();
+    if (type !== 'MISSED' && type !== 'INCOMING' && type !== 'REJECTED') continue;
+
+    const at = Date.parse(entry.date);
+    if (!Number.isFinite(at) || at < cutoff) continue;
+
+    const from = String(entry.phone_number || entry.number || '').trim();
+    if (!from || from === '-1' || /unknown|private/i.test(from)) continue;
+
+    // The call log is a rolling window we re-read every tick, so dedupe on (number, time).
+    const key = `${from}@${at}`;
+    if (seenCalls.has(key)) continue;
+    seenCalls.add(key);
+    fresh.push({ from, at: new Date(at).toISOString() });
+  }
+  if (seenCalls.size > 500) seenCalls.clear(); // bounded; the server dedupes authoritatively
+
+  if (fresh.length === 0) return;
+  const res = await post('/oracle/calls', { calls: fresh });
+  for (let i = 0; i < fresh.length; i++) {
+    // Mask the number: this log is a verification attempt, which is PII.
+    const masked = fresh[i].from.replace(/\d(?=\d{3})/g, '•');
+    const matched = res && res.results && res.results[i] && res.results[i].matched;
+    console.log(matched ? `☎ verified ${masked}` : `☎ ${masked} — no pending verification`);
+  }
+}
+
 setInterval(pollSms, POLL_MS);
 setInterval(pollOutbound, POLL_MS);
+setInterval(pollCalls, POLL_MS);
 setInterval(() => post('/heartbeat', { ts: Date.now(), device: 'termux' }), 60000);
 post('/heartbeat', { ts: Date.now(), device: 'termux', boot: true });
-console.log('Oracle listening (receiving receipts + sending login codes).');
+console.log('Oracle listening (receipts in, login codes out, verification calls in).');
 console.log('Forwarding messages from:', SENDERS.join(', '));
 console.log('Backend:', BACKEND);

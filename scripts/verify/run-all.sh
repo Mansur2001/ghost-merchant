@@ -44,7 +44,8 @@ export OPERATOR_PASSWORD=${OPERATOR_PASSWORD:-seeded-operator-pw-1}
 export ORACLE_WEBHOOK_SECRET=${ORACLE_WEBHOOK_SECRET:-$(grep -E '^ORACLE_WEBHOOK_SECRET=' .env | cut -d= -f2-)}
 
 total_fail=0
-for suite in scripts/verify/0*.sh; do
+# [0-9]* rather than 0* — a tenth suite must not silently stop being run.
+for suite in scripts/verify/[0-9]*.sh; do
   [ "$(basename "$suite")" = "run-all.sh" ] && continue
   reset_stack
   echo

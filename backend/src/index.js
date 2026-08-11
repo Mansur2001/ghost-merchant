@@ -23,6 +23,7 @@ import { disconnect as disconnectDb } from './db/prisma.js';
 import { startBusSubscriber } from './events/bus.js';
 import { startEmailSensor, stopEmailSensor } from './notify/emailSensor.js';
 import { sweepSmsQueue } from './notify/smsQueue.js';
+import { sweepExpiredCallChallenges } from './commands/callAuth.js';
 import { warnIfSingleInstance, closeRedis } from './redis/client.js';
 
 const app = express();
@@ -88,6 +89,9 @@ const housekeeping = setInterval(() => {
   sweepOutbox().catch((err) => console.error('outbox sweep failed:', err.message));
   // Undelivered login codes are plaintext credentials; don't let them accumulate.
   sweepSmsQueue().catch((err) => console.error('sms queue sweep failed:', err.message));
+  sweepExpiredCallChallenges().catch((err) =>
+    console.error('call challenge sweep failed:', err.message)
+  );
 }, 60 * 60 * 1000);
 housekeeping.unref();
 

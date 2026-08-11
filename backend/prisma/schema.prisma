@@ -182,6 +182,27 @@ model OtpCode {
   @@map("otp_codes")
 }
 
+/// Missed-call verification: proving a phone number without sending anything to it.
+///
+/// The customer calls a number we own and hangs up; the caller ID IS the proof. There is no
+/// secret in flight, so what protects this is `ticket_hash` — the session is handed only to
+/// the client that opened the challenge. See domain/callChallenge.js for why that is
+/// load-bearing rather than convenience.
+///
+/// `phone` is the PK, not a surrogate id: one live challenge per number, latest open wins.
+/// That is what stops an attacker's challenge from surviving alongside the victim's own.
+model CallChallenge {
+  phone        String    @id
+  ticket_hash  String
+  verified_at  DateTime? @db.Timestamptz(6)
+  expires_at   DateTime  @db.Timestamptz(6)
+  last_open_at DateTime  @default(now()) @db.Timestamptz(6)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([expires_at], map: "idx_call_challenge_expires")
+  @@map("call_challenges")
+}
+
 /// Transactional outbox: event rows written in the same transaction as the state change they
 /// describe, relayed after commit. `id` is also the ordering key.
 model Outbox {

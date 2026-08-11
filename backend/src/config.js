@@ -102,6 +102,13 @@ export const config = {
     },
   },
 
+  // Missed-call verification: the number customers call to prove they hold their phone.
+  // Unset = the flow is unavailable and clients fall back to an SMS passcode, so a deployment
+  // without a call-capable device is a supported configuration rather than a broken one.
+  verifyCall: {
+    number: process.env.VERIFY_CALL_NUMBER || '',
+  },
+
   // Payment sensing over email — the Oracle's job without the phone. Every US rail emails
   // the same notification it texts, and the server can read a mailbox directly: no handset,
   // no APK, no Android permissions. Unset = disabled.

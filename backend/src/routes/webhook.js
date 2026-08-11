@@ -11,6 +11,7 @@ import { recordAndMatchPayment } from '../commands/payments.js';
 import { recordHeartbeat } from '../realtime/oracleMonitor.js';
 import { parseReceipt } from '../domain/receipts.js';
 import { claimPendingSms, confirmSms } from '../notify/smsQueue.js';
+import { recordInboundCall } from '../commands/callAuth.js';
 
 export const webhookRouter = Router();
 
@@ -101,6 +102,32 @@ webhookRouter.post('/oracle/sms/sent', rawJson, verifyOracleSignature, async (re
     if (!id) return res.status(400).json({ error: 'id required' });
     const result = await confirmSms({ id, ok: ok !== false, error });
     res.json({ ok: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Inbound calls, reported by the Oracle ──
+//
+// POST /api/oracle/calls { calls: [{ from, at }] }
+//
+// This is missed-call verification's whole device-side surface: the phone (or GSM modem)
+// tells us who rang. It never decides anything — matching a caller ID to a live challenge is
+// a server decision, for the same reason receipt parsing is (domain/receipts.js): a rule that
+// needs changing must not require physical access to a handset in another country.
+//
+// A call matching no live challenge is discarded rather than remembered. The response says so
+// per call, which keeps the on-device log honest, but tells the caller nothing they could not
+// already infer — the device is already trusted by HMAC.
+webhookRouter.post('/oracle/calls', rawJson, verifyOracleSignature, async (req, res, next) => {
+  try {
+    const calls = Array.isArray(req.body?.calls) ? req.body.calls.slice(0, 50) : [];
+    const results = [];
+    for (const call of calls) {
+      results.push(await recordInboundCall({ from: call?.from, at: call?.at }));
+    }
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, results });
   } catch (err) {
     next(err);
   }

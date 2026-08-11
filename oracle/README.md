@@ -139,6 +139,23 @@ These cannot be proven in code:
    constraint, and the honest answer then is a commercial A2P agreement. US numbers don't touch
    this path at all — they go through Twilio (`docs/LIVE_SMS_SETUP.md`).
 
+4. **Inbound calls for verification.** Built — `pollCalls()` in the same script. A customer
+   calls this phone from the number they're registering and hangs up; the caller ID is the
+   proof, and we never send them anything. No telecom agreement, no per-verification cost,
+   nothing that can be throttled. Set `VERIFY_CALL_NUMBER` on the backend to THIS PHONE'S
+   number so the app knows what to tell people to call.
+
+   Leave the phone on silent and let calls ring out — never answer, or the customer is billed.
+
+   **Android's limitation is real here.** A call only lands in the call log once it has
+   finished ringing out, so the customer waits 20–30 seconds staring at a screen. A USB GSM
+   modem reports caller ID on the first ring (`AT+CLIP=1`) and hangs up instantly (`ATH`):
+   sub-second, and the call never connects. If verification-by-call becomes the main path, the
+   modem is the right hardware and this phone is the prototype.
+
+   Needs the phone/call-log permission in Termux:API, which is separate from the SMS ones.
+   See `docs/MISSED_CALL_VERIFICATION.md`.
+
 ## Operational hardening
 
 - Dedicated phone, dedicated SIM. No personal use. Treat it as a server-in-a-box.
