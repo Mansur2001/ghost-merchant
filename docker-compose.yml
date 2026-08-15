@@ -52,6 +52,12 @@ services:
     build: ./backend
     restart: unless-stopped
     env_file: .env
+    environment:
+      # Overridable from the shell so the verification suites can force the dev-log transport
+      # (they read the code back out of the response) without editing .env — which would
+      # otherwise mean flipping a real credential setting back and forth to run tests.
+      # Unset in the shell, Compose resolves this from .env as normal.
+      OTP_TRANSPORT: ${OTP_TRANSPORT:-auto}
     depends_on:
       postgres:
         condition: service_healthy

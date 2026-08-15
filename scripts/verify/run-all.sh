@@ -39,6 +39,11 @@ reset_stack() {
   docker compose exec -T backend npm run seed >/dev/null 2>&1
 }
 
+# The suites read the passcode back out of the request response, so they need the dev-log
+# transport regardless of what .env is set to for real device testing. Exported here rather
+# than assumed, so `OTP_TRANSPORT=twilio` in .env doesn't silently break suite 01.
+export OTP_TRANSPORT=log
+
 export OPERATOR_USERNAME=${OPERATOR_USERNAME:-hodan}
 export OPERATOR_PASSWORD=${OPERATOR_PASSWORD:-seeded-operator-pw-1}
 export ORACLE_WEBHOOK_SECRET=${ORACLE_WEBHOOK_SECRET:-$(grep -E '^ORACLE_WEBHOOK_SECRET=' .env | cut -d= -f2-)}

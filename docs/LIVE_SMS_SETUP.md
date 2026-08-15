@@ -89,10 +89,34 @@ TWILIO_FROM=+1XXXXXXXXXX        # the number you just bought, E.164
 `TWILIO_AUTH_TOKEN` can send messages billed to your account. It belongs in `.env` (git-ignored)
 and nowhere else — not in a screenshot, not in a commit, not in a demo video.
 
-### 4. Restart
+### 4. Prove it works before touching the app
 ```bash
-docker compose up -d backend
+node scripts/sms-preflight.mjs                      # credentials only — sends nothing
+node scripts/sms-preflight.mjs --send +12066876538  # a real text to your handset
 ```
+
+"No code arrived" has five plausible causes — bad credentials, an unverified trial
+destination, a from-number that can't send SMS, a malformed destination, or the app never
+reaching the transport. Debugging that through the sign-in screen gives you one guess per
+round trip. The preflight separates them, and translates Twilio's error codes.
+
+### 5. Switch the transport on and restart
+```bash
+# .env
+OTP_TRANSPORT=twilio
+```
+```bash
+docker compose up -d --build backend   # --build: the image COPYs src/
+```
+
+**A transport you name explicitly never falls back to the dev log.** With `auto`, an
+unconfigured Twilio quietly becomes `log` and the code comes back in the HTTP response — so
+you would believe you were testing real delivery while testing nothing. Naming `twilio` means
+you meant it: it sends, or it 502s and the backend log names the missing variable.
+
+Running the verification suites does not require changing this back. Four of them read the
+passcode out of the response, so `run-all.sh` forces `OTP_TRANSPORT=log` for its own stack
+through a Compose override.
 
 ### 5. Sign in with your real number
 Open the app, choose **I'm a customer**, and enter your number **with the country code**:

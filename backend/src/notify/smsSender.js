@@ -136,13 +136,18 @@ export async function sendOtpSms(phone, code) {
   const text = `GuriKaabe: your code is ${code}. It expires in 5 minutes. Never share it.`;
   let transport = transportFor(phone);
 
-  // Outside production, a transport that is selected but not configured falls back to the log
-  // rather than failing the login. Otherwise setting OTP_TRANSPORT=auto — the correct setting
-  // for a mixed deployment — would break every local sign-in until Twilio credentials exist,
-  // which is a bad trade for a dev box. In PRODUCTION this does not apply: the send fails
-  // loudly, because silently printing a customer's login code to a server log is worse than
-  // an error the operator can see.
-  if (!isConfigured(transport) && config.env !== 'production') {
+  // The dev-log fallback exists so that OTP_TRANSPORT=auto — the correct setting for a mixed
+  // deployment — doesn't break every local sign-in before credentials exist. It is a
+  // convenience for a dev box, and it is deliberately narrow:
+  //
+  //   * never in production (printing a customer's login code to a server log is worse than
+  //     an error an operator can see), and
+  //   * never when a transport was named EXPLICITLY. Asking for `twilio` and silently getting
+  //     the log is the worst outcome: you believe you are testing real delivery, the code
+  //     appears in the response, and you never learn the credentials are wrong. If you named
+  //     it, you meant it, so it fails loudly instead.
+  const explicit = config.otp.transport !== 'auto';
+  if (!isConfigured(transport) && config.env !== 'production' && !explicit) {
     console.warn(
       `[OTP] transport "${transport}" is not configured — falling back to the dev log ` +
         'transport. Set the credentials to send real messages.'

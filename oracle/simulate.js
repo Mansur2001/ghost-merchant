@@ -5,6 +5,7 @@
 // Usage:
 //   node simulate.js payment  <senderMsisdn> <amount> [receiptId]   — Somali rail, auto-matches
 //   node simulate.js sms      <provider> <amount> [name]            — RAW message, any rail
+//   node simulate.js call     <callerMsisdn>                       — missed-call verification
 //   node simulate.js heartbeat
 //
 // `sms` is the realistic one: it sends the raw text the merchant phone would actually receive
@@ -71,9 +72,19 @@ if (cmd === 'payment') {
   }
   console.log(`SMS from ${t[0]}: ${t[1]}`);
   await post('/webhook', { senderId: t[0], body: t[1], receivedAt: String(Date.now()) });
+} else if (cmd === 'call') {
+  // Missed-call verification without a phone: pretend someone rang the Oracle. The customer
+  // must already have tapped "Verify by calling" in the app — a call matching no live
+  // challenge is discarded on purpose, so ringing first does nothing.
+  if (!sender) {
+    console.error('Usage: node simulate.js call <callerMsisdn>   e.g. call +12065551234');
+    process.exit(1);
+  }
+  console.log(`Incoming call from ${sender}`);
+  await post('/oracle/calls', { calls: [{ from: sender, at: new Date().toISOString() }] });
 } else if (cmd === 'heartbeat') {
   await post('/heartbeat', { ts: Date.now(), device: 'simulator' });
 } else {
-  console.error('Commands: payment | sms | heartbeat');
+  console.error('Commands: payment | sms | call | heartbeat');
   process.exit(1);
 }

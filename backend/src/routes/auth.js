@@ -68,6 +68,10 @@ authRouter.post('/auth/otp/request', ...requestLimits, async (req, res) => {
     }
     // Invalid number (from normalizeMsisdnOrThrow) or SMS delivery failure.
     const status = /Invalid phone number/.test(err.message) ? 400 : 502;
+    // The customer gets a generic message, but the REASON has to reach the log or a delivery
+    // failure is indistinguishable from every other cause of "no code arrived" — which is the
+    // single most expensive thing to debug in this system. Never the code itself, only why.
+    if (status === 502) console.error(`[OTP] delivery failed: ${err.message}`);
     res.status(status).json({ error: status === 400 ? err.message : 'could not send code' });
   }
 });
