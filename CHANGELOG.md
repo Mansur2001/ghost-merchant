@@ -37,6 +37,12 @@ unit tests pass unchanged before and after.
   rate limiter, offline write queue), refunds, and missed-call verification had all shipped but
   were still described as pending.
 
+- **Compose project name pinned to `gurikaabe`** (`docker-compose.yml`). It previously came
+  from the directory basename, which meant renaming or re-cloning the checkout folder silently
+  pointed the stack at empty volumes. ⚠️ Volumes created under the old `ghost-merchant_*` prefix
+  are now orphaned rather than deleted: locally, reseed; to keep the data, copy it across before
+  discarding them.
+
 ### Added
 - **`docs/PLAY_RELEASE.md`** — the ordered path from repo to Play Store, tying together the
   build in `mobile/README.md` and the Console answers in `docs/PLAY_LISTING.md`. Leads with the

@@ -1,4 +1,12 @@
 # One command stands up the entire sovereign stack. Portable to any VPS.
+#
+# The project name is PINNED rather than inherited from the directory basename, which is what
+# Compose does by default. That default makes volume names depend on what the checkout folder
+# happens to be called — so renaming or re-cloning the directory points the stack at a fresh,
+# EMPTY postgres_data and minio_data instead of the real ones, with no error to notice.
+# Volumes here are named `gurikaabe_postgres_data` / `gurikaabe_minio_data` regardless of path.
+name: gurikaabe
+
 services:
   postgres:
     image: postgres:16-alpine
