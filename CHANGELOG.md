@@ -9,6 +9,42 @@ first build served to a real paying customer.
 
 ---
 
+## [Unreleased] — documentation and naming cleanup
+
+No behaviour changes. Everything here is naming, documentation, or de-duplication; the 340
+unit tests pass unchanged before and after.
+
+### Changed
+- **`ghost` naming retired in favour of the product name, GuriKaabe.** Package names, the Redis
+  pub/sub channel and connection names, Service Worker cache keys, and the `config.js` defaults
+  for the database, MinIO bucket and credentials. The customer PWA's `short_name` was still
+  `"Ghost"` — that one was visible under the home-screen icon.
+- **`.env.example` now provisions a fresh stack as `gurikaabe`.** ⚠️ This does **not** rename an
+  existing database: those names are baked into the `postgres_data` volume on first boot. An
+  existing deployment keeps working with its current `.env`; `.env.example` documents the
+  `ALTER DATABASE` / `ALTER ROLE` migration for when you want to move.
+- **Verification suites read Postgres credentials from `.env`** (`scripts/verify/lib.sh`)
+  instead of hardcoding them in nine places, so a rename is one line rather than a search.
+- **Twilio's role is documented as the toll-free A2P path** for `+1` — chosen because toll-free
+  carries A2P traffic without 10DLC brand registration. Recorded alongside the constraint that
+  makes the split necessary: toll-free reaches US/Canada only and **cannot** deliver to `+252`,
+  which is why the Somali path stays on the Oracle phone.
+- **`README.md` rewritten as an onboarding document** — clone to running stack in four commands,
+  a map of where things live, and the two gotchas (image rebuild, Service Worker cache bump)
+  that otherwise cost a new developer an hour each.
+- **`CLAUDE.md` cut from 574 to ~430 lines.** Removed the P0/P1 completion log and dated
+  "DONE" annotations, which git already records. Corrected stale status: P2 (Redis bus, shared
+  rate limiter, offline write queue), refunds, and missed-call verification had all shipped but
+  were still described as pending.
+
+### Added
+- **`docs/PLAY_RELEASE.md`** — the ordered path from repo to Play Store, tying together the
+  build in `mobile/README.md` and the Console answers in `docs/PLAY_LISTING.md`. Leads with the
+  two clocks that dominate the schedule: identity verification, and the 14-day / 12-tester
+  closed test required of personal developer accounts.
+
+---
+
 ## [0.1.0] — 2026-08-07 — soft-launch candidate
 
 First version that could plausibly be put in front of a real person. Everything before this

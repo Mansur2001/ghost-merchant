@@ -114,6 +114,10 @@ NODE_TLS_REJECT_UNAUTHORIZED=0 ORACLE_WEBHOOK_SECRET=<from .env> \
 
 ## Releasing to Play
 
+This section covers **building and signing**. For the whole path to a published listing — account
+setup, the 14-day closed test, Console answers, and the pre-submission checks — follow
+[`../docs/PLAY_RELEASE.md`](../docs/PLAY_RELEASE.md).
+
 ### 1. Create your signing keystore — once, and never lose it
 Play identifies an app by its signing key. **Lose it and you can never update this app
 again**; leak it and someone else can publish to your users.

@@ -1,5 +1,5 @@
 {
-  "name": "ghost-merchant-backend",
+  "name": "gurikaabe-backend",
   "version": "0.1.0",
   "description": "Sovereign delivery coordination backend (modular monolith, event-driven + CQRS).",
   "type": "module",

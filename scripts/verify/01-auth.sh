@@ -13,7 +13,7 @@ chk() { # chk <label> <expected> <actual>
 # Order ids are UUIDs now. The seed inserts every order in ONE transaction, so created_at is
 # identical across them and UUID order is random — resolve by status instead, which the seed
 # guarantees is unique (exactly one order per state).
-psql() { docker compose exec -T postgres psql -U ghost -d ghost_merchant -tAc "$1" | tr -d ' '; }
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"   # provides psql()
 byStatus() { psql "SELECT id FROM orders WHERE status='$1' LIMIT 1;"; }
 O1=$(byStatus PENDING_PAYMENT)   # +252612345678
 O2=$(byStatus PAID_UNASSIGNED)   # +252651234567, unassigned

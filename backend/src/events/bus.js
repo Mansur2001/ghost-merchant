@@ -28,7 +28,10 @@ export const EVENTS = {
   ORACLE_DOWN: 'oracle.down',
 };
 
-const CHANNEL = 'ghost:events';
+// Redis pub/sub channel. Every instance must agree on this name, so changing it during a
+// rolling deploy leaves old and new instances publishing past each other — restart the whole
+// set, don't roll it.
+const CHANNEL = 'gurikaabe:events';
 
 // Distinguishes our own messages coming back from Redis — useful in logs when tracing which
 // instance originated an event.

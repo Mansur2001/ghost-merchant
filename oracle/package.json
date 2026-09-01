@@ -1,5 +1,5 @@
 {
-  "name": "ghost-merchant-oracle",
+  "name": "gurikaabe-oracle",
   "version": "0.1.0",
   "description": "Android SMS Oracle listener + webhook simulator.",
   "type": "module",

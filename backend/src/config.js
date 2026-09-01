@@ -23,16 +23,16 @@ export const config = {
       if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
       const host = process.env.POSTGRES_HOST || 'postgres';
       const port = process.env.POSTGRES_PORT || '5432';
-      const name = process.env.POSTGRES_DB || 'ghost_merchant';
-      const user = encodeURIComponent(process.env.POSTGRES_USER || 'ghost');
-      const pass = encodeURIComponent(process.env.POSTGRES_PASSWORD || 'ghost');
+      const name = process.env.POSTGRES_DB || 'gurikaabe';
+      const user = encodeURIComponent(process.env.POSTGRES_USER || 'gurikaabe');
+      const pass = encodeURIComponent(process.env.POSTGRES_PASSWORD || 'gurikaabe');
       return `postgresql://${user}:${pass}@${host}:${port}/${name}?schema=public`;
     },
     host: process.env.POSTGRES_HOST || 'postgres',
     port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
-    database: process.env.POSTGRES_DB || 'ghost_merchant',
-    user: process.env.POSTGRES_USER || 'ghost',
-    password: process.env.POSTGRES_PASSWORD || 'ghost',
+    database: process.env.POSTGRES_DB || 'gurikaabe',
+    user: process.env.POSTGRES_USER || 'gurikaabe',
+    password: process.env.POSTGRES_PASSWORD || 'gurikaabe',
 
     // Per-operation CAP choice (see db/pool.js).
     //
@@ -53,9 +53,9 @@ export const config = {
   s3: {
     endpoint: process.env.S3_ENDPOINT || 'http://minio:9000',
     region: process.env.S3_REGION || 'us-east-1',
-    bucket: process.env.S3_BUCKET || 'ghost-documents',
-    accessKey: process.env.S3_ACCESS_KEY || 'ghost_minio_access',
-    secretKey: process.env.S3_SECRET_KEY || 'ghost_minio_secret',
+    bucket: process.env.S3_BUCKET || 'gurikaabe-documents',
+    accessKey: process.env.S3_ACCESS_KEY || 'gurikaabe_minio_access',
+    secretKey: process.env.S3_SECRET_KEY || 'gurikaabe_minio_secret',
     forcePathStyle: (process.env.S3_FORCE_PATH_STYLE || 'true') === 'true',
   },
 

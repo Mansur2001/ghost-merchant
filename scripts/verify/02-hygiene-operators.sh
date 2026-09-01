@@ -6,7 +6,7 @@ pass=0; fail=0
 chk() { if [ "$2" = "$3" ]; then echo "  PASS  $1 ($3)"; pass=$((pass+1));
         else echo "  FAIL  $1 — expected [$2], got [$3]"; fail=$((fail+1)); fi; }
 code() { curl -sk -o /dev/null -w '%{http_code}' "$@"; }
-psql() { docker compose exec -T postgres psql -U ghost -d ghost_merchant -tAc "$1" | tr -d ' '; }
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"   # provides psql()
 
 # Make the suite re-runnable: drop the account it creates, so a second run isn't a cascade of
 # 409s. (A test that only passes on a fresh database hides regressions behind noise.)
@@ -49,7 +49,9 @@ LOGIN=$(curl -sk -X POST -H 'Content-Type: application/json' -d '{"username":"ho
 TOK=$(echo "$LOGIN" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 chk "username+password login      " "yes" "$([ -n "$TOK" ] && echo yes || echo no)"
 chk "username is case-insensitive " 200 "$(code -X POST -H 'Content-Type: application/json' -d '{"username":"  HODAN ","password":"seeded-operator-pw-1"}' $B/operator/login)"
-NOUSER=$(curl -sk -X POST -H 'Content-Type: application/json' -d '{"username":"ghost","password":"seeded-operator-pw-1"}' $B/operator/login)
+# A username the seed deliberately never creates: the point is that "no such account" and
+# "wrong password" answer identically, so the difference can't enumerate the staff roster.
+NOUSER=$(curl -sk -X POST -H 'Content-Type: application/json' -d '{"username":"no-such-operator","password":"seeded-operator-pw-1"}' $B/operator/login)
 BADPW=$(curl -sk -X POST -H 'Content-Type: application/json' -d '{"username":"hodan","password":"wrong-password-here"}' $B/operator/login)
 chk "no-such-user == wrong-pw     " "$NOUSER" "$BADPW"
 chk "GET /operator/me             " 200 "$(code -H "Authorization: Bearer $TOK" $B/operator/me)"

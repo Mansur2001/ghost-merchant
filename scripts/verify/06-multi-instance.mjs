@@ -10,7 +10,7 @@
 import { WebSocket } from 'ws';
 import { execSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 function findRepoRoot(start) {
@@ -32,8 +32,26 @@ const chk = (label, ok, detail = '') => {
 };
 
 const sh = (cmd) => execSync(cmd, { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
+
+// Postgres credentials come from the same .env the stack boots from, so renaming the database
+// doesn't mean hunting down a hardcoded name in every suite. Inlined rather than imported from
+// a shared module because run-all.sh copies this file into backend/ to run it, which would
+// break any relative import.
+function pgEnv() {
+  let text = '';
+  try {
+    text = readFileSync(join(REPO_ROOT, '.env'), 'utf8');
+  } catch {
+    /* no .env — fall through to the defaults */
+  }
+  const read = (key, fallback) =>
+    process.env[key] || text.match(new RegExp(`^${key}=(.*)$`, 'm'))?.[1].trim() || fallback;
+  return { user: read('POSTGRES_USER', 'gurikaabe'), db: read('POSTGRES_DB', 'gurikaabe') };
+}
+const PG = pgEnv();
+
 const psql = (sql) =>
-  sh(`docker compose exec -T postgres psql -U ghost -d ghost_merchant -tAc "${sql}"`).trim();
+  sh(`docker compose exec -T postgres psql -U ${PG.user} -d ${PG.db} -tAc "${sql}"`).trim();
 
 const post = (path, body, token) =>
   fetch(API + path, {

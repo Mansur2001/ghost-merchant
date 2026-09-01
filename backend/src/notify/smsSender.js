@@ -9,7 +9,10 @@
 //   twilio  — everything else, which today means +1 numbers used for testing and for a Play
 //             reviewer who has to receive a code to get past the first screen. A Somali SIM
 //             sending internationally is slow, expensive and unreliable, so routing +1 through
-//             the Oracle would look like "the app is broken".
+//             the Oracle would look like "the app is broken". The sending number is a TOLL-FREE
+//             one: it carries A2P traffic without 10DLC brand registration. Note that toll-free
+//             delivers to US/Canada ONLY — it is not a fallback for +252, which is why the two
+//             transports are split by country rather than by preference.
 //   log     — dev only. Prints the code. The backend REFUSES TO BOOT with this under
 //             NODE_ENV=production, because anyone with log access could log in as any customer.
 //

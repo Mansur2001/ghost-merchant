@@ -12,7 +12,7 @@ pass=0; fail=0
 chk() { if [ "$2" = "$3" ]; then echo "  PASS  $1 ($3)"; pass=$((pass+1));
         else echo "  FAIL  $1 — expected [$2], got [$3]"; fail=$((fail+1)); fi; }
 code() { curl -sk -o /dev/null -w '%{http_code}' "$@"; }
-psql() { docker compose exec -T postgres psql -U ghost -d ghost_merchant -tAc "$1" | tr -d ' '; }
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"   # provides psql()
 
 OTOK=$(curl -sk -X POST -H 'Content-Type: application/json' \
   -d '{"username":"hodan","password":"seeded-operator-pw-1"}' $B/operator/login |

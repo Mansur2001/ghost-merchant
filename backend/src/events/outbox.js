@@ -141,7 +141,10 @@ export async function outboxHealth() {
 // connection pinned for the process lifetime. Prisma's pool doesn't expose one — and the
 // transaction-scoped form turns out to be the better design anyway: leadership is per batch,
 // so failover is instant instead of waiting for a dead holder's connection to time out.)
-const RELAY_LOCK_KEY = 0x60057; // arbitrary but fixed: "ghost" in leetspeak
+// Arbitrary but FIXED advisory-lock id for relay leadership. The value is meaningless; what
+// matters is that every instance uses the same one. Never change it on a running system —
+// mid-deploy, old and new instances would take different locks and both relay.
+const RELAY_LOCK_KEY = 0x60057;
 
 let lastLeaderState = false;
 export function isRelayLeader() {

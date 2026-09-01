@@ -3,7 +3,7 @@
 import { WebSocket } from 'ws';
 import { execSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 // This file is copied into backend/ at run time so `ws` resolves from backend/node_modules,
@@ -18,11 +18,28 @@ function findRepoRoot(start) {
 }
 const REPO_ROOT = findRepoRoot(dirname(fileURLToPath(import.meta.url)));
 
+// Postgres credentials come from the same .env the stack boots from, so renaming the database
+// doesn't mean hunting down a hardcoded name in every suite. Inlined rather than imported from
+// a shared module because run-all.sh copies this file into backend/ to run it, which would
+// break any relative import.
+function pgEnv() {
+  let text = '';
+  try {
+    text = readFileSync(join(REPO_ROOT, '.env'), 'utf8');
+  } catch {
+    /* no .env — fall through to the defaults */
+  }
+  const read = (key, fallback) =>
+    process.env[key] || text.match(new RegExp(`^${key}=(.*)$`, 'm'))?.[1].trim() || fallback;
+  return { user: read('POSTGRES_USER', 'gurikaabe'), db: read('POSTGRES_DB', 'gurikaabe') };
+}
+const PG = pgEnv();
+
 // Order ids are UUIDs. The seed guarantees one order per status, so resolve by status
 // rather than assuming sequential ids.
 const byStatus = (status) =>
   execSync(
-    `docker compose exec -T postgres psql -U ghost -d ghost_merchant -tAc ` +
+    `docker compose exec -T postgres psql -U ${PG.user} -d ${PG.db} -tAc ` +
       `"SELECT id FROM orders WHERE status='${status}' LIMIT 1;"`,
     { cwd: REPO_ROOT, encoding: 'utf8' }
   ).trim();

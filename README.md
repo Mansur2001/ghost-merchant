@@ -1,193 +1,202 @@
-# GuriKaabe — Sovereign Delivery Coordination MVP
+# GuriKaabe
 
-A zero-integration, local-first delivery coordination platform for the East African market
-(EVC Plus / eDahab via USSD `tel:` bridging + Android SMS Oracle). Fully self-hosted, no
-cloud-vendor lock-in.
+Delivery coordination for Somalia, self-hosted end to end. Customers pay the merchant directly
+over EVC Plus / eDahab using a USSD `tel:` link; a dedicated Android phone (**the Oracle**)
+reads the telecom's SMS receipt and reports it to the backend. No AWS, no WhatsApp, no Google
+Maps, no telecom API contract.
 
-## Architecture (modular monolith, event-driven + CQRS + pub/sub)
+The platform **never touches the money** — it only observes that a payment happened. Revenue is
+a coordination fee on completed deliveries. `CLAUDE.md` explains why that constraint shapes
+almost every design decision here; read it before proposing features.
 
-```
-                    ┌──────────────────────────────────────────┐
-   User PWA  ◄──────┤  Backend (Node.js, one deployable)        │
-   Driver PWA ◄─────┤                                            │
-   Operator PWA ◄───┤   routes ──► commands (writes) ──► events │
-        ▲           │                                     │      │
-        │ WebSocket │   queries (reads) ◄── Postgres      ▼      │
-        └───────────┤   realtime layer ◄── event bus (pub/sub)  │
-                    └──────────────────────────────────────────┘
-   Android Oracle ──HMAC-signed webhook──► /webhook
-   Storage: MinIO (self-hosted, S3-compatible)   DB: PostgreSQL   Proxy: Caddy (auto-HTTPS)
-```
+---
 
-The command/query/event seams are drawn where microservices would split
-(order · dispatch · tracking · payment) so any module can be extracted later without
-rewriting logic.
+## Start here (new developer, ~10 minutes)
 
-## Build checklist (progress against the SRS)
-
-### Infrastructure (sovereign stack)
-- [x] `docker-compose.yml` — Postgres + MinIO + backend + Caddy, one command
-- [x] Caddy reverse proxy with auto-HTTPS (required for Service Workers + geolocation)
-- [x] `.env.example` for all secrets
-- [ ] Deploy target: Hetzner/DigitalOcean VPS (manual)
-
-### Backend core (the risky part — built first)
-- [x] Postgres schema + migration (Users, Orders, Transactions, Messages, Drivers)
-- [x] Order state machine — single source of truth, enforced transitions
-- [x] In-process event bus (pub/sub)
-- [x] CQRS: command handlers (writes emit events) / query handlers (reads)
-- [x] Signed webhook receiver (HMAC) — the Android Oracle → backend link
-- [x] Idempotent payments via UNIQUE `telecom_receipt_id` (anti double-spend)
-- [x] WebSocket server, subscribe-by-order_id pub/sub
-- [x] Oracle heartbeat + dead-man's-switch alerting
-- [x] MinIO object storage adapter (S3 SDK)
-- [x] Photo attachments in MinIO — customer reference + driver delivery-proof, idempotent keys
-- [x] Idempotent re-runnable seed (`npm run seed`) — one order in every state + unmatched receipt
-- [x] Jest test suite (state machine, phone, USSD, payments, OTP, access rule, rate limiter) — `npm test`
-- [x] OTP auth (phone-number identity) — code send path via the Oracle phone (unvalidated on real hardware)
-- [x] Per-order authorization on every route + authenticated WebSocket subscriptions
-- [x] Rate limiting on every login path (OTP request/verify, driver PIN, operator password)
-- [x] Named operator accounts — audit trail records who did what (`operator:<id>:<username>`)
-- [x] Security headers + CSP, structured request logs (PII-redacted), graceful shutdown
-- [x] Transactional outbox — events commit with the state change; crash-safe delivery
-- [x] Atomic payment matching — receipt + status transition in one transaction
-- [ ] Manual refund / reconciliation workflow
-
-### Frontend (Option A: sovereign in-app chat)
-- [x] User PWA: service worker + app shell caching, offline repeat visits
-- [x] User: chat thread + progress timeline over WebSocket
-- [x] User: checkout with geolocation + mandatory landmark
-- [x] User: `tel:` USSD bridge with `%23` encoding
-- [x] Driver PWA: PIN login, shopping list, out-of-stock / price adjust, geo: nav
-- [x] Operator PWA: live orders, manual "Mark as Paid" override, Oracle health
-- [x] Unified home/landing (role picker) + in-app FAQ + light/dark theme (gold trim)
-- [x] Photo UX: customer reference photo at checkout, driver delivery-proof, thumbnails for operator
-- [ ] Push notifications (optional, later)
-
-### Mobile app (GuriKaabe — Android)
-- [x] Configurable API base URL across all three PWAs (`frontend/shared/config.js`)
-- [x] Capacitor project, builds a debug APK and a signed release AAB (`mobile/`)
-- [x] Dev LAN listener + derived network-security config for on-device testing
-- [x] Launcher icons, splash, permissions, Play submission pack (`docs/`)
-- [ ] Closed test with 12+ testers for 14 days (Play requirement for personal accounts)
-
-### Validate on real hardware (do before scaling)
-- [ ] `tel:`+USSD `%23` fires on real Hormuud/Somtel devices
-- [ ] Android Oracle SMS interception + HMAC webhook round-trip
-
-## Order state machine
-
-```
-PENDING_PAYMENT → PAID_UNASSIGNED → DISPATCHED → IN_TRANSIT → DELIVERED
-       └────────────────────────────────────────────────────► FAILED_REFUND
-```
-
-## Running locally
-
-For development on your own machine. Caddy issues a self-signed `localhost` cert, so
-browsers show a one-time warning — that's expected and required (Service Workers +
-geolocation refuse to run over plain HTTP).
+Prerequisites: Docker + Docker Compose, Node 20+, and about 2GB of disk.
 
 ```bash
-# 1. Config — copy the template and fill in secrets (any values are fine locally).
+# 1. Config. The placeholder values work fine locally.
 cp .env.example .env
-#    Leaving the change_me_* placeholders works locally, but set them anyway to
-#    practice the prod flow. MERCHANT_MSISDN / USSD_TEMPLATE only matter with a real SIM.
 
-# 2. Stand up the whole stack (Postgres + MinIO + backend + Caddy).
+# 2. Whole stack: Postgres + MinIO + Redis + backend + Caddy.
+#    Migrations run automatically on backend boot and are idempotent.
 docker compose up -d --build
-#    Migrations run automatically on backend boot (idempotent, tracked in schema_migrations).
 
-# 3. Load the demo dataset (one order in every state, two drivers, seeded photos).
-#    (Local .env uses NODE_ENV=development. In production the seed refuses to run at all.)
+# 3. Demo data — one order in every state, two drivers, seeded photos.
 docker compose exec backend npm run seed
 
-# 4. Open the PWAs (accept the self-signed cert warning once per PWA):
-#    User      https://localhost/
-#    Driver    https://localhost/driver/     (Amina / 1234, Bashir / 5678)
-#    Operator  https://localhost/operator/   (admin / change-me-please-1, or hodan / seeded-operator-pw-1)
-
-docker compose logs -f backend   # tail logs
-docker compose down              # stop, keep data   |   down -v  wipes DB + MinIO
+# 4. Unit tests (no database needed).
+cd backend && npm install && npm test
 ```
 
-**Exercise the full payment loop without a phone** — the Oracle simulator posts a signed
-webhook exactly as the real Android device would:
+Then open the three PWAs. Caddy issues a **self-signed `localhost` cert**, so every browser
+shows a one-time warning — accept it once per app. HTTPS isn't optional here: Service Workers
+and geolocation refuse to run without it.
+
+| App | URL | Login |
+|---|---|---|
+| Customer | https://localhost/ | any phone; the passcode is printed to the backend log |
+| Driver | https://localhost/driver/ | `Amina` / `1234` or `Bashir` / `5678` |
+| Operator | https://localhost/operator/ | `hodan` / `seeded-operator-pw-1` |
+
+Customer login needs the code from `docker compose logs -f backend` — look for the
+`[OTP][dev-transport]` line. That is dev-only behaviour; the backend refuses to boot in
+production with the log transport enabled.
+
+**Exercise a full payment without owning a phone.** The simulator posts the same signed webhook
+the real Android device would:
 
 ```bash
 cd oracle
 NODE_TLS_REJECT_UNAUTHORIZED=0 \
-ORACLE_WEBHOOK_SECRET=<same as .env> BACKEND_URL=https://localhost \
+ORACLE_WEBHOOK_SECRET=<same value as .env> BACKEND_URL=https://localhost \
   node simulate.js payment 612345678 7.25   # amount MUST equal the open order's total
-  node simulate.js heartbeat                 # flips the operator's Oracle badge green
+  node simulate.js heartbeat                # flips the operator's Oracle badge green
 ```
 
-**After editing backend `src/`** rebuild the image (a plain restart won't pick up code):
-`docker compose up -d --build backend`. **After editing any frontend shell file** bump the
-`CACHE` constant in that PWA's `sw.js`, or reloads keep serving the cached old version.
+The customer PWA should flip to "Payment confirmed" within about a second, over the WebSocket.
 
-### Tests
+### Two gotchas that will cost you an hour
+
+- **Backend changes need a rebuild**, not a restart — the image `COPY`s `src/`:
+  `docker compose up -d --build backend`
+- **Frontend shell changes need a cache bump.** Edit any `index.html` / `app.js` /
+  `styles.css` and you must also bump the `CACHE` constant in that PWA's `sw.js`, or reloads
+  keep serving the old version. This is the number one "my change isn't showing" here.
+
+---
+
+## How it fits together
+
+One backend deployable, structured with the seams a microservices split would use, so any
+module can be extracted later without a rewrite.
+
+```
+   Customer PWA ◄──┐
+   Driver PWA   ◄──┤  Backend (Node, one process)
+   Operator PWA ◄──┤    routes ─► commands (writes) ─► outbox ─► event bus
+        ▲          │    queries (reads) ◄─ Postgres        │
+        └─WebSocket┤    realtime layer ◄───────────────────┘
+                   │
+   Android Oracle ──HMAC-signed webhook──► /api/webhook
+
+   Postgres · MinIO (S3-compatible) · Redis (bus + rate limits) · Caddy (auto-HTTPS)
+```
+
+- **Commands** (`backend/src/commands/`) write and enqueue domain events *in the same
+  transaction*. **Queries** (`backend/src/queries/`) only read.
+- **The order state machine is the single source of truth**
+  (`backend/src/domain/stateMachine.js`). Never write `orders.status` directly.
+
+```
+PENDING_PAYMENT → PAID_UNASSIGNED → DISPATCHED → IN_TRANSIT → DELIVERED
+       └───────────────────────────────────────────────────► FAILED_REFUND
+```
+
+Where things live:
+
+| Path | What it is |
+|---|---|
+| `backend/src/domain/` | Pure logic — state machine, phone parsing, USSD, receipts. No I/O, fully unit-tested. |
+| `backend/src/commands/` · `queries/` | The CQRS write and read sides. |
+| `backend/src/events/` | Event bus + transactional outbox. |
+| `backend/src/notify/` | Outbound SMS (Oracle queue, Twilio) and the IMAP payment sensor. |
+| `frontend/{user,driver,operator}/` | Three vanilla-JS PWAs; `frontend/shared/` is common code. |
+| `oracle/` | Termux scripts for the Android sensor phone, plus the simulator. |
+| `mobile/` | Capacitor wrapper that ships the PWAs as an Android app. |
+| `scripts/verify/` | End-to-end suites that run against the live stack. |
+
+**Read the invariants in `CLAUDE.md` before changing backend code.** They are short, and each
+one is there because the alternative loses money or leaks customer data.
+
+---
+
+## Testing
 
 ```bash
-cd backend && npm install   # first time — installs jest + cross-env devDeps
-npm test                    # Jest (255 tests): domain, payments, OTP, access, limiter, redaction, operators, outbox
+cd backend && npm test          # 340 Jest unit tests, no database required
+./scripts/verify/run-all.sh     # live end-to-end suites against the running stack
 ```
 
-### Live verification (HTTP + WebSocket, against the running stack)
+The Jest suites cover pure domain logic. The shell suites exist because authorization rules
+have to hold *as deployed* — through Caddy, against the real database and MinIO — which is a
+different question from whether the functions are correct. Run both before a release.
 
-```bash
-./scripts/verify/run-all.sh   # 153 checks: authz, OTP, rate limits, outbox, UUIDs, US numbers
-```
+`run-all.sh` resets the stack between suites on purpose: the rate limiter and the accounts the
+suites create are stateful, and a suite that only passes on a fresh database is one people
+quietly stop running.
 
-Resets the stack between suites — the rate limiter and the accounts the suites create are
-stateful by design.
+---
 
-## Running in production
+## Deploying to a VPS
 
-Deploys to any Linux VPS (Hetzner / DigitalOcean / etc.). Same `docker compose` stack; the
-differences are a **real domain** (so Caddy gets a trusted Let's Encrypt cert automatically),
-**real secrets**, and **no demo seed**.
+Any Linux box with Docker. The differences from local are a real domain, real secrets, and no
+seed.
 
-**Prerequisites:** a VPS with Docker + Docker Compose, a domain's A/AAAA record pointed at the
-VPS IP, and ports **80 + 443 open** (Caddy needs 80 for the ACME HTTP challenge).
+**Prerequisites:** a domain with an A/AAAA record pointing at the VPS, and ports **80 and 443**
+open — Caddy needs 80 for the ACME challenge.
 
-```bash
-# 1. Point Caddy at your domain — replace the `localhost` block in ./Caddyfile:
-#      app.example.com {   ...same handle blocks...   }
-#    Caddy then provisions + renews a Let's Encrypt cert with no extra config.
+1. **Point Caddy at your domain.** Replace the `localhost` block in `./Caddyfile` with
+   `app.example.com { …same handle blocks… }`. Certificates are then automatic.
+2. **Write a real `.env`.** Every `change_me_*` must be replaced.
+   `openssl rand -hex 32` generates `ORACLE_WEBHOOK_SECRET` and `SESSION_SECRET`. Also set:
+   - `NODE_ENV=production`
+   - `CORS_ORIGINS=https://app.example.com`
+   - `OPERATOR_PASSWORD` — bootstraps the first operator account, then goes inert
+   - `MERCHANT_MSISDN`, `USSD_TEMPLATE`, `TELECOM_SENDER_IDS` — match the live telecom
+   - `OTP_TRANSPORT=oracle` (or `auto`) — **required**; the backend refuses to boot in
+     production with the dev `log` transport, which would print login codes to the server log
+3. **Launch:** `docker compose up -d --build`. Migrations run on boot.
+   **Never run the seed** — it truncates the domain tables.
+4. **Point the Oracle phone at the domain** (`oracle/Instructions.md`) and confirm the operator's
+   Oracle badge goes green before taking live orders.
 
-# 2. Real .env — every change_me_* MUST be replaced. Generate strong secrets:
-#      openssl rand -hex 32        # for ORACLE_WEBHOOK_SECRET, SESSION_SECRET
-#    Set for prod:
-#      NODE_ENV=production
-#      CORS_ORIGINS=https://app.example.com     # your domain, not localhost
-#      OPERATOR_PASSWORD=<strong password, 12+ chars — bootstraps the first operator account>
-#      MERCHANT_MSISDN=<real EVC Plus / eDahab number>
-#      USSD_TEMPLATE / TELECOM_SENDER_IDS       # match the live telecom
-#      POSTGRES_PASSWORD, S3_SECRET_KEY         # strong, unique
-#      OTP_TRANSPORT=oracle                     # REQUIRED in prod — the backend refuses to
-#                                               # boot with the dev "log" transport, which
-#                                               # would print customer login codes to the log.
-#                                               # No address needed: the Oracle phone polls.
+### Operational rules
 
-# 3. Launch.
-docker compose up -d --build
-#    Migrations run on boot. Do NOT run the seed in prod — it TRUNCATEs the domain tables.
+- **Back up before every migration**, off the box:
+  `docker compose exec postgres pg_dump -U $POSTGRES_USER $POSTGRES_DB | gzip > backup-$(date +%F).sql.gz`
+- **Two volumes hold everything that matters:** `postgres_data` (orders, payments, audit trail)
+  and `minio_data` (photos). `docker compose down -v` destroys both — never run it on the VPS.
+- **Rollback = previous image tag + the pre-migration dump.** Tag images per release; don't
+  deploy `latest` from a laptop.
+- **Migrations are forward-only and additive.** Add, backfill, then switch reads.
+- **Don't scale past one backend instance without `REDIS_URL` set.** The bus and rate limiter
+  fall back to in-process state, and clients on instance B miss instance A's events.
+- **If `ORACLE_WEBHOOK_SECRET` leaks, payments can be forged.** Rotate it on the VPS and the
+  phone together, then reconcile every transaction since the leak by hand.
+- **Watch the Oracle heartbeat.** A red badge means payments are silently not matching;
+  operators fall back to manual "Mark as paid".
 
-# 4. Point the Android Oracle at the domain: set BACKEND_URL=https://app.example.com and the
-#    matching ORACLE_WEBHOOK_SECRET on the device (see oracle/README.md). Confirm the operator
-#    Oracle badge goes green (heartbeat) before taking live orders.
-```
+Shipping the Android app to Google Play is a separate process — see
+**[`docs/PLAY_RELEASE.md`](docs/PLAY_RELEASE.md)**.
 
-**Operational notes:**
-- **Back up the data volumes** — `postgres_data` (orders, payments, audit trail) and
-  `minio_data` (customer + delivery-proof photos). `docker compose down -v` destroys both.
-- **Secrets never enter git.** `.env` and `CREDENTIALS.md` are git-ignored; keep them so.
-- **Validate on real hardware first** (see checklist below): `tel:`+USSD `%23` dialing and
-  Oracle SMS interception on actual Hormuud/Somtel SIMs before onboarding real customers.
-- Rotate `OPERATOR_PASSWORD` / `SESSION_SECRET` and `docker compose up -d` to apply.
+---
 
-## Sovereignty notes
-- **MinIO** speaks the S3 API but is self-hosted — no AWS. Code uses the standard S3 SDK.
-- No Meta/WhatsApp dependency. Chat is in-app over your own WebSocket, stored in your Postgres.
-- Entire stack is containerized and portable to any VPS.
+## Status
+
+Working end to end and verified against the live stack: the full order lifecycle over
+WebSocket, operator-driven dispatch, payment matching (Oracle SMS + IMAP email sensing),
+photos in MinIO, authentication and per-order authorization on every route and socket, the
+transactional outbox, refunds as a ledger, staff access requests with ID review, the offline
+write queue, and multi-instance operation behind Redis.
+
+**The one blocker to a real launch is hardware validation.** USSD `tel:` dialing, Oracle SMS
+interception, and outbound login codes are all built and pass against the live stack, but none
+has run on a Somali network. See `oracle/Instructions.md` and P4 in `CLAUDE.md`.
+
+Known gaps: push notifications aren't started, and refunds are settled off-platform by design.
+
+## Further reading
+
+| Document | Covers |
+|---|---|
+| `CLAUDE.md` | Architecture, invariants, and the reasoning behind them. The important one. |
+| `CHANGELOG.md` | Release history and version policy. |
+| `oracle/Instructions.md` | Setting up the Android sensor phone. |
+| `mobile/README.md` | Building the Android app. |
+| `docs/PLAY_RELEASE.md` | Getting the app into the Play Store. |
+| `docs/LIVE_SMS_SETUP.md` | Real SMS delivery on hardware. |
+| `docs/MISSED_CALL_VERIFICATION.md` | Verifying a phone without sending anything. |
+| `docs/EMAIL_SENSOR_SETUP.md` | Payment sensing over IMAP. |
+| `docs/PRIVACY.md` · `docs/PLAY_LISTING.md` | Play submission pack. |

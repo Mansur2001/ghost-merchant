@@ -28,7 +28,7 @@ function options(role) {
     lazyConnect: false,
     maxRetriesPerRequest: null,
     enableOfflineQueue: true,
-    connectionName: `ghost-${role}`,
+    connectionName: `gurikaabe-${role}`,
     retryStrategy: (times) => Math.min(times * 200, 5000),
     reconnectOnError: () => true,
   };
