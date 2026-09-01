@@ -8,8 +8,14 @@
 
 # Resolve a var from the environment first, then .env, then a default. Environment wins so a
 # suite can be pointed at a scratch database without editing anything.
+#
+# `printenv` rather than bash's ${!key} indirect expansion: the suites all run under bash, but
+# this file is worth sourcing by hand while debugging, and zsh — the default shell on macOS —
+# fails ${!key} with "bad substitution", which leaves the credentials empty and produces a
+# confusing `role "root" does not exist` from psql rather than a clear error.
 _env_or() {
-  local key="$1" fallback="$2" from_env="${!1:-}"
+  local key="$1" fallback="$2" from_env
+  from_env=$(printenv "$key" 2>/dev/null)
   if [ -n "$from_env" ]; then echo "$from_env"; return; fi
   # Trailing CR is stripped so a .env saved on Windows doesn't produce a database name that
   # looks correct in the terminal and fails to connect.
