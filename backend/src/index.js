@@ -1,11 +1,10 @@
 // Application entry point. Wires the modular monolith together:
 // routes -> commands (writes, emit events) / queries (reads),
-// event bus -> realtime socket layer + oracle monitor.
+// event bus -> realtime socket layer.
 import http from 'node:http';
 import express from 'express';
 import { config } from './config.js';
 import { ordersRouter } from './routes/orders.js';
-import { webhookRouter } from './routes/webhook.js';
 import { driversRouter } from './routes/drivers.js';
 import { operatorRouter } from './routes/operator.js';
 import { authRouter } from './routes/auth.js';
@@ -13,7 +12,6 @@ import { signupRouter } from './routes/signup.js';
 import { staffSetupRouter } from './routes/staffSetup.js';
 import { sweepExpiredSetupCodes } from './commands/staffAccounts.js';
 import { attachSocketServer } from './realtime/socketServer.js';
-import { startOracleMonitor } from './realtime/oracleMonitor.js';
 import { ensureBucket } from './storage/objectStore.js';
 import { sweepExpiredOtps } from './commands/auth.js';
 import { startOutboxRelay, stopOutboxRelay, sweepOutbox } from './events/outbox.js';
@@ -25,9 +23,6 @@ import { prisma, disconnect as disconnectDb } from './db/prisma.js';
 import { SEED_OPERATORS, SEED_DRIVERS } from './db/seedFixtures.js';
 import { liveSeedCredentials } from './db/seedSafety.js';
 import { startBusSubscriber } from './events/bus.js';
-import { startEmailSensor, stopEmailSensor } from './notify/emailSensor.js';
-import { sweepSmsQueue } from './notify/smsQueue.js';
-import { sweepExpiredCallChallenges } from './commands/callAuth.js';
 import { warnIfSingleInstance, closeRedis } from './redis/client.js';
 import { parsePhone } from './domain/phone.js';
 import { isWellFormedCode } from './domain/otp.js';
@@ -49,17 +44,13 @@ app.use((req, res, next) => {
   const origin = req.get('Origin');
   if (origin && config.corsOrigins.includes(origin)) {
     res.set('Access-Control-Allow-Origin', origin);
-    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Oracle-Signature');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.set('Vary', 'Origin');
   }
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
-
-// NOTE: webhookRouter mounts its own raw-body JSON parser (needed for HMAC), so it must
-// be registered BEFORE the global json parser to keep the exact bytes.
-app.use('/api', webhookRouter);
 
 app.use(express.json({ limit: '32kb' })); // order payloads must stay small
 app.use('/api', authRouter);
@@ -77,14 +68,10 @@ app.use(errorHandler);
 
 const server = http.createServer(app);
 const wss = attachSocketServer(server);
-startOracleMonitor();
 
 // Cross-instance event delivery. Without Redis this is a no-op and the bus stays in-process.
 warnIfSingleInstance();
 startBusSubscriber();
-
-// Payment sensing over email. No-op unless IMAP credentials are set.
-startEmailSensor();
 
 // The relay turns committed outbox rows into bus events. Started before listen() so any
 // events left undelivered by a previous crash go out before we take new traffic.
@@ -95,22 +82,16 @@ startOutboxRelay();
 const housekeeping = setInterval(() => {
   sweepExpiredOtps().catch((err) => console.error('OTP sweep failed:', err.message));
   sweepOutbox().catch((err) => console.error('outbox sweep failed:', err.message));
-  // Undelivered login codes are plaintext credentials; don't let them accumulate.
-  sweepSmsQueue().catch((err) => console.error('sms queue sweep failed:', err.message));
-  sweepExpiredCallChallenges().catch((err) =>
-    console.error('call challenge sweep failed:', err.message)
-  );
   sweepExpiredSetupCodes().catch((err) => console.error('setup code sweep failed:', err.message));
 }, 60 * 60 * 1000);
 housekeeping.unref();
 
 async function boot() {
   // The `log` transport prints login codes to the server log, so anyone with log access could
-  // sign in as any customer. Fine in dev, fatal in production. `oracle`, `clicksend` and `auto`
-  // all deliver over a real channel.
-  if (config.env === 'production' && !['oracle', 'clicksend', 'auto'].includes(config.otp.transport)) {
+  // sign in as any customer. Fine in dev, fatal in production.
+  if (config.env === 'production' && !['clicksend', 'auto'].includes(config.otp.transport)) {
     console.error(
-      'FATAL: OTP_TRANSPORT must be oracle | clicksend | auto in production — ' +
+      'FATAL: OTP_TRANSPORT must be clicksend (or auto) in production — ' +
         `"${config.otp.transport}" prints login codes to the server log.`
     );
     process.exit(1);
@@ -195,7 +176,6 @@ async function shutdown(signal) {
   const timeout = new Promise((resolve) => setTimeout(resolve, 10_000).unref?.());
   await Promise.race([closed, timeout]);
 
-  await stopEmailSensor().catch(() => {});
   await closeRedis();
   await disconnectDb().catch(() => {});
   console.log('shutdown complete');

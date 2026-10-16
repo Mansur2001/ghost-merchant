@@ -1,153 +1,120 @@
-// Payment matching is where the "distributed SMS system" fault tolerance lives. CLAUDE.md
-// calls out the exact edge cases to protect: duplicate SMS (invariant #2 idempotency),
-// wrong amount, two identical-amount orders (ambiguous), and unrecognized senders. We mock
-// the DB transaction and the downstream side-effects (state machine + event bus) so these
-// pure-logic branches can be exercised without Postgres.
+// Payments without a device: the customer CLAIMS, the operator CONFIRMS. These are the rules
+// that keep money honest when a person, not a sensor, is the source of truth:
+//   * a claim never marks an order paid — anyone can tap a button;
+//   * a confirmation records the payment AND moves the order, together, so a refund later knows
+//     what is owed;
+//   * one real payment (reference) can never confirm two orders (invariant 2).
+// The DB transaction and downstream modules are mocked so these branches run without Postgres.
 import { jest, describe, test, expect, beforeEach } from '@jest/globals';
 
-// ── Mocks (must be registered before importing the module under test) ──
-const transitionOrder = jest.fn();
+const transitionOrder = jest.fn(async (id, to) => ({ id, status: to }));
+const postMessage = jest.fn(async () => ({}));
 const enqueue = jest.fn();
 const wakeOutbox = jest.fn();
 
-// A fake Prisma transaction client. `$queryRaw` is a tagged template, so it receives
-// (stringsArray, ...values) — the order lookup uses it because FOR UPDATE has no model API.
-let matchRows = [];
-let dupRow = null;
-const calls = { rawValues: null, created: null };
-
+let orderRow = null;
+let usedReceipt = null;
 const tx = {
-  $executeRawUnsafe: jest.fn(async () => 0),
-  $queryRaw: jest.fn(async (_strings, ...values) => {
-    calls.rawValues = values;
-    return matchRows;
-  }),
+  $queryRaw: jest.fn(async () => (orderRow ? [orderRow] : [])),
+  order: { update: jest.fn(async ({ data }) => ({ ...orderRow, ...data })) },
   transaction: {
-    findUnique: jest.fn(async () => dupRow),
-    create: jest.fn(async ({ data }) => {
-      calls.created = data;
-      return { id: 1n, ...data };
-    }),
+    findUnique: jest.fn(async () => usedReceipt),
+    create: jest.fn(async ({ data }) => ({ id: 1n, ...data })),
   },
 };
 
 jest.unstable_mockModule('../src/db/prisma.js', () => ({
   prisma: tx,
-  withCriticalTransaction: async (fn) => fn(tx),
   withTransaction: async (fn) => fn(tx),
+  withCriticalTransaction: async (fn) => fn(tx),
   inTransaction: (c, fn) => (c ? fn(c) : fn(tx)),
-  WriteUnavailableError: class extends Error {},
 }));
-jest.unstable_mockModule('../src/commands/orders.js', () => ({ transitionOrder }));
+jest.unstable_mockModule('../src/commands/orders.js', () => ({ transitionOrder, postMessage }));
 jest.unstable_mockModule('../src/events/bus.js', () => ({
-  EVENTS: { PAYMENT_RECEIVED: 'payment.received', ORDER_STATE_CHANGED: 'order.state_changed' },
-  publish: jest.fn(),
+  EVENTS: { PAYMENT_RECEIVED: 'payment.received', PAYMENT_CLAIMED: 'payment.claimed' },
 }));
-// Events go through the transactional outbox rather than straight to the bus.
 jest.unstable_mockModule('../src/events/outbox.js', () => ({ enqueue, wakeOutbox }));
 
-const { recordAndMatchPayment } = await import('../src/commands/payments.js');
+const { claimPayment, confirmPayment } = await import('../src/commands/payments.js');
+const { normalizeReference, manualReceiptId } = await import('../src/domain/paymentRef.js');
 
-// Configure the fakes for one scenario, and expose what the code passed them.
-function scenario({ dupRows = [], matchRows: rows = [] } = {}) {
-  dupRow = dupRows[0] || null;
-  matchRows = rows;
-  calls.rawValues = null;
-  calls.created = null;
-  return calls;
-}
+const ORDER = '9110aafa-fd8f-4469-8592-4d5f944952e3';
+const pending = { id: ORDER, status: 'PENDING_PAYMENT', user_phone: '+252612345678', total_amount: '7.25' };
 
 beforeEach(() => {
-  transitionOrder.mockReset();
-  enqueue.mockReset();
-  wakeOutbox.mockReset();
-  tx.transaction.create.mockClear();
-  tx.$queryRaw.mockClear();
+  orderRow = { ...pending };
+  usedReceipt = null;
+  [transitionOrder, postMessage, enqueue, wakeOutbox, tx.order.update, tx.transaction.create].forEach((f) => f.mockClear());
 });
 
-describe('clean single match', () => {
-  test('records the receipt, advances the order to PAID_UNASSIGNED, and publishes', async () => {
-    const calls = scenario({ matchRows: [{ id: 42 }] });
+describe('normalizeReference', () => {
+  test('one canonical form, so variants of the same reference collide', () => {
+    expect(normalizeReference(' abc 123 ')).toBe('ABC123');
+    expect(normalizeReference('abc-123')).toBe('ABC123');
+    expect(normalizeReference('')).toBe('');
+  });
+  test('rejects things that are not references', () => {
+    expect(normalizeReference('<script>')).toBeNull();
+    expect(normalizeReference('x'.repeat(41))).toBeNull();
+  });
+});
 
-    const out = await recordAndMatchPayment({
-      receiptId: 'RCPT-1', senderMsisdn: '612345678', amount: 7.25, rawSms: 'You received $7.25',
+describe('claimPayment (customer: "I\'ve paid")', () => {
+  test('records the claim and tells operators — but does NOT mark the order paid', async () => {
+    await claimPayment({ orderId: ORDER, reference: 'evc 991' });
+    expect(tx.order.update.mock.calls[0][0].data.payment_claim_ref).toBe('EVC991');
+    expect(enqueue).toHaveBeenCalledWith(tx, 'payment.claimed', expect.objectContaining({ orderId: ORDER }));
+    expect(transitionOrder).not.toHaveBeenCalled();
+    expect(tx.transaction.create).not.toHaveBeenCalled();
+    expect(wakeOutbox).toHaveBeenCalled();
+  });
+
+  test('works without a reference', async () => {
+    await claimPayment({ orderId: ORDER });
+    expect(tx.order.update.mock.calls[0][0].data.payment_claim_ref).toBeNull();
+  });
+
+  test('an order that is already paid cannot be claimed', async () => {
+    orderRow.status = 'PAID_UNASSIGNED';
+    await expect(claimPayment({ orderId: ORDER })).rejects.toMatchObject({ status: 409 });
+  });
+
+  test('a garbage reference is refused', async () => {
+    await expect(claimPayment({ orderId: ORDER, reference: '<b>' })).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe('confirmPayment (operator saw the money)', () => {
+  test('records the payment AND moves the order to PAID_UNASSIGNED, in the same transaction', async () => {
+    await confirmPayment({ orderId: ORDER, reference: 'EVC991', actor: 'operator:1:hodan' });
+    const row = tx.transaction.create.mock.calls[0][0].data;
+    expect(row).toMatchObject({
+      order_id: ORDER, telecom_receipt_id: 'EVC991', amount: '7.25', matched: true, provider: 'manual',
     });
-
-    expect(out).toMatchObject({ duplicate: false, orderId: 42, ambiguous: false });
-    // Sender normalized to canonical E.164 before matching (invariant #4).
-    expect(calls.rawValues[0]).toBe('+252612345678');
-    // Inserted as a matched transaction.
-    expect(calls.created.order_id).toBe(42);
-    expect(calls.created.matched).toBe(true);
-    // The transition runs INSIDE this transaction (client passed through), so the receipt
-    // and the status change commit together — no window where money is received but the
-    // order still reads "awaiting payment".
-    expect(transitionOrder).toHaveBeenCalledWith(
-      42, 'PAID_UNASSIGNED', 'system', expect.any(String), { client: tx }
-    );
-    // The event is written to the outbox with the SAME transaction client, not published
-    // directly — that is what makes it crash-safe.
-    expect(enqueue).toHaveBeenCalledWith(
-      tx, 'payment.received', expect.objectContaining({ orderId: 42, amount: 7.25 })
-    );
+    expect(transitionOrder).toHaveBeenCalledWith(ORDER, 'PAID_UNASSIGNED', 'operator:1:hodan', expect.any(String), { client: tx });
+    expect(enqueue).toHaveBeenCalledWith(tx, 'payment.received', expect.objectContaining({ orderId: ORDER }));
   });
-});
 
-describe('duplicate SMS webhook (idempotency, invariant #2)', () => {
-  test('a replayed receipt credits nothing a second time', async () => {
-    scenario({ dupRows: [{ id: 9, order_id: 42, matched: true }] });
-
-    const out = await recordAndMatchPayment({ receiptId: 'RCPT-1', senderMsisdn: '612345678', amount: 7.25 });
-
-    expect(out).toMatchObject({ duplicate: true, orderId: 42 });
-    // Critically: no re-transition, no second event.
-    expect(transitionOrder).not.toHaveBeenCalled();
-    expect(enqueue).not.toHaveBeenCalled();
+  test('without a reference it still records a payment, with a per-order receipt id', async () => {
+    await confirmPayment({ orderId: ORDER, actor: 'operator:1:hodan' });
+    expect(tx.transaction.create.mock.calls[0][0].data.telecom_receipt_id).toBe(manualReceiptId(ORDER));
   });
-});
 
-describe('wrong amount / no matching order', () => {
-  test('records an unmatched transaction for the operator and does not move any order', async () => {
-    const calls = scenario({ matchRows: [] });
-
-    const out = await recordAndMatchPayment({ receiptId: 'RCPT-2', senderMsisdn: '612345678', amount: 999 });
-
-    expect(out).toMatchObject({ duplicate: false, orderId: null, ambiguous: false });
-    expect(calls.created.order_id).toBeNull();
-    expect(calls.created.matched).toBe(false);
-    expect(transitionOrder).not.toHaveBeenCalled();
-    expect(enqueue).not.toHaveBeenCalled();
-  });
-});
-
-describe('two identical-amount pending orders (ambiguous)', () => {
-  test('leaves the payment unmatched for manual reconciliation rather than guessing', async () => {
-    const calls = scenario({ matchRows: [{ id: 42 }, { id: 43 }] });
-
-    const out = await recordAndMatchPayment({ receiptId: 'RCPT-3', senderMsisdn: '612345678', amount: 7.25 });
-
-    expect(out).toMatchObject({ duplicate: false, orderId: null, ambiguous: true });
-    expect(calls.created.order_id).toBeNull();
+  test('a reference already used for another order is refused — one payment, one order', async () => {
+    usedReceipt = { order_id: 'aaaaaaaa-0000-0000-0000-000000000000' };
+    await expect(confirmPayment({ orderId: ORDER, reference: 'EVC991', actor: 'op' }))
+      .rejects.toMatchObject({ status: 409, message: expect.stringMatching(/already used/) });
     expect(transitionOrder).not.toHaveBeenCalled();
   });
-});
 
-describe('unrecognized sender number', () => {
-  test('keeps the raw sender value instead of throwing, so the operator can reconcile', async () => {
-    const calls = scenario({ matchRows: [] });
-
-    await recordAndMatchPayment({ receiptId: 'RCPT-4', senderMsisdn: '00000', amount: 1 });
-
-    // Not a valid Somali MSISDN → stored verbatim, not normalized.
-    expect(calls.rawValues[0]).toBe('00000');
+  test('an order that is not waiting for payment cannot be confirmed twice', async () => {
+    orderRow.status = 'PAID_UNASSIGNED';
+    await expect(confirmPayment({ orderId: ORDER, actor: 'op' })).rejects.toMatchObject({ status: 409 });
+    expect(tx.transaction.create).not.toHaveBeenCalled();
   });
-});
 
-describe('malformed webhook input', () => {
-  test('a missing receiptId is rejected before touching the DB', async () => {
-    scenario();
-    await expect(
-      recordAndMatchPayment({ senderMsisdn: '612345678', amount: 1 })
-    ).rejects.toThrow(/receiptId/);
+  test('an unknown order is a 404', async () => {
+    orderRow = null;
+    await expect(confirmPayment({ orderId: ORDER, actor: 'op' })).rejects.toMatchObject({ status: 404 });
   });
 });

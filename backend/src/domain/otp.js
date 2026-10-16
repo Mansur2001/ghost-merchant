@@ -4,8 +4,8 @@
 //   * Online guessing  -> 6 digits + MAX_ATTEMPTS + short TTL (see below).
 //   * Offline cracking -> codes are scrypt-hashed at rest, so stealing the table does not
 //                         hand over live logins.
-//   * SMS spamming     -> RESEND_COOLDOWN_MS. Each send is a real SMS off the Oracle phone,
-//                         so an uncapped resend loop is both a DoS and a direct cash cost.
+//   * SMS spamming     -> RESEND_COOLDOWN_MS. Each send is a real, paid SMS, so an uncapped
+//                         resend loop is both a DoS and a direct cash cost.
 //   * Biased codes     -> crypto.randomInt is uniform; never `Math.random() % 1e6`.
 import crypto from 'node:crypto';
 import { parsePhone } from './phone.js';

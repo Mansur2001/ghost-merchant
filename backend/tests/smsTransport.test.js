@@ -1,6 +1,5 @@
-// Which channel carries a login code. ClickSend carries every number; the Oracle phone only
-// sends if a deployment names it explicitly. A code that never arrives is experienced as "the
-// app is broken", so the fallbacks here are as important as the happy path.
+// How a login code goes out. ClickSend carries every number. A code that never arrives is
+// experienced as "the app is broken", so the fallbacks here are as important as the happy path.
 import { jest, describe, test, expect, beforeEach } from '@jest/globals';
 
 const config = {
@@ -11,20 +10,10 @@ const config = {
     clicksend: { username: '', apiKey: '', from: '' },
     devSmsAllowlist: [],
   },
-  oracleWebhookSecret: 'test-secret',
 };
 
 jest.unstable_mockModule('../src/config.js', () => ({ config }));
 
-// The Oracle transport is only usable when a phone is actually polling — a config value
-// can't tell us that, so the sender asks the heartbeat monitor.
-let oracleState = 'not_configured';
-jest.unstable_mockModule('../src/realtime/oracleMonitor.js', () => ({
-  oracleStatus: () => ({ state: oracleState }),
-}));
-jest.unstable_mockModule('../src/notify/smsQueue.js', () => ({
-  queueSms: jest.fn(async () => 1n),
-}));
 
 const { transportFor, sendOtpSms } = await import('../src/notify/smsSender.js');
 
@@ -41,7 +30,6 @@ const accepted = () => ({
 });
 
 beforeEach(() => {
-  oracleState = 'not_configured';
   config.env = 'development';
   config.otp.transport = 'auto';
   config.otp.clicksend = { username: '', apiKey: '', from: '' };
@@ -52,33 +40,19 @@ beforeEach(() => {
 
 describe('routing', () => {
   test('auto sends EVERY number through ClickSend, Somali and US alike', () => {
-    // Even with a healthy Oracle: it reads payment receipts now, it doesn't send texts.
-    oracleState = 'healthy';
-    expect(transportFor('+252612345678')).toBe('clicksend');
-    expect(transportFor('+12065551234')).toBe('clicksend');
+    expect(transportFor()).toBe('clicksend');
   });
 
-  test('an explicit transport overrides auto', () => {
+  test('an explicit log transport keeps a dev box offline', () => {
     config.otp.transport = 'log';
-    expect(transportFor('+252612345678')).toBe('log');
-    config.otp.transport = 'oracle';
-    expect(transportFor('+12065551234')).toBe('oracle');
+    expect(transportFor()).toBe('log');
   });
 
-  test('a Somali number goes out over ClickSend, never the Oracle queue', async () => {
-    oracleState = 'healthy';
+  test('a Somali number goes out over ClickSend', async () => {
     config.otp.clicksend = { ...CREDS };
     const { transport } = await sendOtpSms('+252612345678', '123456');
     expect(transport).toBe('clicksend');
     expect(JSON.parse(global.fetch.mock.calls[0][1].body).messages[0].to).toBe('+252612345678');
-  });
-
-  test('the legacy Oracle path still queues when named explicitly', async () => {
-    config.otp.transport = 'oracle';
-    oracleState = 'healthy';
-    const { transport } = await sendOtpSms('+252612345678', '123456');
-    expect(transport).toBe('oracle');
-    expect(global.fetch).not.toHaveBeenCalled();
   });
 });
 

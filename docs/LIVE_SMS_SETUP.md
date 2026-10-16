@@ -17,13 +17,10 @@ ClickSend is the deliberate, bounded exception:
 
 - **It's outside the money path.** It carries a login code, never a payment, so invariant 6 is
   untouched.
-- **The alternative was hardware in another country.** Sending from the Oracle phone's SIM
-  meant every login depended on a handset staying charged and online. It also depended on a
-  subscriber SIM not being rate-limited for sending near-identical texts. That path still
-  exists (`OTP_TRANSPORT=oracle`), but nothing selects it automatically.
+- **The alternative was hardware in another country.** Sending from a phone's own SIM would
+  make every login depend on a handset staying charged and online, and on a subscriber SIM not
+  being rate-limited for sending near-identical texts.
 - **No commitment.** Credit is prepaid, and nothing renews.
-
-The Oracle phone keeps its real job: reading payment receipts.
 
 ---
 
@@ -119,9 +116,6 @@ never as sent.
 - [ ] Credit topped up, with a low-balance alert set in ClickSend.
 - [ ] Rate limits left as they are. The per-phone and per-IP limits plus the 60-second resend
       cooldown are what stand between an SMS-bomb and your bill.
-- [ ] `VERIFY_CALL_NUMBER` left **blank** unless the Oracle phone is running. Missed-call
-      sign-in needs that phone to see the call, so without it customers get a button that
-      never completes.
 
 ## Phone numbers: the country switch
 

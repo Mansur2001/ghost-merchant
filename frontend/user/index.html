@@ -110,20 +110,6 @@
         <label for="phone" data-i18n="auth.phone">Your phone number</label>
         <input id="phone" type="tel" inputmode="tel" placeholder="61 234 5678" autocomplete="tel" />
         <div class="phone-hint muted" id="phoneHint">Enter your mobile number</div>
-        <!-- Missed-call verification is the primary path where a call-capable device is
-             configured. Nothing is sent to the customer: the caller ID IS the proof, which
-             is why it costs nothing, cannot be throttled by a telecom, and leaves no code
-             for anyone pretending to be support to ask for. -->
-        <div id="callStep" class="hidden">
-          <button id="callVerifyBtn" type="button" data-i18n="auth.call">Verify with a free call</button>
-          <div id="callInstructions" class="hidden">
-            <p class="muted" data-i18n-html="auth.call.how">Call this number from <strong>this phone</strong> and hang up when it rings. We never answer, so it’s free.</p>
-            <a id="callLink" class="paylink" href="#"></a>
-            <p class="muted" id="callWaiting" data-i18n="auth.call.waiting">Waiting for your call…</p>
-            <button class="secondary" id="callCancelBtn" type="button" data-i18n="auth.call.cancel">Text me a code instead</button>
-          </div>
-        </div>
-
         <button id="sendCodeBtn" type="button" data-i18n="auth.send">Text me a code</button>
 
         <div id="codeStep" class="hidden">
@@ -178,6 +164,17 @@
         <a id="payLink" href="#"><button id="payBtn" type="button" data-i18n="pay.btn">Pay now (EVC Plus)</button></a>
         <p class="muted" id="payNote"></p>
 
+        <!-- No device reads the merchant's receipts: the customer says "I've paid" and an
+             operator checks the merchant phone. This only tells them which order to check —
+             the order becomes paid when THEY confirm it. -->
+        <div id="paidBox" class="hidden">
+          <label for="payRef" data-i18n="paid.refLabel">Transaction number (optional)</label>
+          <input id="payRef" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false"
+                 data-i18n-ph="paid.refPh" placeholder="From your EVC / eDahab message" />
+          <button id="paidBtn" type="button" data-i18n="paid.btn">I've paid</button>
+        </div>
+        <p class="muted hidden" id="paidNote"></p>
+
         <h3 style="margin:18px 0 8px;" data-i18n="order.progress">Progress</h3>
         <ul class="timeline" id="timeline"></ul>
 
@@ -206,8 +203,6 @@
           <h3 style="margin:0;" data-i18n="faq.title">FAQ</h3>
           <button class="secondary" id="faqBack" type="button" style="max-width:110px;margin:0;" data-i18n="nav.back">← Back</button>
         </div>
-        <details><summary data-i18n="faq.call.q"></summary>
-          <p class="muted" data-i18n-html="faq.call.a"></p></details>
         <details open><summary data-i18n="faq.what.q"></summary>
           <p class="muted" data-i18n-html="faq.what.a"></p></details>
         <details><summary data-i18n="faq.pay.q"></summary>

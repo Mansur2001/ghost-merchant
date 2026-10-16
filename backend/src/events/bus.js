@@ -1,5 +1,5 @@
 // Domain event bus (Observer pattern). Command handlers publish here via the outbox; the
-// realtime layer and the oracle monitor subscribe.
+// realtime layer subscribes.
 //
 // TWO MODES, one API:
 //   no REDIS_URL  — in-process EventEmitter. One backend instance. What the tests use.
@@ -24,8 +24,8 @@ export const EVENTS = {
   ORDER_STATE_CHANGED: 'order.state_changed',
   PAYMENT_RECEIVED: 'payment.received',
   MESSAGE_POSTED: 'message.posted',
-  ORACLE_HEARTBEAT: 'oracle.heartbeat',
-  ORACLE_DOWN: 'oracle.down',
+  // The customer said "I've paid" — tells operators which order to check. Not a payment.
+  PAYMENT_CLAIMED: 'payment.claimed',
 };
 
 // Redis pub/sub channel. Every instance must agree on this name, so changing it during a

@@ -1,7 +1,0 @@
-{
-  "name": "gurikaabe-oracle",
-  "version": "0.1.0",
-  "description": "Android SMS Oracle listener + webhook simulator.",
-  "type": "module",
-  "private": true
-}

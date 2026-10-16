@@ -56,28 +56,44 @@ BADPW=$(curl -sk -X POST -H 'Content-Type: application/json' -d '{"username":"ho
 chk "no-such-user == wrong-pw     " "$NOUSER" "$BADPW"
 chk "GET /operator/me             " 200 "$(code -H "Authorization: Bearer $TOK" $B/operator/me)"
 chk "  ...never returns the hash  " "yes" "$(curl -sk -H "Authorization: Bearer $TOK" $B/operator/me | grep -q password_hash && echo no || echo yes)"
-chk "roster excludes hashes       " "yes" "$(curl -sk -H "Authorization: Bearer $TOK" $B/operator/operators | grep -q password_hash && echo no || echo yes)"
+# Staff management is ADMIN-only; hodan dispatches. The seeded admin manages the roster.
+ATOK=$(curl -sk -X POST -H 'Content-Type: application/json' -d '{"username":"admin","password":"change-me-please-1"}' $B/operator/login | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+chk "roster is admin-only         " 403 "$(code -H "Authorization: Bearer $TOK" $B/operator/operators)"
+chk "roster excludes hashes       " "yes" "$(curl -sk -H "Authorization: Bearer $ATOK" $B/operator/operators | grep -q password_hash && echo no || echo yes)"
 
 echo
-echo "── P0 #5b. Account creation rules ──"
-mk() { curl -sk -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d "$1" $B/operator/operators; }
-chk "create operator              " 201 "$(mk '{"username":"testop","displayName":"Test Op","password":"a-good-long-password"}')"
-chk "duplicate username -> 409    " 409 "$(mk '{"username":"testop","displayName":"Dup","password":"a-good-long-password"}')"
-chk "duplicate is case-insensitive" 409 "$(mk '{"username":"TESTOP","displayName":"Dup","password":"a-good-long-password"}')"
-chk "short password -> 400        " 400 "$(mk '{"username":"testop2","displayName":"X","password":"short"}')"
-chk "password contains username   " 400 "$(mk '{"username":"testop2","displayName":"X","password":"testop2-testop2"}')"
-chk "bad username chars -> 400    " 400 "$(mk '{"username":"bad user!","displayName":"X","password":"a-good-long-password"}')"
-chk "unauthenticated create -> 401" 401 "$(curl -sk -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"username":"sneaky","displayName":"X","password":"a-good-long-password"}' $B/operator/operators)"
+echo "── P0 #5b. Account creation: admin creates, the person sets their own password ──"
+# Nobody types another person's password. The admin creates the account; a one-time setup code
+# goes to the person's phone (the log transport here, so the code comes back as devCode).
+mk() { curl -sk -X POST -H "Authorization: Bearer $1" -H 'Content-Type: application/json' -d "$2" $B/operator/operators; }
+mkc() { curl -sk -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $1" -H 'Content-Type: application/json' -d "$2" $B/operator/operators; }
+CREATED=$(mk "$ATOK" '{"username":"testop","displayName":"Test Op","phone":"+12065550142"}')
+SETUP=$(echo "$CREATED" | python3 -c "import sys,json;print(json.load(sys.stdin).get('devCode',''))")
+chk "admin creates by invite      " "yes" "$([ -n "$SETUP" ] && echo yes || echo no)"
+chk "non-admin cannot create      " 403 "$(mkc "$TOK" '{"username":"sneaky","displayName":"X","phone":"+12065550143"}')"
+chk "unauthenticated create -> 401" 401 "$(curl -sk -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"username":"sneaky","displayName":"X","phone":"+12065550143"}' $B/operator/operators)"
+chk "duplicate username -> 409    " 409 "$(mkc "$ATOK" '{"username":"testop","displayName":"Dup","phone":"+12065550144"}')"
+chk "duplicate is case-insensitive" 409 "$(mkc "$ATOK" '{"username":"TESTOP","displayName":"Dup","phone":"+12065550144"}')"
+chk "bad username chars -> 400    " 400 "$(mkc "$ATOK" '{"username":"bad user!","displayName":"X","phone":"+12065550145"}')"
+chk "no usable password yet       " 401 "$(code -X POST -H 'Content-Type: application/json' -d '{"username":"testop","password":"a-good-long-password"}' $B/operator/login)"
+claim() { curl -sk -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d "{\"role\":\"operator\",\"phone\":\"+12065550142\",\"code\":\"$SETUP\",\"secret\":\"$1\"}" $B/staff/setup; }
+chk "short password -> 400        " 400 "$(claim short)"
+chk "password contains username   " 400 "$(claim testop-testop-x)"
+chk "person sets own password     " 200 "$(claim a-good-long-password)"
+chk "setup code is single-use     " 401 "$(claim another-good-password)"
+chk "they can log in              " 200 "$(code -X POST -H 'Content-Type: application/json' -d '{"username":"testop","password":"a-good-long-password"}' $B/operator/login)"
 
 echo
 echo "── P0 #5c. Deactivation guards ──"
 # pg returns BIGINT as a JSON string, so the id may or may not be quoted.
 ME_ID=$(curl -sk -H "Authorization: Bearer $TOK" $B/operator/me | python3 -c "import sys,json;print(json.load(sys.stdin)['operator']['id'])")
-chk "cannot deactivate yourself   " 400 "$(code -X POST -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{"active":false}' $B/operator/operators/$ME_ID/active)"
-TEST_ID=$(curl -sk -H "Authorization: Bearer $TOK" $B/operator/operators | python3 -c "import sys,json;print([o['id'] for o in json.load(sys.stdin)['operators'] if o['username']=='testop'][0])")
-chk "deactivate another operator  " 200 "$(code -X POST -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{"active":false}' $B/operator/operators/$TEST_ID/active)"
+ADMIN_ID=$(curl -sk -H "Authorization: Bearer $ATOK" $B/operator/me | python3 -c "import sys,json;print(json.load(sys.stdin)['operator']['id'])")
+chk "cannot deactivate yourself   " 400 "$(code -X POST -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{"active":false}' $B/operator/operators/$ADMIN_ID/active)"
+chk "last admin cannot be demoted " 409 "$(code -X POST -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{"admin":false}' $B/operator/operators/$ADMIN_ID/admin)"
+TEST_ID=$(curl -sk -H "Authorization: Bearer $ATOK" $B/operator/operators | python3 -c "import sys,json;print([o['id'] for o in json.load(sys.stdin)['operators'] if o['username']=='testop'][0])")
+chk "deactivate another operator  " 200 "$(code -X POST -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{"active":false}' $B/operator/operators/$TEST_ID/active)"
 chk "deactivated cannot log in    " 401 "$(code -X POST -H 'Content-Type: application/json' -d '{"username":"testop","password":"a-good-long-password"}' $B/operator/login)"
-chk "reactivate                   " 200 "$(code -X POST -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{"active":true}' $B/operator/operators/$TEST_ID/active)"
+chk "reactivate                   " 200 "$(code -X POST -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{"active":true}' $B/operator/operators/$TEST_ID/active)"
 chk "reactivated can log in again " 200 "$(code -X POST -H 'Content-Type: application/json' -d '{"username":"testop","password":"a-good-long-password"}' $B/operator/login)"
 
 echo

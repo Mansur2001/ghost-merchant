@@ -18,6 +18,11 @@ OTOK=$(curl -sk -X POST -H 'Content-Type: application/json' \
   -d '{"username":"hodan","password":"seeded-operator-pw-1"}' $B/operator/login |
   sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 chk "operator signed in            " "yes" "$([ -n "$OTOK" ] && echo yes || echo no)"
+# Access requests and ID documents are ADMIN-only; hodan dispatches.
+ATOK=$(curl -sk -X POST -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"change-me-please-1"}' $B/operator/login |
+  sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+chk "admin signed in               " "yes" "$([ -n "$ATOK" ] && echo yes || echo no)"
 
 echo
 echo "── 1. Failing a PAID order opens a refund automatically ──"
@@ -84,54 +89,54 @@ echo
 echo "── 7. Reviewing a request is operator-only, and still creates nothing ──"
 AR_ID=$(psql "SELECT id FROM access_requests WHERE phone='+12065551234' LIMIT 1;")
 chk "unauthenticated review        " 401 "$(code -X POST -H 'Content-Type: application/json' -d '{"status":"approved"}' $B/operator/access-requests/$AR_ID/review)"
-chk "operator marks it approved    " 200 "$(code -X POST -H "Authorization: Bearer $OTOK" -H 'Content-Type: application/json' -d '{"status":"approved"}' $B/operator/access-requests/$AR_ID/review)"
+chk "non-admin cannot review       " 403 "$(code -X POST -H "Authorization: Bearer $OTOK" -H 'Content-Type: application/json' -d '{"status":"approved"}' $B/operator/access-requests/$AR_ID/review)"
+chk "admin marks it approved       " 200 "$(code -X POST -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{"status":"approved"}' $B/operator/access-requests/$AR_ID/review)"
 chk "  ...STILL no driver created  " "$DRV_BEFORE" "$(psql "SELECT count(*) FROM drivers;")"
-chk "  ...decision is attributed   " "yes" "$(psql "SELECT reviewed_by FROM access_requests WHERE id=$AR_ID;" | grep -q hodan && echo yes || echo no)"
-chk "an unknown status is rejected " 400 "$(code -X POST -H "Authorization: Bearer $OTOK" -H 'Content-Type: application/json' -d '{"status":"superuser"}' $B/operator/access-requests/$AR_ID/review)"
+chk "  ...decision is attributed   " "yes" "$(psql "SELECT reviewed_by FROM access_requests WHERE id=$AR_ID;" | grep -q admin && echo yes || echo no)"
+chk "an unknown status is rejected " 400 "$(code -X POST -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{"status":"superuser"}' $B/operator/access-requests/$AR_ID/review)"
 
 echo
 echo "── 8. Owner contact is reachable without an account ──"
 CONTACT=$(curl -sk $B/signup/contact)
 chk "contact endpoint is public    " 200 "$(code $B/signup/contact)"
-chk "  ...carries the email        " "yes" "$(echo "$CONTACT" | grep -q 'tukale206@gmail.com' && echo yes || echo no)"
-chk "  ...carries the phone        " "yes" "$(echo "$CONTACT" | grep -q '206 687 6538' && echo yes || echo no)"
+# Whatever the owner contact is in .env — the suite checks it is served, not what it says.
+# Strip quotes and surrounding spaces, as the backend does.
+envval() { grep -E "^$1=" .env 2>/dev/null | cut -d= -f2- | tr -d "\"'" | sed 's/^ *//;s/ *$//'; }
+OWNER_EMAIL=$(envval OWNER_EMAIL)
+OWNER_PHONE=$(envval OWNER_PHONE)
+chk "  ...carries the email        " "yes" "$(echo "$CONTACT" | grep -qF "$OWNER_EMAIL" && echo yes || echo no)"
+chk "  ...carries the phone        " "yes" "$(echo "$CONTACT" | grep -qF "$OWNER_PHONE" && echo yes || echo no)"
 
 echo
-echo "── 9. Sensing a payment on a US rail, then reconciling it ──"
-# Zelle and friends name the payer instead of giving a phone number, so these CANNOT be
-# auto-matched — guessing from the amount would credit the wrong customer. They must land in
-# the reconcile queue and be bindable by an operator. This path had no coverage and broke
-# silently once already.
-# Earlier sections deliberately refund the seeded orders, so this one makes its own fixture
-# rather than depending on what is left over — a suite whose sections depend on each other's
-# leftovers fails for reasons that have nothing to do with the thing under test.
-# head -1 because psql appends its "INSERT 0 1" tag after the RETURNING row.
+echo "── 9. \"I've paid\" -> operator confirms -> a later failure still owes the money ──"
+# No device reads receipts. The customer's claim only tells the operator where to look; the
+# operator's confirmation records the payment, so failing the order later opens a refund.
+# Its own fixture, so it doesn't depend on what earlier sections left behind.
 ORDER=$(psql "INSERT INTO orders(user_phone, status, total_amount, items, landmark_text)
-              VALUES ('+252612345678','PENDING_PAYMENT', 33.33, '[]'::jsonb, 'reconcile fixture')
+              VALUES ('+252612345678','PENDING_PAYMENT', 33.33, '[]'::jsonb, 'claim fixture')
               RETURNING id;" | head -1)
-AMT="33.33"
-SECRET=$(grep -E '^ORACLE_WEBHOOK_SECRET=' .env | cut -d= -f2-)
-SMS_BODY="Mansur T sent you \$$AMT with Zelle. Ref VERIFY$$"
-PAYLOAD=$(python3 -c "import json,sys;print(json.dumps({'senderId':'Zelle','body':sys.argv[1],'receivedAt':'1'}))" "$SMS_BODY")
-SIG=$(python3 -c "import hmac,hashlib,sys;print(hmac.new(sys.argv[1].encode(),sys.argv[2].encode(),hashlib.sha256).hexdigest())" "$SECRET" "$PAYLOAD")
-SENSE=$(curl -sk -X POST -H 'Content-Type: application/json' -H "X-Oracle-Signature: $SIG" -d "$PAYLOAD" $B/webhook)
-chk "US-rail message is recognised" "yes" "$(echo "$SENSE" | grep -q '"recognised":true' && echo yes || echo no)"
-chk "  ...but NOT auto-matched     " "yes" "$(echo "$SENSE" | grep -q '"matched":false' && echo yes || echo no)"
-chk "  ...and flagged for the queue" "yes" "$(echo "$SENSE" | grep -q '"needsReconciliation":true' && echo yes || echo no)"
-chk "  ...payer name is kept       " "MansurT" "$(psql "SELECT sender_name FROM transactions WHERE provider='zelle' ORDER BY id DESC LIMIT 1;")"
+DEVCODE=$(curl -sk -X POST -H 'Content-Type: application/json' -d '{"phone":"+252612345678"}' $B/auth/otp/request |
+  python3 -c "import sys,json;print(json.load(sys.stdin).get('devCode',''))")
+CTOK=$(curl -sk -X POST -H 'Content-Type: application/json' -d "{\"phone\":\"+252612345678\",\"code\":\"$DEVCODE\"}" $B/auth/otp/verify |
+  sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+chk "customer says \"I've paid\"     " 200 "$(code -X POST -H "Authorization: Bearer $CTOK" -H 'Content-Type: application/json' -d '{"reference":"evc 7788"}' $B/orders/$ORDER/paid)"
+chk "  ...claim recorded, normalized" "EVC7788" "$(psql "SELECT payment_claim_ref FROM orders WHERE id='$ORDER';")"
+chk "  ...but the order is NOT paid " "PENDING_PAYMENT" "$(psql "SELECT status FROM orders WHERE id='$ORDER';")"
+chk "  ...and no payment recorded   " "0" "$(psql "SELECT count(*) FROM transactions WHERE order_id='$ORDER';")"
+DEV2=$(curl -sk -X POST -H 'Content-Type: application/json' -d '{"phone":"+252651234567"}' $B/auth/otp/request |
+  python3 -c "import sys,json;print(json.load(sys.stdin).get('devCode',''))")
+OTHER=$(curl -sk -X POST -H 'Content-Type: application/json' -d "{\"phone\":\"+252651234567\",\"code\":\"$DEV2\"}" $B/auth/otp/verify |
+  sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+chk "another customer can't claim it" 404 "$(code -X POST -H 'Content-Type: application/json' -d '{}' -H "Authorization: Bearer $OTHER" $B/orders/$ORDER/paid)"
 
-TXID=$(psql "SELECT id FROM transactions WHERE provider='zelle' AND matched=false ORDER BY id DESC LIMIT 1;")
-chk "operator binds it to an order " 200 "$(code -X POST -H "Authorization: Bearer $OTOK" -H 'Content-Type: application/json' -d "{\"orderId\":\"$ORDER\"}" $B/operator/transactions/$TXID/assign)"
-chk "  ...order becomes paid       " "PAID_UNASSIGNED" "$(psql "SELECT status FROM orders WHERE id='$ORDER';")"
-chk "  ...receipt is bound         " "t" "$(psql "SELECT matched FROM transactions WHERE id=$TXID;")"
-chk "  ...audit names the operator " "yes" "$(psql "SELECT actor FROM order_events WHERE order_id='$ORDER' ORDER BY id DESC LIMIT 1;" | grep -q hodan && echo yes || echo no)"
+chk "operator confirms the payment  " 200 "$(code -X POST -H "Authorization: Bearer $OTOK" -H 'Content-Type: application/json' -d '{"reference":"EVC7788"}' $B/operator/orders/$ORDER/mark-paid)"
+chk "  ...order becomes paid        " "PAID_UNASSIGNED" "$(psql "SELECT status FROM orders WHERE id='$ORDER';")"
+chk "  ...payment recorded          " "33.33" "$(psql "SELECT amount FROM transactions WHERE order_id='$ORDER' AND matched;")"
+chk "  ...audit names the operator  " "yes" "$(psql "SELECT actor FROM order_events WHERE order_id='$ORDER' ORDER BY id DESC LIMIT 1;" | grep -q hodan && echo yes || echo no)"
+chk "claiming a paid order -> 409   " 409 "$(code -X POST -H "Authorization: Bearer $CTOK" -H 'Content-Type: application/json' -d '{}' $B/orders/$ORDER/paid)"
 
-# An ordinary text must not become a payment.
-JUNK=$(python3 -c "import json;print(json.dumps({'senderId':'+12065551234','body':'are you open today?','receivedAt':'1'}))")
-JSIG=$(python3 -c "import hmac,hashlib,sys;print(hmac.new(sys.argv[1].encode(),sys.argv[2].encode(),hashlib.sha256).hexdigest())" "$SECRET" "$JUNK")
-TX_BEFORE=$(psql "SELECT count(*) FROM transactions;")
-curl -sk -o /dev/null -X POST -H 'Content-Type: application/json' -H "X-Oracle-Signature: $JSIG" -d "$JUNK" $B/webhook
-chk "an ordinary text is ignored   " "$TX_BEFORE" "$(psql "SELECT count(*) FROM transactions;")"
+curl -sk -o /dev/null -X POST -H "Authorization: Bearer $OTOK" -H 'Content-Type: application/json' -d '{"reason":"shop closed"}' $B/operator/orders/$ORDER/refund
+chk "failing it opens a refund      " "33.33" "$(psql "SELECT amount FROM refunds WHERE order_id='$ORDER' AND status='owed';")"
 
 echo
 echo "── 10. ID verification: the most sensitive data in the system ──"
@@ -160,13 +165,13 @@ chk "back can be attached too      " 201 "$(code -X POST -H "Authorization: Bear
 chk "  ...and stored separately    " "yes" "$(psql "SELECT CASE WHEN id_back_key IS NOT NULL THEN 'yes' ELSE 'no' END FROM access_requests WHERE id=$IDREQ;")"
 chk "an invalid side is refused    " 400 "$(code -X POST -H "Authorization: Bearer $UPTOK" -H 'Content-Type: image/png' --data-binary @/tmp/verify-id.png $B/signup/id-document/sideways)"
 chk "only an operator may view it  " 401 "$(code $B/operator/access-requests/$IDREQ/id-document/front)"
-chk "  ...operator can             " 200 "$(code -H "Authorization: Bearer $OTOK" $B/operator/access-requests/$IDREQ/id-document/front)"
-chk "  ...and it is not cached     " "yes" "$(curl -skI -H "Authorization: Bearer $OTOK" $B/operator/access-requests/$IDREQ/id-document/front | grep -qi 'no-store' && echo yes || echo no)"
+chk "  ...an admin can             " 200 "$(code -H "Authorization: Bearer $ATOK" $B/operator/access-requests/$IDREQ/id-document/front)"
+chk "  ...and it is not cached     " "yes" "$(curl -skI -H "Authorization: Bearer $ATOK" $B/operator/access-requests/$IDREQ/id-document/front | grep -qi 'no-store' && echo yes || echo no)"
 
 # RETENTION — the property that keeps a routine breach from becoming identity theft.
-curl -sk -o /dev/null -X POST -H "Authorization: Bearer $OTOK" -H 'Content-Type: application/json' -d '{"status":"declined"}' $B/operator/access-requests/$IDREQ/review
+curl -sk -o /dev/null -X POST -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' -d '{"status":"declined"}' $B/operator/access-requests/$IDREQ/review
 chk "decision DESTROYS BOTH sides  " "yes" "$(psql "SELECT CASE WHEN id_front_key IS NULL AND id_back_key IS NULL THEN 'yes' ELSE 'no' END FROM access_requests WHERE id=$IDREQ;")"
-chk "  ...it is gone from storage  " 404 "$(code -H "Authorization: Bearer $OTOK" $B/operator/access-requests/$IDREQ/id-document/front)"
+chk "  ...it is gone from storage  " 404 "$(code -H "Authorization: Bearer $ATOK" $B/operator/access-requests/$IDREQ/id-document/front)"
 chk "  ...but we kept the PROOF    " "yes" "$(psql "SELECT CASE WHEN id_document_at IS NOT NULL THEN 'yes' ELSE 'no' END FROM access_requests WHERE id=$IDREQ;")"
 chk "  ...and who decided          " "yes" "$(psql "SELECT reviewed_by FROM access_requests WHERE id=$IDREQ;" | grep -qi 'operator' && echo yes || echo no)"
 

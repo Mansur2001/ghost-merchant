@@ -6,9 +6,9 @@ deployment; this file is the reasoning you need before changing anything.
 ## What this is
 
 A **sovereign, local-first delivery coordination platform** for Somalia. It bypasses formal
-fintech/telecom APIs: customers pay peer-to-peer via **USSD `tel:` links** (EVC Plus / eDahab),
-and a dedicated Android phone (**the Oracle**) intercepts the telecom SMS receipt and reports it
-to the backend. No AWS, no Meta/WhatsApp, no Google Maps — self-hosted and containerized.
+fintech/telecom APIs: customers pay the merchant peer-to-peer via **USSD `tel:` links** (EVC Plus
+/ eDahab), and an **operator confirms each payment** by checking the merchant phone. No device
+reads receipts. No AWS, no Meta/WhatsApp, no Google Maps — self-hosted and containerized.
 
 `CREDENTIALS.md` (git-ignored) holds local logins and seeded data.
 
@@ -22,7 +22,7 @@ illegal, gets the merchant MSISDN frozen, or gets the app pulled from Play. **We
 those.** Three consequences:
 
 - **Never custody customer money.** Payment goes customer → merchant MSISDN directly. The
-  platform *observes* the receipt; it never sits in the funds flow. This is why refunds are
+  platform *records* a payment an operator confirmed; it never sits in the funds flow. This is why refunds are
   manual and off-platform — correct, not a shortcut.
 - **Cheap to run beats clever.** One small VPS serves the whole thing. Reject dependencies that
   add monthly cost or a vendor relationship.
@@ -34,7 +34,7 @@ those.** Three consequences:
 1. **Never demo with real customer data.** Screenshots and recordings use `npm run seed` data
    only. The operator dashboard shows real phone numbers and addresses — treat it as PII.
 2. **Never show `.env` or `CREDENTIALS.md`**, including scrolled-back terminal history.
-   `ORACLE_WEBHOOK_SECRET` on screen = anyone can forge payment confirmations.
+   `SESSION_SECRET` on screen = anyone can mint an operator session and confirm payments.
 3. **Ship behind the state machine, not around it.** Fast shipping breaks this project the
    moment someone writes `orders.status` directly to hit a deadline.
 4. **Every ship needs a rollback**: tagged image + `pg_dump` before migration.
@@ -57,8 +57,10 @@ module (order / dispatch / tracking / payment) can be extracted later without a 
   WebSocket clients (subscribe-by-`order_id`; operators get everything).
 
 Payment data flow:
-`Oracle → POST /api/webhook (HMAC) → parseReceipt → recordAndMatchPayment → transitionOrder →
-outbox → socket push → PWA updates live.`
+`customer pays merchant (USSD) → taps "I've paid" (POST /orders/:id/paid, optional reference) →
+operator checks the merchant phone → Confirm payment (POST /operator/orders/:id/mark-paid) →
+confirmPayment: payment row + transitionOrder + event, one transaction → outbox → socket push →
+customer's page flips to paid live.`
 
 ## Non-negotiable invariants
 
@@ -69,13 +71,16 @@ outbox → socket push → PWA updates live.`
    `PENDING_PAYMENT → PAID_UNASSIGNED → DISPATCHED → IN_TRANSIT → DELIVERED`; any live state can
    go to `FAILED_REFUND`.
 2. **Writes touching sensitive data are idempotent — enforced in the DB, not just code.**
-   Payments: `transactions.telecom_receipt_id UNIQUE` (a replayed SMS can't credit twice).
-   Customers: `users.phone_number` PK + `ON CONFLICT DO NOTHING`. Drivers: `msisdn UNIQUE` +
-   upsert. Photos: `order_photos.object_key UNIQUE` with a deterministic key per (order, kind),
+   Payments: `transactions.telecom_receipt_id UNIQUE` — the EVC/eDahab transaction reference,
+   normalized (`domain/paymentRef.js`), so one real payment can never confirm two orders.
+   Customers: `users.phone_number` PK + `ON CONFLICT DO NOTHING`. Drivers: `msisdn UNIQUE`,
+   never upserted (an upsert silently replaced an existing driver's PIN). Photos: `order_photos.object_key UNIQUE` with a deterministic key per (order, kind),
    so a re-upload overwrites one object/row instead of leaking duplicate copies of an image.
-3. **The Oracle webhook is HMAC-signed** (`X-Oracle-Signature`, `middleware/hmac.js`). The
-   endpoint is public; unsigned requests are rejected. The webhook route uses a raw-body parser
-   and must stay registered **before** the global `express.json()` in `index.js`.
+3. **Only an operator's confirmation makes an order paid** (`commands/payments.js`
+   `confirmPayment`). A customer's "I've paid" (`claimPayment`) is a hint for the operator and
+   never changes status — anyone can tap a button. Confirming records the payment row in the
+   SAME transaction as the transition, because the refund ledger sums those rows: a paid order
+   with no payment row would fail owing nothing.
 4. **Phone numbers are the customer identity.** Validate/normalize at every trust boundary with
    `domain/phone.js` → canonical E.164 (`+252XXXXXXXXX`). Rule: 2-digit operator prefix +
    7 digits = 9-digit national number. `frontend/shared/phone.js` mirrors this for live input
@@ -83,7 +88,7 @@ outbox → socket push → PWA updates live.`
 5. **USSD `#` must be `%23`.** `domain/ussd.js` builds the `tel:` URI with the trailing `#`
    pre-encoded. A bare `#` reaching the browser makes Android truncate the dial string.
 6. **Money never flows through the platform.** No wallet, no balance, no held funds, no
-   platform-initiated transfer. The backend only *records* an observed telecom receipt.
+   platform-initiated transfer. The backend only *records* a payment an operator confirmed.
 7. **Domain events are written in the same transaction as the state they describe.** Commands
    call `enqueue(client, EVENT, payload)` with the transaction's client — never `publish()`
    directly (`events/outbox.js`). Publishing after COMMIT is two steps with a crash-shaped gap
@@ -95,48 +100,33 @@ outbox → socket push → PWA updates live.`
 
 ---
 
-## The Oracle: a confirmation sensor, not a communication device
+## Payment confirmation: a person, not a device
 
-It watches the merchant phone's inbox for any message saying money arrived — EVC Plus, eDahab,
-Zelle, Cash App, Venmo — and forwards the RAW text. Conversation between customer, driver and
-operator never touches it; that is the in-app chat over WebSocket.
+There is **no Oracle**. An earlier design had an Android phone read the merchant's SMS receipts
+and post them to a signed webhook; it was removed with everything it needed (webhook + HMAC,
+heartbeat monitor, receipt parsers, IMAP email sensor, reconcile queue, missed-call sign-in).
+Git history has it if it's ever wanted back.
 
-- **Parsing is server-side** (`domain/receipts.js`). Rails reword receipts without warning, and
-  a parser fix must not require physical access to a handset in another country.
-- **Only a receipt carrying a PHONE NUMBER can auto-match.** US rails identify the payer by
-  display name, so those land in the operator's reconcile queue. Matching on amount alone would
-  mark the wrong customer's order paid the moment two people owe the same amount — which, with a
-  fixed delivery fee, is most of the time.
-- **A receipt is evidence, not proof**: sender IDs are spoofable. What holds is the narrow match
-  (number + exact amount + an order actually waiting), the reconcile queue for anything
-  ambiguous, and `telecom_receipt_id UNIQUE` so a replay can never credit twice.
-- **A payment REQUEST is not a payment.** "X requests $25 from you" has the same sender, brand
-  and amount as a real receipt; booking it would let someone mark an order paid by *asking* for
-  money. `NOT_A_PAYMENT` gates that, along with declines, refunds and marketing.
-- **Email sensing is the same job without the phone** (`notify/emailSensor.js`). US rails email
-  the notification they also text, so the server reads a mailbox over IMAP and feeds the SAME
-  parsers — no Android device, no permissions granted by hand. Somali rails still need the
-  phone; they text, they don't email. Both can run at once: the same payment over both
-  transports produces the same receipt id, so it cannot credit twice.
-  Setup: `docs/EMAIL_SENSOR_SETUP.md`.
-- **Running with no Oracle is supported.** At low volume an operator reads the merchant phone
-  and taps "Mark as paid". The dead-man's switch arms only once an Oracle has actually reported,
-  so a deployment without one shows "Payments: manual" rather than a permanent red DOWN — an
-  alarm that is always on is one people learn to ignore.
+- **Customer:** pays the merchant over USSD, then taps **"I've paid"**, optionally typing the
+  transaction number from their EVC/eDahab message. Stored as `orders.payment_claimed_at` /
+  `payment_claim_ref`; a `payment.claimed` event reaches operators live. Status unchanged.
+- **Operator:** claimed orders sort to the top of the dashboard with the reference pre-filled.
+  They check the merchant phone, then **Confirm payment**. Confirming without a reference is
+  allowed but warned against: without it, the same payment could be confirmed twice.
+- `confirmPayment` takes the order row `FOR UPDATE`, refuses anything not `PENDING_PAYMENT`, and
+  refuses a reference already used (`409`, naming the other order) before UNIQUE would.
+- **The honest limit:** this costs operator time per order, and the operator is now the payment
+  check — they must look at the merchant phone, not trust the customer's reference. If volume
+  outgrows it, the fix is a telecom merchant API, not reviving the phone.
 
-### Outbound SMS: ClickSend, not the Oracle
+### Outbound SMS: ClickSend
 
 Every text the platform sends — customer login codes (`+252` and `+1`) and staff setup codes —
 goes through **ClickSend** (`notify/smsSender.js`), pay-as-you-go with no monthly fee. It is the
 one deliberate vendor exception, and it is bounded: it carries a code, never money.
 
-The Oracle phone USED to send login codes over its own SIM (`notify/smsQueue.js`, polled via
-`POST /api/oracle/sms/pending`). That path is kept but never selected automatically
-(`OTP_TRANSPORT=oracle` only): it made every login depend on a handset in another country
-staying charged, and a subscriber SIM sending near-identical texts gets rate-limited.
-
 - `OTP_TRANSPORT`: `clicksend` (production), `auto` (= clicksend, but a dev box without keys
-  shows the code on screen), `log` (dev only — **refuses to boot** in production), `oracle`.
+  shows the code on screen), `log` (dev only — **refuses to boot** in production).
 - **Dev never texts strangers.** Outside production, real SMS goes only to numbers on
   `DEV_SMS_ALLOWLIST`; everything else gets the on-screen code. The seed's numbers are valid
   Somali numbers that may belong to real people.
@@ -218,32 +208,6 @@ own PIN/password with it.** Nobody ever types or knows another person's secret.
 - The SMS goes out **after** the transaction commits (a text can't be rolled back); if it
   fails, the account exists and "Send setup code" retries.
 
-### Phone verification by missed call
-
-`docs/MISSED_CALL_VERIFICATION.md`. Sending an SMS makes verification an infrastructure problem.
-Inverting it removes the sending entirely: the customer calls a number we own from the phone
-they're registering and hangs up; **the caller ID is the proof**. No code, no queue, no
-per-message cost. It also kills OTP phishing by construction — with no code in the system,
-"never tell anyone your code" becomes unconditionally true.
-
-- **The TICKET is the security property, not a convenience.** With a passcode, an attacker who
-  opens a challenge for someone else's number gets nothing — the code goes to the victim's
-  handset. Here there is no secret in flight, so the attacker is waiting for *a call from that
-  number*, which the victim may make for their own reasons. A session is therefore handed only
-  to the client holding the ticket that opened the challenge, never to "whoever asks about this
-  number". Deleting that check silently breaks the whole scheme.
-- Three rules hold it together: **latest open wins** (`phone` is the PK, so a victim's own
-  attempt replaces an attacker's challenge rather than racing it); **a call matching no live
-  challenge is DISCARDED**, never banked for a later challenge; **verification is single-use**.
-- `VERIFY_CALL_NUMBER` unset = the flow is advertised as unavailable (`GET /api/auth/methods`)
-  and clients fall back to SMS. Never hardcode "Somali numbers call" in a client — whether a
-  call-capable device exists is deployment config, and a dead button is worse than no button.
-- **It needs the Oracle phone** to see the call. With no phone running, leave
-  `VERIFY_CALL_NUMBER` blank, or customers get a button that never completes.
-- **Android is the weak part**: a call only reaches the log after ringing out (20–30s). A USB
-  GSM modem reports caller ID on the first ring (`AT+CLIP`) and rejects instantly (`ATH`). If
-  this becomes the primary path, the modem is the right hardware.
-
 ---
 
 ## Event delivery (transactional outbox)
@@ -267,14 +231,12 @@ per-message cost. It also kills OTP phishing by construction — with no code in
   when the relay falls behind (>20 pending, >30s old, or anything parked). A stalled relay looks
   exactly like "the app is frozen", so it must not be silent.
 - Delivered rows are kept **7 days** as the "why did this happen at 3am" record, then swept.
-- Oracle heartbeat/down events stay on the direct bus: they derive from in-memory monitor state,
-  not a database write, so there is nothing to make atomic.
 
 ## CAP: what we actually choose
 
 Over Somali mobile networks **P is not optional**, so the design picks C or A *per operation*:
 
-- **Money and state transitions → CP.** `recordAndMatchPayment`, `transitionOrder` and driver
+- **Money and state transitions → CP.** `confirmPayment`, `transitionOrder` and driver
   assignment must be linearizable. On partition, **refuse the write**. The
   `telecom_receipt_id UNIQUE` invariant already encodes this — never trade it for availability,
   because the failure mode is crediting a payment twice. `PG_CP_COMMIT` / `PG_CRITICAL_TIMEOUT_MS`
@@ -402,8 +364,9 @@ serving the cached old version. This is the #1 "my change isn't showing" gotcha 
 `backend/src/db/seed.js` (`docker compose exec backend npm run seed`). `TRUNCATE … RESTART
 IDENTITY` then a fixed dataset (`db/seedFixtures.js`), so **every run converges to the same
 state** — reset here whenever data drifts. Covers one order in every state, two drivers
-(Amina/1234, Bashir/5678), two operators (`admin` — an admin — and `hodan`), matched receipts,
-one **unmatched** receipt for the reconcile queue, chat/audit rows, and two seeded SVG photos.
+(Amina/1234, Bashir/5678), two operators (`admin` — an admin — and `hodan`), recorded payments
+for the paid orders, an "I've paid" claim on the pending order, chat/audit rows, and two seeded
+SVG photos.
 
 **Seed data is the only data that may appear in screenshots or demo videos.**
 
@@ -417,7 +380,7 @@ Guards (`db/seedSafety.js`), because the seed truncates everything and its passw
 ## Testing
 
 ```bash
-cd backend && npm install && npm test   # 369 Jest unit tests, ESM via --experimental-vm-modules
+cd backend && npm install && npm test   # 325 Jest unit tests, ESM via --experimental-vm-modules
 ./scripts/verify/run-all.sh             # live suites over real HTTP + WebSocket
 ```
 
@@ -461,15 +424,15 @@ Quick syntax check without the runner:
 ## Status and what's left before launch
 
 Working and verified against the live stack: full order lifecycle over WebSocket,
-operator-driven dispatch, payment matching (Oracle SMS + IMAP), photos in MinIO AIStor,
-authentication and per-order authorization everywhere, the transactional outbox, refunds as a
-ledger, staff onboarding by invite (admin-only), the offline write queue, missed-call
-verification, multi-instance operation behind Redis, ClickSend login codes delivered to a real
-US handset, and the EN/SO interface. The Android app builds and installs.
+operator-confirmed payments with "I've paid" claims, operator-driven dispatch, photos in MinIO
+AIStor, authentication and per-order authorization everywhere, the transactional outbox,
+refunds as a ledger, staff onboarding by invite (admin-only), the offline write queue,
+multi-instance operation behind Redis, ClickSend login codes delivered to a real US handset, and
+the EN/SO interface. The Android app builds and installs.
 
-**Still to validate on a Somali network:** ClickSend delivery to `+252`, `tel:`/USSD `%23`
-dialing, and Oracle receipt interception. A Play reviewer signs in with the review login
-(`REVIEW_PHONE`/`REVIEW_CODE`), not a real text. Production deploy: `docker-compose.prod.yml`
-(+ `Caddyfile.prod`). See `docs/PLAY_RELEASE.md`.
+**Still to validate on a Somali network:** ClickSend delivery to `+252` and `tel:`/USSD `%23`
+dialing. A Play reviewer signs in with the review login (`REVIEW_PHONE`/`REVIEW_CODE`), not a
+real text. Production deploy: `docker-compose.prod.yml` (+ `Caddyfile.prod`). See
+`docs/PLAY_RELEASE.md`.
 
 Not started: push notifications.

@@ -59,7 +59,6 @@ export const config = {
     forcePathStyle: (process.env.S3_FORCE_PATH_STYLE || 'true') === 'true',
   },
 
-  oracleWebhookSecret: required('ORACLE_WEBHOOK_SECRET'),
   sessionSecret: required('SESSION_SECRET'),
   // Bootstrap credential ONLY: used once, on first boot, to create the initial named operator
   // account when the roster is empty (commands/operators.js). After that, accounts live in the
@@ -72,13 +71,7 @@ export const config = {
   payment: {
     merchantMsisdn: process.env.MERCHANT_MSISDN || '61XXXXXXX',
     ussdTemplate: process.env.USSD_TEMPLATE || '*712*{NUM}*{AMT}%23',
-    senderIds: (process.env.TELECOM_SENDER_IDS || 'EVCPlus')
-      .split(',')
-      .map((s) => s.trim()),
   },
-
-  oracleHeartbeatTimeoutMs:
-    parseInt(process.env.ORACLE_HEARTBEAT_TIMEOUT_SECONDS || '180', 10) * 1000,
 
   // Redis is OPTIONAL. Unset = single-instance mode (in-process bus + rate limiter), which
   // is exactly how this ran before P2. Set it to run more than one backend container.
@@ -90,7 +83,6 @@ export const config = {
     // 'log'    — dev only, prints the code. Refused under NODE_ENV=production.
     // 'clicksend' — real SMS via ClickSend, every number. The production setting.
     // 'auto'      — same as clicksend, but a dev box without credentials falls back to 'log'.
-    // 'oracle'    — legacy: the Oracle phone sends over its own SIM. Explicit only.
     transport: process.env.OTP_TRANSPORT || 'log',
     sendTimeoutMs: parseInt(process.env.OTP_SEND_TIMEOUT_MS || '10000', 10),
     clicksend: {
@@ -114,27 +106,7 @@ export const config = {
       .filter(Boolean),
   },
 
-  // Missed-call verification: the number customers call to prove they hold their phone.
-  // Unset = the flow is unavailable and clients fall back to an SMS passcode, so a deployment
-  // without a call-capable device is a supported configuration rather than a broken one.
-  verifyCall: {
-    number: process.env.VERIFY_CALL_NUMBER || '',
-  },
 
-  // Payment sensing over email — the Oracle's job without the phone. Every US rail emails
-  // the same notification it texts, and the server can read a mailbox directly: no handset,
-  // no APK, no Android permissions. Unset = disabled.
-  emailSensor: {
-    host: process.env.IMAP_HOST || '',
-    port: parseInt(process.env.IMAP_PORT || '993', 10),
-    secure: (process.env.IMAP_SECURE || 'true') === 'true',
-    user: process.env.IMAP_USER || '',
-    password: process.env.IMAP_PASSWORD || '',
-    mailbox: process.env.IMAP_MAILBOX || 'INBOX',
-    pollSeconds: parseInt(process.env.IMAP_POLL_SECONDS || '30', 10),
-    // A first run must not replay a year of old notifications into the reconcile queue.
-    lookbackHours: parseInt(process.env.IMAP_LOOKBACK_HOURS || '24', 10),
-  },
 
   // Shown on the access-request page so someone who can't or won't use the form has a person
   // to contact. Public by design — it is the owner's business contact.

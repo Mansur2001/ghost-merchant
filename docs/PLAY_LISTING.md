@@ -117,8 +117,9 @@ data on your behalf as "sharing". `PRIVACY.md` still names ClickSend, because th
 be accurate even where the form doesn't ask.
 
 **Payment info deserves a note:** the answer is genuinely *not collected*. Money moves phone
-to phone over the telecom's own rails; the app records only the confirmation reference the
-telecom sends.
+to phone over the telecom's own rails. The app records only that the payment arrived (amount,
+and the transaction number if the customer or operator enters one), once an operator confirms it.
+The app does **not** request `READ_SMS` or any SMS permission.
 
 **Security practices**
 - Data encrypted in transit: **Yes** (HTTPS/TLS)

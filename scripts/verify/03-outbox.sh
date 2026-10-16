@@ -53,35 +53,31 @@ chk "relayed on restart            " "0" "$(psql "SELECT count(*) FROM outbox WH
 chk "  ...and marked delivered     " "1" "$(psql "SELECT count(*) FROM outbox WHERE payload->>'actor'='crash-test' AND published_at IS NOT NULL;")"
 
 echo
-echo "── 5. Payment matching is now ONE transaction ──"
+echo "── 5. Confirming a payment is ONE transaction ──"
+# No device reads receipts: the operator confirms. Payment row + status change + event must
+# commit together, or a refund later wouldn't know the order was ever paid.
 psql "UPDATE orders SET status='PENDING_PAYMENT' WHERE id='$O_PAID';" >/dev/null
-psql "DELETE FROM transactions WHERE telecom_receipt_id LIKE 'ATOMIC-%';" >/dev/null
-AMT=$(psql "SELECT total_amount FROM orders WHERE id='$O_PAID';")
-PHONE=$(psql "SELECT user_phone FROM orders WHERE id='$O_PAID';")
-(cd oracle && NODE_TLS_REJECT_UNAUTHORIZED=0 ORACLE_WEBHOOK_SECRET="$ORACLE_WEBHOOK_SECRET" \
-  BACKEND_URL=https://localhost node simulate.js payment "${PHONE#+252}" "$AMT" >/dev/null 2>&1)
+psql "DELETE FROM transactions WHERE order_id='$O_PAID';" >/dev/null
+REF="VERIFY$$"
+chk "operator confirms with a ref  " 200 "$(curl -sk -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $OTOK" -H 'Content-Type: application/json' -d "{\"reference\":\"$REF\"}" $B/operator/orders/$O_PAID/mark-paid)"
 sleep 2
 chk "order advanced to paid        " "PAID_UNASSIGNED" "$(psql "SELECT status FROM orders WHERE id='$O_PAID';")"
-chk "receipt recorded as matched   " "t" "$(psql "SELECT matched FROM transactions WHERE order_id='$O_PAID' ORDER BY id DESC LIMIT 1;")"
+chk "payment recorded with its ref " "$REF" "$(psql "SELECT telecom_receipt_id FROM transactions WHERE order_id='$O_PAID' ORDER BY id DESC LIMIT 1;")"
 chk "payment event enqueued        " "yes" "$([ "$(psql "SELECT count(*) FROM outbox WHERE event_name='payment.received' AND payload->>'orderId'='$O_PAID';")" -ge 1 ] && echo yes || echo no)"
-chk "receipt+transition same commit" "yes" "$([ "$(psql "SELECT count(*) FROM transactions t JOIN orders o ON o.id=t.order_id WHERE t.order_id='$O_PAID' AND o.status<>'PENDING_PAYMENT';")" -ge 1 ] && echo yes || echo no)"
 chk "all payment events delivered  " "0" "$(psql "SELECT count(*) FROM outbox WHERE published_at IS NULL AND NOT failed;")"
 
 echo
-echo "── 6. Duplicate receipt still credits nothing twice (invariant #2) ──"
-# simulate.js mints SIM-<timestamp> per run, so a real replay needs an explicit receipt id.
+echo "── 6. One payment can't confirm two orders (invariant #2) ──"
 psql "UPDATE orders SET status='PENDING_PAYMENT' WHERE id='$O_FAILED';" >/dev/null
-AMT6=$(psql "SELECT total_amount FROM orders WHERE id='$O_FAILED';")
-PHONE6=$(psql "SELECT user_phone FROM orders WHERE id='$O_FAILED';")
-send_dup() { (cd oracle && NODE_TLS_REJECT_UNAUTHORIZED=0 ORACLE_WEBHOOK_SECRET="$ORACLE_WEBHOOK_SECRET" \
-  BACKEND_URL=https://localhost node simulate.js payment "${PHONE6#+252}" "$AMT6" DUP-RECEIPT-1 2>/dev/null | tail -1); }
-send_dup >/dev/null; sleep 1
 TXN_BEFORE=$(psql "SELECT count(*) FROM transactions;")
 OUT_BEFORE=$(psql "SELECT count(*) FROM outbox;")
-RESP=$(send_dup); sleep 1
-chk "replay reported as duplicate  " "yes" "$(echo "$RESP" | grep -q '\"duplicate\":true' && echo yes || echo no)"
-chk "no duplicate transaction rows " "$TXN_BEFORE" "$(psql "SELECT count(*) FROM transactions;")"
-chk "no duplicate events enqueued  " "$OUT_BEFORE" "$(psql "SELECT count(*) FROM outbox;")"
+# Same reference, different spacing/case: normalized, so it still collides.
+REUSE=$(curl -sk -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $OTOK" -H 'Content-Type: application/json' -d "{\"reference\":\" $(echo $REF | tr A-Z a-z) \"}" $B/operator/orders/$O_FAILED/mark-paid)
+chk "reused reference refused      " 409 "$REUSE"
+chk "  ...order still unpaid       " "PENDING_PAYMENT" "$(psql "SELECT status FROM orders WHERE id='$O_FAILED';")"
+chk "  ...no extra payment rows    " "$TXN_BEFORE" "$(psql "SELECT count(*) FROM transactions;")"
+chk "  ...no extra events          " "$OUT_BEFORE" "$(psql "SELECT count(*) FROM outbox;")"
+chk "confirming twice is refused   " 409 "$(curl -sk -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $OTOK" -H 'Content-Type: application/json' -d '{}' $B/operator/orders/$O_PAID/mark-paid)"
 
 echo
 echo "════ $pass passed, $fail failed ════"

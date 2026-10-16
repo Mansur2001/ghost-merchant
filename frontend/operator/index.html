@@ -13,10 +13,9 @@
     <header>
       <span class="dot" id="liveDot"></span>
       <h1>Operator / Dispatch</h1>
-      <span class="badge pending" id="oracleBadge" style="margin-left:auto;">Oracle: ?</span>
       <!-- Event-relay backlog. Hidden while healthy; if it appears, committed state is not
            reaching clients and the apps look frozen even though the data is fine. -->
-      <span class="badge fail hidden" id="outboxBadge" style="margin-left:8px;">Events: ?</span>
+      <span class="badge fail hidden" id="outboxBadge" style="margin-left:auto;">Events: ?</span>
       <a class="linkbtn" href="/" title="Go to the home page" style="margin-left:8px;">Home</a>
       <button class="linkbtn" id="themeToggle" type="button" title="Toggle theme" style="margin-left:8px;">☀️</button>
       <button class="linkbtn hidden" id="logoutBtn" type="button" style="margin-left:8px;">Log out</button>
@@ -73,12 +72,10 @@
 
         <div class="card">
           <h3 style="margin:0 0 8px;">Active orders</h3>
+          <p class="muted" style="margin:0 0 8px;">Payments are confirmed by you: check the merchant
+            phone for the money, then tap <strong>Confirm payment</strong>. Orders whose customer
+            tapped “I’ve paid” are at the top.</p>
           <div id="orders" class="scroll-list"></div>
-        </div>
-
-        <div class="card">
-          <h3 style="margin:0 0 8px;">Unmatched receipts (reconcile)</h3>
-          <div id="unmatched" class="scroll-list"></div>
         </div>
 
         <!-- Money we owe customers. The platform never holds funds, so settling a refund is

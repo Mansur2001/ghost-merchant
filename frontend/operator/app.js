@@ -1,6 +1,6 @@
-// Operator PWA — the emergency-override dashboard. The manual "Mark as Paid" button here
-// is the difference between a broken system and a reliable business when the Oracle fails
-// or a payment can't be auto-matched.
+// Operator PWA — the dispatch desk. Nothing reads payment receipts automatically: the operator
+// checks the merchant phone and confirms each payment here, so "Confirm payment" is the step
+// every order passes through. Customers who tap "I've paid" are surfaced first.
 
 const $ = (id) => document.getElementById(id);
 let token = sessionStorage.getItem('opToken') || null;
@@ -123,8 +123,8 @@ async function showDash() {
   );
   refreshAll();
   connectSocket();
-  setInterval(pollOracle, 20000);
-  pollOracle();
+  setInterval(pollOutbox, 20000);
+  pollOutbox();
 }
 
 // Resolve who we are from the token. Also catches the case where this account was
@@ -171,7 +171,7 @@ let drivers = []; // roster with workload stats, kept fresh for the assign picke
 async function refreshAll() {
   await loadDrivers();                       // load first so order cards can build the picker
   const [orderCount] = await Promise.all([
-    loadOrders(), loadUnmatched(), loadRefunds(),
+    loadOrders(), loadRefunds(),
     ...(me?.is_admin ? [loadOperators(), loadAccessRequests()] : []),
   ]);
   renderFirstRun({ drivers: drivers.length, orders: orderCount ?? 0 });
@@ -538,31 +538,55 @@ function driverOptions() {
 async function loadOrders() {
   const res = await api('/operator/orders');
   if (res.error) { logout(); return 0; }
-  const orders = res.orders || [];
+  // Customers who said "I've paid" first (oldest claim first): that's money waiting on you.
+  const orders = (res.orders || []).slice().sort((a, b) => {
+    const ca = a.status === 'PENDING_PAYMENT' && a.payment_claimed_at;
+    const cb = b.status === 'PENDING_PAYMENT' && b.payment_claimed_at;
+    if (ca && cb) return new Date(a.payment_claimed_at) - new Date(b.payment_claimed_at);
+    return ca ? -1 : cb ? 1 : 0;
+  });
   $('orders').innerHTML = orders.length
-    ? orders.map((o) => `
-      <div class="card" style="background:var(--panel-2);">
+    ? orders.map((o) => {
+        const claimed = o.status === 'PENDING_PAYMENT' && o.payment_claimed_at;
+        return `
+      <div class="card" style="background:var(--panel-2);${claimed ? 'border-color:var(--accent);' : ''}">
         <div class="row" style="align-items:center;">
           <div><strong>#${GMIds.shortId(o.id)}</strong> · $${Number(o.total_amount).toFixed(2)} · ${escapeHtml(o.user_phone)}</div>
           <span class="badge ${badgeClass(o.status)}">${o.status}</span>
         </div>
         <div class="muted">${escapeHtml(o.landmark_text || '')} ${o.driver_name ? '· driver: ' + escapeHtml(o.driver_name) : ''}</div>
+        ${claimed ? `<div style="margin-top:6px;"><strong>💰 Customer says they paid</strong>
+          <span class="muted">${o.payment_claim_ref ? `· ref ${escapeHtml(o.payment_claim_ref)} ` : ''}· ${timeAgo(o.payment_claimed_at)}</span></div>` : ''}
         <div class="photos" id="opPhotos-${o.id}"></div>
         ${o.status === 'PAID_UNASSIGNED' ? `
         <div class="row" style="margin-top:8px;">
           <select data-assign="${o.id}">${driverOptions()}</select>
           <button data-assignbtn="${o.id}" style="max-width:110px;">Assign</button>
         </div>` : ''}
+        ${o.status === 'PENDING_PAYMENT' ? `
+        <div style="margin-top:8px;">
+          <input data-payref="${o.id}" placeholder="Transaction number from the merchant phone"
+                 value="${escapeHtml(o.payment_claim_ref || '')}" autocapitalize="characters" spellcheck="false" />
+          <button data-confirm="${o.id}" style="margin-top:6px;">Confirm payment — $${Number(o.total_amount).toFixed(2)} received</button>
+        </div>` : ''}
         <div class="row" style="margin-top:8px;">
-          ${o.status === 'PENDING_PAYMENT' ? `<button data-act="mark-paid" data-id="${o.id}">Mark as paid (override)</button>` : ''}
           ${o.status !== 'FAILED_REFUND' ? `<button class="danger" data-act="refund" data-id="${o.id}">Refund / fail</button>` : ''}
         </div>
-      </div>`).join('')
+      </div>`;
+      }).join('')
     : '<p class="muted">No active orders. Orders appear here the moment a customer places one — '
       + 'you don\'t need to refresh.</p>';
   bindOrderButtons();
   orders.forEach((o) => loadCardPhotos(o.id));
   return orders.length;
+}
+
+function timeAgo(when) {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(when).getTime()) / 60000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const h = Math.round(mins / 60);
+  return h < 24 ? `${h} h ago` : new Date(when).toLocaleString();
 }
 
 // Lazily hydrate each order card with its photo thumbnails (reference + delivery proof).
@@ -591,13 +615,30 @@ async function loadCardPhotos(orderId) {
 }
 
 function bindOrderButtons() {
-  $('orders').querySelectorAll('[data-act]').forEach((b) =>
+  $('orders').querySelectorAll('[data-act="refund"]').forEach((b) =>
     b.addEventListener('click', async () => {
-      const { act, id } = b.dataset;
-      const path = act === 'mark-paid' ? `/operator/orders/${id}/mark-paid` : `/operator/orders/${id}/refund`;
-      const res = await api(path, { method: 'POST', body: JSON.stringify({}) });
+      const res = await api(`/operator/orders/${b.dataset.id}/refund`, { method: 'POST', body: JSON.stringify({}) });
       if (res.error) return toast(res.error);
       toast('Done ✓');
+      refreshAll();
+    })
+  );
+  // Confirm only after seeing the money on the merchant phone. The transaction number ties
+  // this payment to this order: the same number can't confirm a second order.
+  $('orders').querySelectorAll('[data-confirm]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const id = b.dataset.confirm;
+      const reference = $('orders').querySelector(`[data-payref="${id}"]`).value.trim();
+      if (!reference && b.dataset.noref !== '1') {
+        b.dataset.noref = '1';
+        b.textContent = 'Confirm WITHOUT a transaction number?';
+        return toast('Adding the transaction number stops one payment being used for two orders.');
+      }
+      b.disabled = true;
+      const res = await api(`/operator/orders/${id}/mark-paid`, { method: 'POST', body: JSON.stringify({ reference }) });
+      b.disabled = false;
+      if (res.error) return toast(res.error);
+      toast('Payment confirmed ✓ — the customer sees it now');
       refreshAll();
     })
   );
@@ -615,70 +656,6 @@ function bindOrderButtons() {
   );
 }
 
-// Payments we can see but couldn't attribute. Every US rail lands here by design: Zelle and
-// friends name the payer instead of giving a phone number, and guessing from the amount alone
-// would mark the wrong customer's order paid.
-async function loadUnmatched() {
-  const [res, orderRes] = await Promise.all([
-    api('/operator/transactions/unmatched'),
-    api('/operator/orders'),
-  ]);
-  const txs = res.transactions || [];
-  const pending = (orderRes.orders || []).filter((o) => o.status === 'PENDING_PAYMENT');
-
-  // Picking the order is a CHOICE FROM A LIST, not a typed id. Order ids are UUIDs now —
-  // asking someone to transcribe 9110aafa-fd8f-4469-8592-4d5f944952e3 from one panel to
-  // another is a mis-keyed character away from crediting a stranger's order.
-  const orderOptions = (amount) => {
-    if (!pending.length) return '<option value="">— no orders awaiting payment —</option>';
-    const exact = pending.filter((o) => Number(o.total_amount) === Number(amount));
-    const rest = pending.filter((o) => Number(o.total_amount) !== Number(amount));
-    const opt = (o, mark) =>
-      `<option value="${o.id}">${mark}#${GMIds.shortId(o.id)} · $${Number(o.total_amount).toFixed(2)} · ${escapeHtml(o.user_phone)}</option>`;
-    return (
-      '<option value="">Choose the order this paid for…</option>' +
-      // Same-amount orders float to the top — that's the likely answer, but it is still the
-      // operator confirming it, not the system assuming it.
-      exact.map((o) => opt(o, '✓ same amount — ')).join('') +
-      rest.map((o) => opt(o, '')).join('')
-    );
-  };
-
-  $('unmatched').innerHTML = txs.length
-    ? txs.map((t) => {
-        const who = t.sender_name || t.sender_msisdn;
-        const rail = t.provider ? `<span class="badge pending">${escapeHtml(t.provider)}</span> ` : '';
-        return `
-      <div class="card" style="background:var(--panel-2);">
-        <div class="row" style="align-items:center;">
-          <div><strong>$${Number(t.amount).toFixed(2)}</strong> from ${escapeHtml(who)}</div>
-          <span style="margin-left:auto;">${rail}</span>
-        </div>
-        <div class="muted">${new Date(t.created_at).toLocaleString()} · ${escapeHtml(t.telecom_receipt_id)}</div>
-        ${t.sender_name ? '<div class="muted">Named payer, no phone number — confirm which order this is.</div>' : ''}
-        <select data-txin="${t.id}" style="margin-top:8px;">${orderOptions(t.amount)}</select>
-        <button data-txassign="${t.id}" style="margin-top:6px;">Mark this order paid</button>
-      </div>`;
-      }).join('')
-    : '<p class="muted">Nothing to reconcile. Payments that arrive without a phone number to '
-      + 'match — Zelle, Cash App, Venmo — land here for you to attach to an order.</p>';
-
-  $('unmatched').querySelectorAll('[data-txassign]').forEach((b) =>
-    b.addEventListener('click', async () => {
-      const txId = b.dataset.txassign;
-      const orderId = $('unmatched').querySelector(`[data-txin="${txId}"]`).value;
-      if (!orderId) return toast('Choose which order this payment was for.');
-      const out = await api(`/operator/transactions/${txId}/assign`, {
-        method: 'POST',
-        body: JSON.stringify({ orderId }),
-      });
-      if (out.error) return toast(out.error);
-      toast('Reconciled ✓');
-      refreshAll();
-    })
-  );
-}
-
 $('addDriver').addEventListener('click', async () => {
   const name = $('dName').value.trim();
   const msisdn = SomPhone.e164Of($('dMsisdn')) || $('dMsisdn').value.trim();
@@ -689,12 +666,6 @@ $('addDriver').addEventListener('click', async () => {
   setupCodeToast(res, name);
   loadDrivers();
 });
-
-async function pollOracle() {
-  const res = await api('/operator/oracle');
-  setOracleBadge(res);
-  pollOutbox();
-}
 
 // Event-relay backlog. Silent while healthy — an always-on green badge trains people to
 // ignore it, and this one only matters when it's wrong.
@@ -716,30 +687,6 @@ async function pollOutbox() {
     );
   }
 }
-// Three states, because "we never had an Oracle" and "the Oracle died" are different
-// situations and only one of them is an emergency. Showing a permanent red DOWN for a phone
-// that was never deployed teaches the operator to ignore the badge that matters.
-function setOracleBadge(status) {
-  const b = $('oracleBadge');
-  const state = typeof status === 'object' ? status.state : (status ? 'healthy' : 'down');
-
-  if (state === 'not_configured') {
-    b.textContent = 'Payments: manual';
-    b.className = 'badge pending';
-    b.title = status?.detail || 'No Oracle phone connected — confirm payments by hand.';
-    return;
-  }
-  if (state === 'healthy') {
-    b.textContent = 'Oracle: healthy';
-    b.className = 'badge paid';
-    b.title = 'Payment receipts are being matched automatically.';
-    return;
-  }
-  b.textContent = 'Oracle: DOWN';
-  b.className = 'badge fail';
-  b.title = status?.detail || 'The Oracle stopped reporting.';
-}
-
 let ws;
 function connectSocket() {
   ws = new WebSocket(GMConfig.wsUrl());
@@ -757,11 +704,11 @@ function connectSocket() {
       token = null;
       return location.reload();
     }
-    if (m.type === 'oracle_down') {
-      setOracleBadge({ state: 'down' });
-      setStatus('⚠ Oracle DOWN — payment receipts may be missed. Check the phone.', 'down');
-    } else if (m.type === 'oracle_heartbeat') {
-      setOracleBadge({ state: 'healthy' });
+    if (m.type === 'payment_claimed') {
+      // The customer says they've paid: the cue to look at the merchant phone.
+      setStatus(`💰 Customer says they paid order #${GMIds.shortId(m.orderId)}${m.reference ? ` (ref ${m.reference})` : ''} — check the merchant phone.`, 'warn');
+      toast('A customer says they have paid — check the merchant phone.');
+      refreshAll();
     } else if (m.type === 'order_created') {
       setStatus(`New order #${GMIds.shortId(m.orderId)} created — awaiting payment.`, 'warn');
       refreshAll();

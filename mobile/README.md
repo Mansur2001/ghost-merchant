@@ -102,17 +102,14 @@ become a valid US number.
 1. **Customer:** landing → *I'm a customer* → enter your number → code appears on screen →
    verify → describe an order, set location, add a landmark, attach a photo → create.
 2. **Operator** (same app, or `https://localhost/operator/` on the laptop): the order appears
-   → *Mark as paid* → assign a driver.
+   → *Confirm payment* → assign a driver.
 3. **Driver:** sign in as Amina → the order is in the queue → *Items secured* → capture a
    delivery-proof photo → *Mark delivered*.
 4. Watch the customer screen update live at each step — that's the WebSocket layer.
 
-For the real payment path (Somali number only), simulate the telecom SMS instead of step 2:
-```bash
-cd ../oracle
-NODE_TLS_REJECT_UNAUTHORIZED=0 ORACLE_WEBHOOK_SECRET=<from .env> \
-  BACKEND_URL=https://localhost node simulate.js payment 612345678 7.25
-```
+The customer can tap **I've paid** (with any transaction number) before step 2. The order
+then jumps to the top of the operator's list with the number pre-filled, and **Confirm payment**
+in the operator app is step 2.
 
 ---
 

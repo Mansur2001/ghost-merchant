@@ -1,107 +1,135 @@
-// CQRS write side for payments. Called by the Oracle webhook. Records the receipt
-// (idempotently, via UNIQUE telecom_receipt_id) and tries to match it to a pending order.
+// CQRS write side for payments.
 //
-// Matching is deliberately conservative: exact amount + sender phone + PENDING_PAYMENT,
-// most-recent first. Anything ambiguous or unmatched is left for the operator's manual
-// "Mark as Paid" queue — automated systems WILL have edge cases and that override is a
-// core feature, not a safety net.
+// There is no device reading telecom receipts. The customer pays the merchant directly over
+// EVC Plus / eDahab (invariant 6 — the platform never touches the money), and an OPERATOR
+// confirms it by checking the merchant phone. Two steps, deliberately unequal:
 //
-// ONE TRANSACTION, on purpose. This used to insert the receipt, commit, and then transition
-// the order in a second transaction. A crash in between left money received against an order
-// still showing "awaiting payment" — the single worst state this system can be in, because
-// the customer has paid and nothing in the app agrees. Receipt + transition + events now
-// commit together or not at all.
-import { withCriticalTransaction } from '../db/prisma.js';
-import { transitionOrder } from './orders.js';
+//   claimPayment    — the customer says "I've paid", optionally with the reference. A hint for
+//                     the operator: it changes NOTHING about the order's status, because a
+//                     claim is not a payment and anyone can tap a button.
+//   confirmPayment  — the operator saw the money arrive. Records the payment and moves the order
+//                     to PAID_UNASSIGNED, in ONE transaction.
+//
+// Recording the payment is not bookkeeping for its own sake: the refund ledger sums an order's
+// matched payments when it fails (commands/refunds.js). A paid order with no payment row would
+// fail owing nothing, and the customer's money would be forgotten.
+import { withTransaction, withCriticalTransaction } from '../db/prisma.js';
+import { transitionOrder, postMessage } from './orders.js';
 import { STATUS } from '../domain/stateMachine.js';
-import { parsePhone } from '../domain/phone.js';
+import { normalizeReference, manualReceiptId } from '../domain/paymentRef.js';
 import { EVENTS } from '../events/bus.js';
 import { enqueue, wakeOutbox } from '../events/outbox.js';
 
-export async function recordAndMatchPayment({
-  receiptId,
-  senderMsisdn,
-  senderName = null,
-  amount,
-  rawSms,
-  provider = null,
-}) {
-  if (!receiptId) throw new Error('receiptId (telecom_receipt_id) required');
-  // Normalize the sender to the same canonical E.164 identity we stored on the order, so
-  // a receipt from "61234567", "061234567", or "+25261234567" all match. If the Oracle
-  // reports an unrecognized number we keep the raw value (operator will reconcile).
-  const parsed = parsePhone(senderMsisdn);
-  const sender = parsed.valid ? parsed.e164 : String(senderMsisdn || senderName || 'unknown');
+export class PaymentError extends Error {
+  constructor(message, status = 400) {
+    super(message);
+    this.status = status;
+  }
+}
 
-  // Only a phone number can be matched to an order automatically. US rails (Zelle, Cash App,
-  // Venmo) identify the payer by display name, and matching on amount alone would mark the
-  // WRONG customer's order paid the moment two people owe the same amount. Those go straight
-  // to the operator's reconcile queue, which is exactly what it is for.
-  const canAutoMatch = parsed.valid;
+function referenceOrThrow(raw) {
+  const ref = normalizeReference(raw);
+  if (ref === null) throw new PaymentError('that does not look like a transaction reference');
+  return ref;
+}
 
-  // CP path: a payment must be linearizable and durable before we acknowledge it.
-  const outcome = await withCriticalTransaction(async (tx) => {
-    // Idempotency: if we've seen this receipt, do nothing (duplicate SMS webhook).
-    const dup = await tx.transaction.findUnique({
-      where: { telecom_receipt_id: receiptId },
-      select: { id: true, order_id: true, matched: true },
-    });
-    if (dup) return { duplicate: true, transaction: dup, orderId: dup.order_id };
+// Customer: "I've paid". Re-claiming just updates the reference (a typo fix is not a second
+// payment). Authorization — that this is THEIR order — is the route's job (requireOrderAccess).
+export async function claimPayment({ orderId, reference }) {
+  const ref = referenceOrThrow(reference);
 
-    // RAW, and it must stay raw: Prisma has no row-lock API. Two receipts for the same
-    // amount arriving together would otherwise both read the order as PENDING_PAYMENT and
-    // both try to claim it. Locking here makes the second re-read after the first commits,
-    // find no pending order, and record itself as unmatched for the operator — instead of
-    // blowing up and losing the receipt.
-    const candidates = await tx.$queryRaw`
-      SELECT id FROM orders
-       WHERE user_phone = ${sender}
-         AND total_amount = ${String(amount)}::numeric
-         AND status = 'PENDING_PAYMENT'::order_status
-       ORDER BY created_at DESC
-       LIMIT 2
-       FOR UPDATE
+  const order = await withTransaction(async (tx) => {
+    // RAW: FOR UPDATE, so a claim can't race the operator's confirmation into a stale state.
+    const rows = await tx.$queryRaw`
+      SELECT id, status FROM orders WHERE id = ${orderId}::uuid FOR UPDATE
     `;
-
-    // Ambiguous (2+) -> record but leave unmatched for the operator.
-    const matchedOrderId = candidates.length === 1 ? candidates[0].id : null;
-
-    const transaction = await tx.transaction.create({
-      data: {
-        order_id: matchedOrderId,
-        telecom_receipt_id: receiptId,
-        sender_msisdn: sender,
-        amount,
-        raw_sms: rawSms || null,
-        matched: matchedOrderId != null,
-        provider,
-        sender_name: senderName,
-      },
-    });
-
-    if (matchedOrderId) {
-      // Same transaction: we already hold the order's row lock and know it is
-      // PENDING_PAYMENT, so this transition cannot legally fail.
-      await transitionOrder(matchedOrderId, STATUS.PAID_UNASSIGNED, 'system', 'payment matched', {
-        client: tx,
-      });
-      await enqueue(tx, EVENTS.PAYMENT_RECEIVED, {
-        orderId: matchedOrderId,
-        amount,
-        receiptId,
-      });
+    if (!rows[0]) throw new PaymentError('order not found', 404);
+    if (rows[0].status !== STATUS.PENDING_PAYMENT) {
+      throw new PaymentError('this order is already paid', 409);
     }
 
-    return {
-      duplicate: false,
-      transaction,
-      orderId: matchedOrderId,
-      ambiguous: candidates.length > 1,
-    };
+    const updated = await tx.order.update({
+      where: { id: orderId },
+      data: { payment_claimed_at: new Date(), payment_claim_ref: ref || null },
+    });
+    await postMessage(
+      {
+        orderId,
+        sender: 'system',
+        body: ref ? `Customer says they have paid. Reference: ${ref}` : 'Customer says they have paid.',
+      },
+      { client: tx }
+    );
+    // A snapshot, like every other event: safe to deliver twice.
+    await enqueue(tx, EVENTS.PAYMENT_CLAIMED, {
+      orderId,
+      reference: ref || null,
+      claimedAt: updated.payment_claimed_at,
+    });
+    return updated;
   });
 
-  // Committed — now let the relay push to the sockets.
   wakeOutbox();
+  return order;
+}
 
-  return outcome; // { duplicate, transaction, orderId, ambiguous }
+// Operator: the money is on the merchant phone. `reference` is the transaction id from that
+// receipt; it is optional, but without it the same payment could be confirmed twice.
+export async function confirmPayment({ orderId, reference, actor }) {
+  const ref = referenceOrThrow(reference);
+  const receiptId = ref || manualReceiptId(orderId);
+
+  // CP path: money. Linearizable and durable before we answer.
+  const result = await withCriticalTransaction(async (tx) => {
+    // RAW: FOR UPDATE. Two operators confirming at once must not both record a payment.
+    const rows = await tx.$queryRaw`
+      SELECT id, status, user_phone, total_amount FROM orders WHERE id = ${orderId}::uuid FOR UPDATE
+    `;
+    const order = rows[0];
+    if (!order) throw new PaymentError('order not found', 404);
+    if (order.status !== STATUS.PENDING_PAYMENT) {
+      throw new PaymentError('this order is not waiting for payment', 409);
+    }
+
+    // UNIQUE telecom_receipt_id is the real guarantee (invariant 2); this check only turns a
+    // constraint error into a sentence the operator can act on.
+    const used = await tx.transaction.findUnique({
+      where: { telecom_receipt_id: receiptId },
+      select: { order_id: true },
+    });
+    if (used) {
+      throw new PaymentError(
+        `reference ${ref} was already used to confirm order #${String(used.order_id).slice(0, 8)}`,
+        409
+      );
+    }
+
+    await tx.transaction.create({
+      data: {
+        order_id: orderId,
+        telecom_receipt_id: receiptId,
+        sender_msisdn: order.user_phone,
+        amount: order.total_amount,
+        matched: true,
+        provider: 'manual',
+        sender_name: actor,
+      },
+    });
+    const updated = await transitionOrder(
+      orderId,
+      STATUS.PAID_UNASSIGNED,
+      actor,
+      ref ? `payment confirmed (ref ${ref})` : 'payment confirmed (no reference)',
+      { client: tx }
+    );
+    await enqueue(tx, EVENTS.PAYMENT_RECEIVED, {
+      orderId,
+      amount: order.total_amount,
+      receiptId,
+    });
+    return updated;
+  });
+
+  wakeOutbox();
+  return result;
 }

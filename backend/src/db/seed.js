@@ -1,7 +1,7 @@
 // Idempotent, re-runnable dev seed. Running it any number of times converges the database
 // to the SAME known state (TRUNCATE ... RESTART IDENTITY, then insert) — so you can reset to
 // a full, workflow-complete dataset whenever the data drifts. Covers EVERY order state plus
-// an unmatched receipt and seeded photos, so all three PWAs have something real to work with.
+// a customer's "I've paid" claim and seeded photos, so all three PWAs have something real to work with.
 //
 //   docker compose exec backend npm run seed
 //
@@ -171,8 +171,9 @@ async function seed() {
             telecom_receipt_id: `SEED-RCPT-${receiptSeq++}`,
             sender_msisdn: o.phone,
             amount: o.amount,
-            raw_sms: `You have received $${o.amount} from ${o.phone}. Ref SEED-RCPT.`,
             matched: true,
+            provider: 'manual',
+            sender_name: 'operator:seed',
           },
         });
       }
@@ -196,16 +197,11 @@ async function seed() {
       if (o.proofPhoto) photoJobs.push({ orderId, kind: 'delivery_proof', label: '📦 Delivered', bg: '#d4af37' });
     }
 
-    // One unmatched receipt so the operator's reconcile queue has a real item to resolve.
-    await tx.transaction.create({
-      data: {
-        order_id: null,
-        telecom_receipt_id: 'SEED-UNMATCHED-1',
-        sender_msisdn: '+252612345678',
-        amount: '99.00',
-        raw_sms: 'You have received $99.00 from +252612345678. Ref SEED-UNMATCHED.',
-        matched: false,
-      },
+    // The pending order's customer has said "I've paid", so the operator's screen shows a
+    // payment waiting to be checked against the merchant phone.
+    await tx.order.updateMany({
+      where: { status: 'PENDING_PAYMENT' },
+      data: { payment_claimed_at: new Date(), payment_claim_ref: 'SEED-EVC-0001' },
     });
   }, { timeout: 30000 });
 

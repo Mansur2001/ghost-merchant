@@ -1,36 +1,17 @@
-// Outbound SMS — currently only used to deliver login passcodes.
+// Outbound SMS: customer login codes and staff setup codes.
 //
-// ClickSend carries EVERY login code, Somali and international alike. It reaches +252 and
-// +1 (toll-free) from one account, with no hardware to keep alive, which is the difference
-// between "logins work" and "logins work while a phone in another country stays charged".
-// The Oracle phone keeps its real job — reading payment receipts — and no longer sends texts.
+// ClickSend carries EVERY text, Somali and international alike: one account, no hardware to
+// keep alive, pay-as-you-go. It is the one deliberate vendor exception (CLAUDE.md), and it is
+// bounded: it carries a code, never money.
 //
-//   clicksend — the production path, for every number. `auto` means this.
-//   oracle    — legacy: queue for the Oracle phone to send over its own SIM. Only used if named
-//               explicitly; kept so a deployment can fall back to it without a code change.
+//   clicksend — the production transport, for every number. `auto` means this.
 //   log       — dev only. Prints the code. The backend REFUSES TO BOOT with this under
 //               NODE_ENV=production, because anyone with log access could log in as any customer.
-//
-// ClickSend is a deliberate, bounded exception to "no vendor relationships" (CLAUDE.md): it is
-// pay-as-you-go (no monthly fee) and it sits OUTSIDE the money path — it carries a login code,
-// never a payment.
 import { config } from '../config.js';
 import { parsePhone } from '../domain/phone.js';
 import { setupMessage } from '../domain/staffInvite.js';
-import { queueSms } from './smsQueue.js';
-import { oracleStatus } from '../realtime/oracleMonitor.js';
 
 export class SmsDeliveryError extends Error {}
-
-// Queue for the Oracle phone to collect. Deliberately NOT an HTTP call to the device: a
-// phone cannot accept inbound connections (carrier NAT on mobile data, router NAT on WiFi),
-// so calling it would require a VPN or tunnel. The phone polls instead — see notify/smsQueue.js.
-async function sendViaOracle(phone, text) {
-  await queueSms({ to: phone, body: text });
-  // Queued, not delivered. The phone collects within one poll (a few seconds), well inside
-  // the 5-minute code TTL. If the phone is offline the message expires unsent and is swept,
-  // which is visible to the operator as a growing queue rather than a silent failure.
-}
 
 // ClickSend's REST API over plain HTTPS + basic auth (username : API key). No SDK on purpose:
 // it would be a large dependency for one JSON POST, and this keeps the supply chain short.
@@ -93,19 +74,13 @@ function clickSendConfigured() {
   return Boolean(c.username && c.apiKey);
 }
 
-// Which transport carries this number. `auto` is ClickSend for everyone; an explicit
-// transport overrides it (a dev box forcing `log`, or a fallback to `oracle`).
+// Which transport to use. `auto` is ClickSend; an explicit `log` keeps a dev box offline.
 export function transportFor() {
-  const configured = config.otp.transport;
-  return configured === 'auto' ? 'clicksend' : configured;
+  return config.otp.transport === 'auto' ? 'clicksend' : config.otp.transport;
 }
 
 // Is the transport actually usable, or is it selected but unconfigured?
 function isConfigured(transport) {
-  // "Configured" for the Oracle means a PHONE HAS COLLECTED, not that a setting is present —
-  // queuing itself needs nothing but a database, so a config check would always pass and
-  // every login would silently queue a message nobody sends.
-  if (transport === 'oracle') return oracleStatus().state !== 'not_configured';
   if (transport === 'clicksend') return clickSendConfigured();
   return true; // 'log' needs nothing
 }
@@ -156,11 +131,6 @@ async function deliverCode(phone, code, text) {
       `[OTP] ${phone} is not on DEV_SMS_ALLOWLIST — showing the code instead of texting it.`
     );
     transport = 'log';
-  }
-
-  if (transport === 'oracle') {
-    await sendViaOracle(phone, text);
-    return { transport: 'oracle' };
   }
 
   if (transport === 'clicksend') {

@@ -7,6 +7,7 @@
 //   The ownership rule itself lives in domain/access.js — don't re-implement it inline.
 import { Router, raw } from 'express';
 import { createOrder, postMessage } from '../commands/orders.js';
+import { claimPayment, PaymentError } from '../commands/payments.js';
 import { getOrderTimeline, getMessages, getOrdersByPhone } from '../queries/orders.js';
 import { savePhoto } from '../commands/photos.js';
 import { listPhotos, getPhoto } from '../queries/photos.js';
@@ -88,6 +89,25 @@ ordersRouter.get('/orders/:id/timeline', requireAuth, requireOrderAccess, async 
 ordersRouter.get('/orders/:id/messages', requireAuth, requireOrderAccess, async (req, res) => {
   res.json({ messages: await getMessages(req.params.id) });
 });
+
+// POST /api/orders/:id/paid { reference? } — the customer says "I've paid".
+// Tells the operator which order to check on the merchant phone. It does NOT mark the order
+// paid: a button anyone can tap is not evidence of money. Only the operator's confirmation is.
+ordersRouter.post(
+  '/orders/:id/paid',
+  customerOnly,
+  requireOrderAccess,
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: 'too many requests' }),
+  async (req, res, next) => {
+    try {
+      const order = await claimPayment({ orderId: req.params.id, reference: req.body?.reference });
+      res.json({ order });
+    } catch (err) {
+      if (err instanceof PaymentError) return res.status(err.status).json({ error: err.message });
+      next(err);
+    }
+  }
+);
 
 // ── Photos (MinIO-backed) ──
 // Customer attaches a reference photo to their own order.

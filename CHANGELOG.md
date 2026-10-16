@@ -9,7 +9,39 @@ first build served to a real paying customer.
 
 ---
 
-## [Unreleased] — launch prep: ClickSend, staff onboarding, Somali, production hardening
+## [Unreleased] — no Oracle: payments confirmed by an operator
+
+Migration `20261016090000_manual_payment_confirmation` adds `orders.payment_claimed_at` /
+`payment_claim_ref` and **drops** `sms_outbox` and `call_challenges`. Neither held anything
+worth keeping. Back up before deploying.
+
+### Removed
+- **The Oracle device and everything that existed for it:**
+  - `oracle/` (Termux scripts and simulator), the HMAC payment webhook, the heartbeat monitor
+    and Oracle badge, and the phone's outbound-SMS queue;
+  - `ORACLE_WEBHOOK_SECRET`, which is no longer required to boot;
+  - missed-call sign-in, which needed the phone to see the call;
+  - the IMAP email payment sensor, the receipt parsers, and the reconcile queue for unmatched
+    receipts. Somali rails don't email, and the queue only ever filled from those sensors.
+- `imapflow` dependency; `TELECOM_SENDER_IDS`, `ORACLE_HEARTBEAT_TIMEOUT_SECONDS`, `IMAP_*`,
+  `VERIFY_CALL_NUMBER` settings.
+
+### Added
+- **"I've paid"** for customers, with an optional EVC/eDahab transaction number. Claimed
+  orders jump to the top of the operator's list, with a live alert and the number pre-filled.
+  A claim never changes the order's status.
+- **Confirm payment** for operators: records the payment, with its transaction number, and
+  moves the order to paid, in one transaction. A number already used for another order is
+  refused, so one payment can't confirm two orders.
+
+### Fixed
+- **Manually confirmed orders opened no refund when failed.** "Mark as paid" never recorded a
+  payment, and the refund ledger sums recorded payments, so failing such an order owed nothing.
+  Confirming now always records one.
+
+---
+
+## [Earlier unreleased] — launch prep: ClickSend, staff onboarding, Somali, production hardening
 
 Migration `20261015120000_staff_invites` (additive). Back up before deploying.
 
@@ -34,8 +66,7 @@ Migration `20261015120000_staff_invites` (additive). Back up before deploying.
 - Brand icons from `GuriKaabe-brandsheet.png` (`scripts/brandsheet-icons.py`).
 
 ### Changed
-- **SMS: ClickSend replaces Twilio, and carries every number.** The Oracle no longer sends
-  login codes by default (`OTP_TRANSPORT=oracle` still selects it); it only reads payments.
+- **SMS: ClickSend replaces Twilio, and carries every number.**
 - **MinIO → AIStor**, pinned to `RELEASE.2026-09-19T17-05-25Z`, with the license read from the
   git-ignored `./minio.license`.
 - Customer and driver copy rewritten for accuracy. It said customers pay "a driver" (they pay

@@ -26,7 +26,7 @@ we do not share it with advertisers, and we never see or hold your money.
 | **Delivery location** (GPS, optional) and **landmark** (required) | So a driver can find you. Addresses are unreliable in our service area; the landmark is the primary instruction and the GPS point is an aid. | With the order |
 | **Order contents and chat messages** | To fulfil the order and resolve disputes. | With the order |
 | **Photos you attach** | A reference photo helps the driver find the right item; a delivery-proof photo protects both you and the driver in a dispute. | With the order |
-| **Payment receipt details** (transaction reference, sender number or name, amount) | To match your transfer to your order. | With the order |
+| **Payment details** (amount, and the transaction number from your EVC Plus / eDahab message if you or our operator enter it) | So our operator can confirm your payment arrived, and so one payment can't be counted for two orders. | With the order |
 | **Name and phone number** — *drivers and operators only* | To create your staff account. We text you a one-time setup code so you can choose your own PIN or password. | While your account exists |
 | **Photos of an ID, front and back** — *only if you apply to be a driver or operator* | Drivers carry other people's money and goods, so we confirm who they are before issuing an account. | **Both images are deleted the moment the application is decided.** Never collected from customers. |
 
@@ -42,8 +42,8 @@ copy after the decision, so a future breach cannot expose the ID of someone who 
 
 **We never take custody of your money.** Payment goes directly from you to the merchant's
 mobile-money account using your own phone's dialer. We do not process the payment, hold a
-balance, or store card or bank details — we only read the confirmation message the telecom
-sends, to know your order is paid. Refunds are arranged directly and off-platform.
+balance, or store card or bank details. Our operator checks that your payment reached the
+merchant, then marks your order paid. Refunds are arranged directly and off-platform.
 
 ## How your data is used and shared
 

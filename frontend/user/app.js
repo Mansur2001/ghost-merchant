@@ -161,103 +161,6 @@ async function verifyCode() {
   toast(t('auth.ok'));
 }
 
-// ── Missed-call verification ──
-//
-// The inverse of a passcode: instead of us sending a secret to the phone and asking for it
-// back, the customer's phone reaches us and the caller ID is the proof. Nothing is sent, so
-// there is no code to intercept, no per-message cost, and no queue that can stall.
-//
-// The ticket returned by /call/start is this client's claim on the challenge — it is what
-// makes the session ours rather than "whoever asks about this number". Held in memory only:
-// it must not outlive the tab, and it is never shown to the customer.
-let callTicket = null;
-let callNumber = null;
-let callPollTimer = null;
-
-async function loadAuthMethods() {
-  const res = await api('/auth/methods');
-  // Whether a call-capable device exists is deployment configuration, not something the
-  // client can assume — a dead "call to verify" button is worse than no button.
-  if (res && res.call) $('callStep').classList.remove('hidden');
-}
-loadAuthMethods();
-
-function stopCallPolling() {
-  if (callPollTimer) clearInterval(callPollTimer);
-  callPollTimer = null;
-  callTicket = null;
-}
-
-async function startCallVerification() {
-  if (!phoneValid) return toast(t('err.phone'));
-  $('callVerifyBtn').disabled = true;
-  $('otpStatus').textContent = '';
-
-  const res = await api('/auth/call/start', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone: phoneE164 }),
-  });
-  $('callVerifyBtn').disabled = false;
-
-  if (res.error || !res.ticket) {
-    $('otpStatus').textContent = res.error ? errText(res) : t('err.callStart');
-    return;
-  }
-
-  callTicket = res.ticket;
-  $('callInstructions').classList.remove('hidden');
-  $('callVerifyBtn').classList.add('hidden');
-  // Same permission-free dialer launch the USSD payment flow uses (ACTION_DIAL on Android).
-  // A plain voice call also works on iOS, where USSD from a tel: link is blocked — so this is
-  // the more portable half of the app.
-  $('callLink').href = `tel:${res.callNumber}`;
-  callNumber = res.callNumber;
-  $('callLink').textContent = t('auth.call.tap', { n: callNumber });
-  $('callWaiting').textContent = t('auth.call.waiting');
-
-  const interval = res.pollIntervalMs || 2000;
-  callPollTimer = setInterval(() => pollCallStatus(), interval);
-  pollCallStatus();
-}
-
-async function pollCallStatus() {
-  if (!callTicket) return;
-  const res = await api('/auth/call/status', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone: phoneE164, ticket: callTicket }),
-  });
-
-  if (res.status === 'verified' && res.token) {
-    stopCallPolling();
-    $('callInstructions').classList.add('hidden');
-    $('callVerifyBtn').classList.remove('hidden');
-    setSession(res.token, res.phone);
-    $('signedInAs').textContent = res.phone;
-    showView('startView');
-    toast(t('auth.ok'));
-    return;
-  }
-
-  // A 401 here means the challenge expired or was replaced (someone re-opened one for this
-  // number). Stop rather than polling a dead ticket forever, and say what to do next.
-  if (res.error) {
-    stopCallPolling();
-    $('callWaiting').textContent = t('auth.call.expired');
-    $('callInstructions').classList.add('hidden');
-    $('callVerifyBtn').classList.remove('hidden');
-  }
-}
-
-$('callVerifyBtn').addEventListener('click', startCallVerification);
-$('callCancelBtn').addEventListener('click', () => {
-  stopCallPolling();
-  $('callInstructions').classList.add('hidden');
-  $('callVerifyBtn').classList.remove('hidden');
-  requestCode();
-});
-
 $('sendCodeBtn').addEventListener('click', requestCode);
 $('resendBtn').addEventListener('click', requestCode);
 $('verifyBtn').addEventListener('click', verifyCode);
@@ -527,7 +430,39 @@ function updateBadge(status) {
   } else {
     $('payNote').classList.remove('hidden');
   }
+  renderPaidClaim(status);
 }
+
+// ── "I've paid" ──
+// Nothing reads the merchant's receipts automatically: an operator checks the merchant phone.
+// This tells them which order to check. It is not proof of payment, and the order only turns
+// "paid" when the operator confirms — the page then updates on its own over the socket.
+function renderPaidClaim(status) {
+  const pending = status === 'PENDING_PAYMENT';
+  const claimed = Boolean(order && order.payment_claimed_at);
+  $('paidBox').classList.toggle('hidden', !pending || claimed);
+  $('paidNote').classList.toggle('hidden', !pending || !claimed);
+  if (pending && claimed) {
+    $('paidNote').textContent = t('paid.waiting') +
+      (order.payment_claim_ref ? ` ${t('paid.ref', { ref: order.payment_claim_ref })}` : '');
+  }
+}
+
+$('paidBtn').addEventListener('click', async () => {
+  if (!order) return;
+  $('paidBtn').disabled = true;
+  const res = await api(`/orders/${order.id}/paid`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reference: $('payRef').value.trim() }),
+  });
+  $('paidBtn').disabled = false;
+  if (res.error) return toast(GMI18n.err(res.error));
+  order = { ...order, ...res.order };
+  $('payRef').value = '';
+  renderPaidClaim(order.status);
+  toast(t('paid.sent'));
+});
 
 // ── Chat ──
 async function loadThread() {
@@ -767,7 +702,6 @@ document.addEventListener('gm:lang', () => {
     loadPhotos(order.id);
   }
   if (resendLeft > 0 || !$('codeStep').classList.contains('hidden')) renderResend();
-  if (callNumber) $('callLink').textContent = t('auth.call.tap', { n: callNumber });
   if (lastSyncStats) renderSyncState(lastSyncStats);
   // Re-run the live phone hints in the new language.
   ['phone', 'joinPhone'].forEach((id) => $(id).dispatchEvent(new Event('input')));

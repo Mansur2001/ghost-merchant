@@ -110,13 +110,3 @@ Upload the AAB to a **closed testing** track, recruit your 12+ testers, and leav
 for 14 continuous days. Then apply for production access and submit.
 
 Ship the final pre-flight list in [`PLAY_LISTING.md`](PLAY_LISTING.md) §8 before you upload.
-
----
-
-## The Oracle never goes on Play
-
-Worth stating plainly, because it looks like a missing feature: the Oracle phone's software is
-**not** part of this app and must never be. Reading SMS requires `READ_SMS`, which Play
-restricts to apps that are the user's default SMS handler — which GuriKaabe is not and should
-not be. The Oracle is side-loaded Termux on a dedicated handset you control (`oracle/Instructions.md`).
-That separation is the only reviewable architecture, not a workaround.

@@ -83,6 +83,9 @@ model Order {
   driver_id     BigInt?
   created_at    DateTime     @default(now()) @db.Timestamptz(6)
   updated_at    DateTime     @default(now()) @db.Timestamptz(6)
+  /// The customer said "I've paid". A hint for the operator, never a payment.
+  payment_claimed_at DateTime? @db.Timestamptz(6)
+  payment_claim_ref  String?
 
   driver       Driver?       @relation(fields: [driver_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   user         User          @relation(fields: [user_phone], references: [phone_number], onDelete: NoAction, onUpdate: NoAction)
@@ -98,7 +101,8 @@ model Order {
   @@map("orders")
 }
 
-/// Verified payment receipts parsed from telecom SMS by the Android Oracle.
+/// Confirmed payments: one row per payment an operator verified on the merchant phone.
+/// The refund ledger sums these, so an order that was paid always has one.
 /// telecom_receipt_id UNIQUE is the anti-double-spend guarantee (invariant 2).
 model Transaction {
   id                 BigInt   @id @default(autoincrement())
@@ -109,11 +113,10 @@ model Transaction {
   raw_sms            String?
   matched            Boolean  @default(false)
   created_at         DateTime @default(now()) @db.Timestamptz(6)
-  // Which rail this arrived on (evcplus, zelle, cashapp, …). The Oracle senses any of them.
+  // 'manual' = confirmed by an operator against the merchant phone (the only path now).
+  // Older rows may name a rail the retired Oracle sensed (evcplus, zelle, …).
   provider           String?
-  // US rails identify people by DISPLAY NAME, not phone number, so there is nothing to match
-  // an order against automatically. The name is recorded so the operator's reconcile queue
-  // says "Zelle · John Smith · $25.00" instead of an anonymous amount.
+  // For a manual confirmation: which operator confirmed it (actor label).
   sender_name        String?
 
   order Order? @relation(fields: [order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -188,26 +191,6 @@ model OtpCode {
   @@map("otp_codes")
 }
 
-/// Missed-call verification: proving a phone number without sending anything to it.
-///
-/// The customer calls a number we own and hangs up; the caller ID IS the proof. There is no
-/// secret in flight, so what protects this is `ticket_hash` — the session is handed only to
-/// the client that opened the challenge. See domain/callChallenge.js for why that is
-/// load-bearing rather than convenience.
-///
-/// `phone` is the PK, not a surrogate id: one live challenge per number, latest open wins.
-/// That is what stops an attacker's challenge from surviving alongside the victim's own.
-model CallChallenge {
-  phone        String    @id
-  ticket_hash  String
-  verified_at  DateTime? @db.Timestamptz(6)
-  expires_at   DateTime  @db.Timestamptz(6)
-  last_open_at DateTime  @default(now()) @db.Timestamptz(6)
-  created_at   DateTime  @default(now()) @db.Timestamptz(6)
-
-  @@index([expires_at], map: "idx_call_challenge_expires")
-  @@map("call_challenges")
-}
 
 /// Transactional outbox: event rows written in the same transaction as the state change they
 /// describe, relayed after commit. `id` is also the ordering key.
@@ -289,31 +272,6 @@ model AccessRequest {
   @@map("access_requests")
 }
 
-/// Outbound SMS waiting for the Oracle phone to send.
-///
-/// WHY A QUEUE INSTEAD OF CALLING THE PHONE: the phone cannot accept inbound connections. On
-/// mobile data it sits behind carrier-grade NAT, and on WiFi behind a router — so a backend
-/// on a VPS can never open a socket to it without a VPN or tunnel, which is exactly the extra
-/// dependency this project exists to avoid. Inverting it costs nothing: the Oracle already
-/// polls for incoming messages, so it polls for outgoing ones on the same tick.
-///
-/// PLAINTEXT WARNING: `body` contains a live login code. The hashed copy in otp_codes is the
-/// real record; this row exists only long enough to be delivered and is DELETED on
-/// confirmation, with a sweep for anything the phone never collected. Codes must not
-/// accumulate at rest.
-model SmsOutbox {
-  id         BigInt    @id @default(autoincrement())
-  to         String
-  body       String
-  status     String    @default("pending") // 'pending' | 'sending' | 'failed'
-  attempts   Int       @default(0)
-  last_error String?
-  created_at DateTime  @default(now()) @db.Timestamptz(6)
-  claimed_at DateTime? @db.Timestamptz(6)
-
-  @@index([created_at], map: "idx_sms_outbox_pending")
-  @@map("sms_outbox")
-}
 
 enum order_status {
   PENDING_PAYMENT

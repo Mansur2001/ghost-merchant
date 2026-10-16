@@ -78,10 +78,3 @@ export async function getDriverQueue(driverId) {
 }
 
 // Transactions the operator may need to reconcile manually (unmatched / ambiguous).
-export async function getUnmatchedTransactions() {
-  return prisma.transaction.findMany({
-    where: { matched: false },
-    orderBy: { created_at: 'desc' },
-    take: 100,
-  });
-}

@@ -229,10 +229,8 @@ export function attachSocketServer(httpServer) {
     broadcastToOrder(p.orderId, { type: 'message', ...p })
   ));
   subscribe(EVENTS.ORDER_CREATED, (p) => sendTo(operators, { type: 'order_created', ...p }));
-  subscribe(EVENTS.ORACLE_DOWN, (p) => sendTo(operators, { type: 'oracle_down', ...p }));
-  subscribe(EVENTS.ORACLE_HEARTBEAT, (p) =>
-    sendTo(operators, { type: 'oracle_heartbeat', ...p })
-  );
+  // Operators only: it's a prompt to go and check the merchant phone.
+  subscribe(EVENTS.PAYMENT_CLAIMED, (p) => sendTo(operators, { type: 'payment_claimed', ...p }));
 
   console.log('WebSocket layer attached at /ws (authenticated)');
   return wss;

@@ -1,11 +1,11 @@
 # GuriKaabe
 
 Delivery coordination for Somalia, self-hosted end to end. Customers pay the merchant directly
-over EVC Plus / eDahab using a USSD `tel:` link; a dedicated Android phone (**the Oracle**)
-reads the telecom's SMS receipt and reports it to the backend. No AWS, no WhatsApp, no Google
-Maps, no telecom API contract.
+over EVC Plus / eDahab using a USSD `tel:` link, tap **"I've paid"**, and an **operator
+confirms** the payment by checking the merchant phone. No AWS, no WhatsApp, no Google Maps, no
+telecom API contract, no device reading receipts.
 
-The platform **never touches the money** — it only observes that a payment happened. Revenue is
+The platform **never touches the money**: it only records a payment an operator confirmed. Revenue is
 a coordination fee on completed deliveries. `CLAUDE.md` explains why that constraint shapes
 almost every design decision here; read it before proposing features.
 
@@ -52,18 +52,9 @@ With ClickSend keys in `.env`, dev sends real texts **only** to numbers on
 Every phone field has a **🇸🇴 +252 / 🇺🇸 +1** switch: pick the country, then type the number
 any way you like.
 
-**Exercise a full payment without owning a phone.** The simulator posts the same signed webhook
-the real Android device would:
-
-```bash
-cd oracle
-NODE_TLS_REJECT_UNAUTHORIZED=0 \
-ORACLE_WEBHOOK_SECRET=<same value as .env> BACKEND_URL=https://localhost \
-  node simulate.js payment 612345678 7.25   # amount MUST equal the open order's total
-  node simulate.js heartbeat                # flips the operator's Oracle badge green
-```
-
-The customer PWA should flip to "Payment confirmed" within about a second, over the WebSocket.
+**Walk a payment through.** As a customer, place an order and tap **I've paid**. You can type
+any transaction number. In the operator app the order jumps to the top. Tap **Confirm
+payment**, and the customer's page flips to paid within about a second, over the WebSocket.
 
 ### Two gotchas that will cost you an hour
 
@@ -86,8 +77,6 @@ module can be extracted later without a rewrite.
    Operator PWA ◄──┤    routes ─► commands (writes) ─► outbox ─► event bus
         ▲          │    queries (reads) ◄─ Postgres        │
         └─WebSocket┤    realtime layer ◄───────────────────┘
-                   │
-   Android Oracle ──HMAC-signed webhook──► /api/webhook
 
    Postgres · MinIO (S3-compatible) · Redis (bus + rate limits) · Caddy (auto-HTTPS)
 ```
@@ -106,12 +95,11 @@ Where things live:
 
 | Path | What it is |
 |---|---|
-| `backend/src/domain/` | Pure logic — state machine, phone parsing, USSD, receipts. No I/O, fully unit-tested. |
+| `backend/src/domain/` | Pure logic — state machine, phone parsing, USSD, payment references. No I/O, fully unit-tested. |
 | `backend/src/commands/` · `queries/` | The CQRS write and read sides. |
 | `backend/src/events/` | Event bus + transactional outbox. |
-| `backend/src/notify/` | Outbound SMS (ClickSend) and the IMAP payment sensor. |
+| `backend/src/notify/` | Outbound SMS (ClickSend). |
 | `frontend/{user,driver,operator}/` | Three vanilla-JS PWAs; `frontend/shared/` is common code. |
-| `oracle/` | Termux scripts for the Android sensor phone, plus the simulator. |
 | `mobile/` | Capacitor wrapper that ships the PWAs as an Android app. |
 | `scripts/verify/` | End-to-end suites that run against the live stack. |
 
@@ -123,7 +111,7 @@ one is there because the alternative loses money or leaks customer data.
 ## Testing
 
 ```bash
-cd backend && npm test          # 369 Jest unit tests, no database required
+cd backend && npm test          # 325 Jest unit tests, no database required
 ./scripts/verify/run-all.sh     # live end-to-end suites against the running stack
 ```
 
@@ -146,7 +134,7 @@ seed data.
 open. Caddy needs port 80 to get its certificate.
 
 1. **Write a real `.env`.** Replace every `change_me_*`. Use `openssl rand -hex 32` to
-   generate `ORACLE_WEBHOOK_SECRET` and `SESSION_SECRET`. Also set:
+   generate `SESSION_SECRET`. Also set:
    - `DOMAIN=app.example.com`, `NODE_ENV=production`, `CORS_ORIGINS=https://app.example.com,https://localhost`
    - `OPERATOR_PASSWORD`: a **new** password of at least 12 characters. It creates the first
      admin account, `admin`, which must change it at first sign-in. Never reuse a value from
@@ -154,7 +142,6 @@ open. Caddy needs port 80 to get its certificate.
    - `OTP_TRANSPORT=clicksend` plus the `CLICKSEND_*` keys ([`docs/LIVE_SMS_SETUP.md`](docs/LIVE_SMS_SETUP.md))
    - `REVIEW_PHONE` / `REVIEW_CODE` for the Play reviewer ([`docs/PLAY_RELEASE.md`](docs/PLAY_RELEASE.md) §3)
    - `MERCHANT_MSISDN`, `USSD_TEMPLATE`, `TELECOM_SENDER_IDS`, matching the live telecom
-   - `VERIFY_CALL_NUMBER` left **blank** unless the Oracle phone is running
 2. **Put the MinIO AIStor license on the server** as `./minio.license`. It's git-ignored,
    like `.env`, and MinIO won't start without it.
 3. **Launch with the production overrides:**
@@ -169,8 +156,9 @@ open. Caddy needs port 80 to get its certificate.
    person gets a setup code by text and chooses their own PIN or password.
 5. **Publish the privacy policy:** fill in the placeholders in `docs/PRIVACY.md`, then run
    `node scripts/build-privacy.mjs`. It's served at `https://<domain>/privacy.html`.
-6. **Payments:** to match them automatically, point the Oracle phone at the domain
-   (`oracle/Instructions.md`). Without it, operators confirm payments with "Mark as paid".
+6. **Payments:** keep the merchant phone with whoever runs the desk. An operator confirms
+   every order by checking that phone for the money, so the desk must be staffed while orders
+   are coming in.
 
 ### Operational rules
 
@@ -183,10 +171,10 @@ open. Caddy needs port 80 to get its certificate.
 - **Migrations are forward-only and additive.** Add, backfill, then switch reads.
 - **Don't scale past one backend instance without `REDIS_URL` set.** The bus and rate limiter
   fall back to in-process state, and clients on instance B miss instance A's events.
-- **If `ORACLE_WEBHOOK_SECRET` leaks, payments can be forged.** Rotate it on the VPS and the
-  phone together, then reconcile every transaction since the leak by hand.
-- **Watch the Oracle heartbeat.** A red badge means payments are silently not matching;
-  operators fall back to manual "Mark as paid".
+- **If `SESSION_SECRET` leaks, anyone can mint an operator session** and confirm payments.
+  Rotate it (everyone is logged out), then review recent confirmations in `order_events`.
+- **Check the merchant phone before every confirmation.** "I've paid" and the number the
+  customer typed are claims, not proof. Only the money on the phone is proof.
 
 Shipping the Android app to Google Play is a separate process — see
 **[`docs/PLAY_RELEASE.md`](docs/PLAY_RELEASE.md)**.
@@ -196,14 +184,14 @@ Shipping the Android app to Google Play is a separate process — see
 ## Status
 
 Working end to end and verified against the live stack: the full order lifecycle over
-WebSocket, operator-driven dispatch, payment matching (Oracle SMS + IMAP email sensing),
+WebSocket, operator-driven dispatch, operator-confirmed payments with "I've paid" claims,
 photos in MinIO, authentication and per-order authorization on every route and socket, the
 transactional outbox, refunds as a ledger, staff access requests with ID review, the offline
 write queue, and multi-instance operation behind Redis.
 
 Login and staff setup codes go out through ClickSend, which has been verified delivering to a
-real US handset. **Still unvalidated on a Somali network:** USSD `tel:` dialing, Oracle receipt
-interception, and ClickSend delivery to `+252`. See `oracle/Instructions.md`.
+real US handset. **Still unvalidated on a Somali network:** USSD `tel:` dialing and ClickSend
+delivery to `+252`.
 
 Known gaps: push notifications aren't started, and refunds are settled off-platform by design.
 
@@ -213,11 +201,8 @@ Known gaps: push notifications aren't started, and refunds are settled off-platf
 |---|---|
 | `CLAUDE.md` | Architecture, invariants, and the reasoning behind them. The important one. |
 | `CHANGELOG.md` | Release history and version policy. |
-| `oracle/Instructions.md` | Setting up the Android sensor phone. |
 | `mobile/README.md` | Building the Android app. |
 | `docs/PLAY_RELEASE.md` | Getting the app into the Play Store. |
 | `docs/LIVE_SMS_SETUP.md` | Real SMS delivery (ClickSend) and the dev allowlist. |
-| `docs/MISSED_CALL_VERIFICATION.md` | Verifying a phone without sending anything. |
-| `docs/EMAIL_SENSOR_SETUP.md` | Payment sensing over IMAP. |
 | `docs/PRIVACY.md` · `docs/PLAY_LISTING.md` | Play submission pack. |
 | `scripts/brandsheet-icons.py` | Cuts every app icon out of `GuriKaabe-brandsheet.png`. |

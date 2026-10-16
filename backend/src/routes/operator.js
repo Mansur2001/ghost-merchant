@@ -1,6 +1,5 @@
-// Operator/dispatcher super-user dashboard routes. The manual-override surface that turns
-// edge-case failures (Oracle down, wrong amount, ambiguous match) into a recoverable
-// business rather than a broken one.
+// Operator/dispatcher dashboard routes. Payments are confirmed here — an operator checks the
+// merchant phone and confirms each one — plus dispatch, refunds, and (admins) staff management.
 import { Router } from 'express';
 import { prisma, withTransaction } from '../db/prisma.js';
 import { signToken, requireRole } from '../middleware/auth.js';
@@ -20,14 +19,11 @@ import { actorLabel } from '../domain/redact.js';
 import { transitionOrder, postMessage, assignDriver } from '../commands/orders.js';
 import {
   getActiveOrders,
-  getUnmatchedTransactions,
   getOrder,
 } from '../queries/orders.js';
 import { getDriversWithStats, getDriverById } from '../queries/drivers.js';
 import { STATUS } from '../domain/stateMachine.js';
-import { oracleStatus } from '../realtime/oracleMonitor.js';
 import { wakeOutbox, outboxHealth } from '../events/outbox.js';
-import { smsQueueHealth } from '../notify/smsQueue.js';
 import {
   listOutstandingRefunds,
   listSettledRefunds,
@@ -41,6 +37,8 @@ import {
   AccessRequestError,
 } from '../commands/accessRequests.js';
 import { getObject } from '../storage/objectStore.js';
+import { confirmPayment, PaymentError } from '../commands/payments.js';
+import { isUuid } from '../domain/ids.js';
 
 export const operatorRouter = Router();
 
@@ -218,30 +216,11 @@ operatorRouter.get('/operator/orders', operatorOnly, async (req, res) => {
   res.json({ orders: await getActiveOrders() });
 });
 
-// GET /api/operator/oracle — Android Oracle health (dead-man's switch state).
-operatorRouter.get('/operator/oracle', operatorOnly, (req, res) => {
-  res.json(oracleStatus());
-});
-
 // GET /api/operator/outbox — event-relay backlog. A growing `pending` count means committed
 // state is not reaching clients: the app looks frozen even though the data is fine.
 operatorRouter.get('/operator/outbox', operatorOnly, async (req, res, next) => {
   try {
     res.json(await outboxHealth());
-  } catch (err) {
-    next(err);
-  }
-});
-
-// GET /api/operator/sms-queue — login codes waiting for the Oracle phone to send them.
-//
-// This is the one queue whose backlog is invisible from the inside: a customer who never
-// receives their code doesn't file a bug, they just conclude the app is broken and stop. If
-// `pending` is climbing, the phone has stopped polling — check that it is awake, on a
-// network, and running the forwarder.
-operatorRouter.get('/operator/sms-queue', operatorOnly, async (req, res, next) => {
-  try {
-    res.json(await smsQueueHealth());
   } catch (err) {
     next(err);
   }
@@ -369,11 +348,6 @@ operatorRouter.post('/operator/access-requests/:id/account', adminOnly, async (r
   }
 });
 
-// GET /api/operator/transactions/unmatched — reconciliation queue.
-operatorRouter.get('/operator/transactions/unmatched', operatorOnly, async (req, res) => {
-  res.json({ transactions: await getUnmatchedTransactions() });
-});
-
 // GET /api/operator/drivers — roster with live workload stats (for the assign picker + panel).
 operatorRouter.get('/operator/drivers', operatorOnly, async (req, res) => {
   res.json({ drivers: await getDriversWithStats() });
@@ -415,51 +389,22 @@ operatorRouter.post('/operator/orders/:id/assign', operatorOnly, async (req, res
   }
 });
 
-// POST /api/operator/orders/:id/mark-paid — manual override when the Oracle failed
-// or the auto-match couldn't resolve. Forces PENDING_PAYMENT -> PAID_UNASSIGNED.
-operatorRouter.post('/operator/orders/:id/mark-paid', operatorOnly, async (req, res) => {
+// POST /api/operator/orders/:id/mark-paid { reference? }
+// THE way an order becomes paid: the operator saw the money on the merchant phone. Records the
+// payment (so a later refund knows what is owed) and moves the order on, in one transaction.
+// `reference` is the EVC/eDahab transaction id — unique, so one payment can't pay two orders.
+operatorRouter.post('/operator/orders/:id/mark-paid', operatorOnly, async (req, res, next) => {
+  if (!isUuid(req.params.id)) return res.status(404).json({ error: 'order not found' });
   try {
-    const order = await transitionOrder(
-      req.params.id,
-      STATUS.PAID_UNASSIGNED,
-      actorLabel(req.auth),
-      req.body?.note || 'manual mark-paid override'
-    );
+    const order = await confirmPayment({
+      orderId: req.params.id,
+      reference: req.body?.reference,
+      actor: actorLabel(req.auth),
+    });
     res.json({ order });
   } catch (err) {
-    res.status(409).json({ error: err.message });
-  }
-});
-
-// POST /api/operator/transactions/:txId/assign  { orderId }
-// Manually bind an unmatched receipt to an order and mark it paid.
-operatorRouter.post('/operator/transactions/:txId/assign', operatorOnly, async (req, res) => {
-  try {
-    const { orderId } = req.body || {};
-    if (!orderId) return res.status(400).json({ error: 'orderId required' });
-    // Binding the receipt and marking the order paid is one decision, so it's one
-    // transaction: a crash between them would leave a receipt claimed against an order that
-    // still reads "awaiting payment" — the money-received-but-app-disagrees state.
-    await withTransaction(async (tx) => {
-      const { count } = await tx.transaction.updateMany({
-        where: { id: BigInt(req.params.txId) },
-        data: { order_id: orderId, matched: true },
-      });
-      if (count === 0) throw new Error('receipt not found');
-      // RAW: FOR UPDATE, so a concurrent auto-match can't transition the same order twice.
-      const rows = await tx.$queryRaw`
-        SELECT status FROM orders WHERE id = ${orderId}::uuid FOR UPDATE
-      `;
-      if (!rows[0]) throw new Error('order not found');
-      if (rows[0].status === STATUS.PENDING_PAYMENT) {
-        await transitionOrder(orderId, STATUS.PAID_UNASSIGNED, actorLabel(req.auth),
-          'manual receipt assign', { client: tx });
-      }
-    });
-    wakeOutbox();
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(409).json({ error: err.message });
+    if (err instanceof PaymentError) return res.status(err.status).json({ error: err.message });
+    next(err);
   }
 });
 

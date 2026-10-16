@@ -29,7 +29,7 @@
 		-Server
 	}
 
-	# API + webhook + heartbeat -> backend
+	# API -> backend
 	handle /api/* {
 		reverse_proxy backend:3000
 	}
