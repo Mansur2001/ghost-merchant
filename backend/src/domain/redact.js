@@ -64,5 +64,5 @@ export function redact(value, depth = 0) {
 // Paths whose request bodies are never logged at all, even redacted — belt and braces around
 // the two endpoints that carry live login secrets.
 export function isSensitivePath(path) {
-  return /\/(auth\/otp|login|password)/.test(path || '');
+  return /\/(auth\/otp|login|password|staff\/setup|setup-code)/.test(path || '');
 }

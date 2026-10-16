@@ -5,14 +5,24 @@
 //
 //   docker compose exec backend npm run seed
 //
-// Refuses to run against NODE_ENV=production unless SEED_FORCE=1 (it wipes domain tables).
+// Refuses to run unless NODE_ENV is explicitly development/test, and refuses to wipe data it
+// did not create without SEED_CONFIRM=wipe-local-data (rules in db/seedSafety.js).
 import { prisma } from './prisma.js';
 import { hashSecret } from '../middleware/auth.js';
 import { putObject } from '../storage/objectStore.js';
+import { SEED_OPERATORS, SEED_DRIVERS, SEED_CUSTOMERS } from './seedFixtures.js';
+import { seedRefusal } from './seedSafety.js';
 
-if (process.env.NODE_ENV === 'production' && process.env.SEED_FORCE !== '1') {
-  console.error('Refusing to seed in production (this TRUNCATEs domain tables). Set SEED_FORCE=1 to override.');
-  process.exit(1);
+// Rows this seed would never have created: evidence that real (or at least someone's) data
+// lives here. Checked BEFORE the truncate, outside its transaction.
+async function countNonSeedRows() {
+  const [users, operators, drivers, accessRequests] = await Promise.all([
+    prisma.user.count({ where: { phone_number: { notIn: SEED_CUSTOMERS } } }),
+    prisma.operator.count({ where: { username: { notIn: SEED_OPERATORS.map((o) => o.username) } } }),
+    prisma.driver.count({ where: { msisdn: { notIn: SEED_DRIVERS.map((d) => d.msisdn) } } }),
+    prisma.accessRequest.count(),
+  ]);
+  return { customers: users, operators, drivers, 'access requests': accessRequests };
 }
 
 // A tiny self-describing SVG so seeded photos render as real images in the gallery.
@@ -36,17 +46,9 @@ const PATHS = {
 
 // Named operator accounts (P0 #5). Two of them on purpose: the whole point of the change is
 // that order_events.actor can tell two people apart, and a one-row roster can't demo that.
-const OPERATORS = [
-  { username: 'admin', displayName: 'Bootstrap operator', password: 'change-me-please-1' },
-  { username: 'hodan', displayName: 'Hodan (dispatch)', password: 'seeded-operator-pw-1' },
-];
-
-const DRIVERS = [
-  { name: 'Amina', msisdn: '+252619876543', pin: '1234' },
-  { name: 'Bashir', msisdn: '+252651112223', pin: '5678' },
-];
-
-const USERS = ['+252612345678', '+252651234567', '+252771234567'];
+const OPERATORS = SEED_OPERATORS;
+const DRIVERS = SEED_DRIVERS;
+const USERS = SEED_CUSTOMERS;
 
 // driverIdx is a 1-based index into DRIVERS (null = unassigned).
 const ORDERS = [
@@ -71,6 +73,17 @@ const ORDERS = [
 ];
 
 async function seed() {
+  const refusal = seedRefusal({
+    nodeEnv: process.env.NODE_ENV,
+    nonSeedRows: await countNonSeedRows(),
+    confirm: process.env.SEED_CONFIRM,
+  });
+  if (refusal) {
+    console.error(`Refusing to seed (this TRUNCATEs every domain table): ${refusal}`);
+    await prisma.$disconnect();
+    process.exit(1);
+  }
+
   const photoJobs = []; // { orderId, kind, ... } to upload after the DB commit
 
   await prisma.$transaction(async (tx) => {
@@ -78,7 +91,7 @@ async function seed() {
     // TRUNCATE ... RESTART IDENTITY CASCADE — and deleteMany() in dependency order would be
     // both slower and easy to get subtly wrong as the schema grows.
     await tx.$executeRawUnsafe(`
-      TRUNCATE outbox, otp_codes, order_photos, order_events, messages, transactions,
+      TRUNCATE outbox, otp_codes, staff_invites, order_photos, order_events, messages, transactions,
                refunds, access_requests, orders, drivers, users, operators
       RESTART IDENTITY CASCADE
     `);
@@ -90,6 +103,7 @@ async function seed() {
         username: o.username,
         display_name: o.displayName,
         password_hash: hashSecret(o.password),
+        is_admin: o.isAdmin,
         created_by: 'system:seed',
       })),
     });
@@ -98,7 +112,7 @@ async function seed() {
     for (const d of DRIVERS) {
       // eslint-disable-next-line no-await-in-loop
       const created = await tx.driver.create({
-        data: { name: d.name, msisdn: d.msisdn, pin_hash: hashSecret(d.pin) },
+        data: { name: d.name, msisdn: d.msisdn, pin_hash: hashSecret(d.pin), pin_set_at: new Date() },
         select: { id: true },
       });
       driverIds.push(created.id);
@@ -224,7 +238,7 @@ async function seed() {
     console.log(`  ${c.status.padEnd(16)} ${c._count._all}`);
   }
   console.log(`Drivers: ${DRIVERS.map((d) => `${d.name}/${d.pin}`).join(', ')}`);
-  console.log(`Operators: ${OPERATORS.map((o) => `${o.username}/${o.password}`).join(', ')}`);
+  console.log(`Operators: ${OPERATORS.map((o) => `${o.username}/${o.password}${o.isAdmin ? ' (admin)' : ''}`).join(', ')}`);
   await prisma.$disconnect();
 }
 

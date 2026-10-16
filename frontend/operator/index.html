@@ -36,6 +36,27 @@
         <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" />
         <button id="loginBtn" type="button">Log in</button>
         <div class="muted" id="loginHint"></div>
+        <p class="muted" style="margin:14px 0 0;">New here?
+          <button class="linkbtn" id="showSetup" type="button">Set up account →</button></p>
+      </section>
+
+      <!-- Claim an account an admin created: the setup code texted to you proves it's your
+           phone, and you choose your own password. Nobody else ever knows it. -->
+      <section id="setupView" class="card hidden">
+        <h3 style="margin:0 0 6px;">Set up your account</h3>
+        <p class="muted" style="margin:0 0 10px;">Enter the 8-digit code we texted you and choose a password.</p>
+        <label for="sPhone">Your phone number</label>
+        <input id="sPhone" type="tel" inputmode="tel" placeholder="61 234 5678" />
+        <div class="phone-hint muted" id="sPhoneHint"></div>
+        <label for="sCode">Setup code</label>
+        <input id="sCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="12345678" />
+        <label for="sPass">New password (at least 12 characters)</label>
+        <input id="sPass" type="password" autocomplete="new-password" />
+        <label for="sPass2">Repeat password</label>
+        <input id="sPass2" type="password" autocomplete="new-password" />
+        <button id="setupBtn" type="button">Set password &amp; log in</button>
+        <button class="secondary" id="setupBack" type="button">← Back to log in</button>
+        <div class="muted" id="setupHint"></div>
       </section>
 
       <section id="dash" class="hidden">
@@ -75,9 +96,10 @@
           </details>
         </div>
 
-        <!-- People asking to be given an account. Reviewing here records a decision; it does
-             NOT create the account — you do that below, with a password you choose. -->
-        <div class="card">
+        <!-- ADMIN ONLY from here to the end of staff management. People asking for an account:
+             Approve records the decision; "Create account" is the separate step that texts
+             them a setup code. Nobody types another person's password or PIN. -->
+        <div class="card admin-only hidden">
           <div class="row" style="align-items:center;">
             <h3 style="margin:0;">Access requests</h3>
             <span class="badge pending hidden" id="requestCount" style="margin-left:auto;"></span>
@@ -90,30 +112,31 @@
           <div id="drivers" class="scroll-list"></div>
         </div>
 
-        <div class="card">
+        <div class="card admin-only hidden">
           <h3 style="margin:0 0 8px;">Add driver</h3>
+          <p class="muted" style="margin:0 0 8px;">They get a text with a setup code and choose their own PIN.</p>
           <div class="row"><input id="dName" placeholder="Name" /><input id="dMsisdn" placeholder="61 234 5678" /></div>
           <div class="phone-hint muted" id="phoneHint"></div>
-          <input id="dPin" placeholder="PIN" inputmode="numeric" style="margin-top:10px;" />
-          <button id="addDriver" type="button">Create driver</button>
+          <button id="addDriver" type="button">Create &amp; text setup code</button>
         </div>
 
         <!-- Operator accounts (P0 #5). Named accounts are what makes order_events.actor
              mean something in a dispute. -->
-        <div class="card">
+        <div class="card admin-only hidden">
           <h3 style="margin:0 0 8px;">Operators</h3>
           <div id="operators" class="scroll-list"></div>
         </div>
 
-        <div class="card">
+        <div class="card admin-only hidden">
           <h3 style="margin:0 0 8px;">Add operator</h3>
+          <p class="muted" style="margin:0 0 8px;">They get a text with a setup code and choose their own password.</p>
           <div class="row">
+            <input id="oName" placeholder="Name" />
             <input id="oUsername" placeholder="username" autocapitalize="none" spellcheck="false" />
-            <input id="oName" placeholder="Display name" />
           </div>
-          <input id="oPassword" type="password" placeholder="password (min 12 characters)"
-                 autocomplete="new-password" style="margin-top:10px;" />
-          <button id="addOperator" type="button">Create operator</button>
+          <input id="oPhone" type="tel" placeholder="Their phone, e.g. 61 234 5678" style="margin-top:10px;" />
+          <div class="phone-hint muted" id="oPhoneHint"></div>
+          <button id="addOperator" type="button">Create &amp; text setup code</button>
         </div>
 
         <div class="card">

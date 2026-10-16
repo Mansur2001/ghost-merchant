@@ -2,13 +2,11 @@
 // one-tap tel: call, out-of-stock/price adjustments, and state-machine actions.
 
 const $ = (id) => document.getElementById(id);
+const t = GMI18n.t;
 let token = sessionStorage.getItem('driverToken') || null;
 let current = null; // current order detail
 
-const LABELS = {
-  PAID_UNASSIGNED: 'Ready to accept', DISPATCHED: 'Heading to market',
-  IN_TRANSIT: 'Delivering to customer', DELIVERED: 'Delivered', FAILED_REFUND: 'Failed / refund',
-};
+const label = (s) => t(`drv.st.${s}`);
 const STATUS_KIND = {
   PAID_UNASSIGNED: 'ok', DISPATCHED: 'info', IN_TRANSIT: 'info',
   DELIVERED: 'ok', FAILED_REFUND: 'down',
@@ -16,7 +14,7 @@ const STATUS_KIND = {
 // Status bar becomes available once the driver is working an order.
 function setStatus(orderId, status) {
   $('statusbar').classList.remove('hidden');
-  $('sbText').textContent = `Order #${GMIds.shortId(orderId)}: ${LABELS[status] || status}`;
+  $('sbText').textContent = `#${GMIds.shortId(orderId)}: ${label(status)}`;
   $('sbTime').textContent = new Date().toLocaleTimeString();
   $('statusbar').className = 'statusbar ' + (STATUS_KIND[status] || '');
 }
@@ -40,12 +38,47 @@ const api = (path, opts = {}) =>
 
 // ── Login ──
 $('loginBtn').addEventListener('click', async () => {
-  const msisdn = $('msisdn').value.trim();
+  // The full number the country switch produced ("206 687 6538" alone isn't one).
+  const msisdn = SomPhone.e164Of($('msisdn')) || $('msisdn').value.trim();
   const pin = $('pin').value.trim();
   const res = await api('/driver/login', { method: 'POST', body: JSON.stringify({ msisdn, pin }) });
-  if (res.error) return toast(res.error);
+  if (res.error) return toast(GMI18n.err(res.error));
   token = res.token;
   sessionStorage.setItem('driverToken', token);
+  showQueue();
+});
+
+// ── Set up the account an admin created ──
+if (window.SomPhone) SomPhone.attach({ input: $('sPhone'), hint: $('sPhoneHint') });
+$('showSetup').addEventListener('click', () => {
+  $('loginView').classList.add('hidden');
+  $('setupView').classList.remove('hidden');
+});
+$('setupBack').addEventListener('click', () => {
+  $('setupView').classList.add('hidden');
+  $('loginView').classList.remove('hidden');
+});
+$('setupBtn').addEventListener('click', async () => {
+  const phone = SomPhone.e164Of($('sPhone')) || $('sPhone').value.trim();
+  const code = $('sCode').value.trim();
+  const pin = $('sPin').value.trim();
+  if (!phone || !/^\d{8}$/.test(code)) return toast(t('drv.setup.err.code'));
+  if (pin !== $('sPin2').value.trim()) return toast(t('drv.setup.err.match'));
+  $('setupBtn').disabled = true;
+  const res = await api('/staff/setup', {
+    method: 'POST',
+    body: JSON.stringify({ role: 'driver', phone, code, secret: pin }),
+  });
+  $('setupBtn').disabled = false;
+  if (res.error) { $('setupHint').textContent = GMI18n.err(res.error); return; }
+  // Straight in with the PIN they just chose.
+  const login = await api('/driver/login', { method: 'POST', body: JSON.stringify({ msisdn: phone, pin }) });
+  $('sCode').value = ''; $('sPin').value = ''; $('sPin2').value = '';
+  if (login.error) { $('setupView').classList.add('hidden'); $('loginView').classList.remove('hidden'); return; }
+  token = login.token;
+  sessionStorage.setItem('driverToken', token);
+  $('setupView').classList.add('hidden');
+  toast(t('drv.setup.ok'));
   showQueue();
 });
 
@@ -84,11 +117,14 @@ function flushQueue() {
   });
 }
 
+let lastSyncStats = null;
 function renderSyncState(stats) {
   const el = $('syncState');
   if (!el) return;
+  lastSyncStats = stats;
   const d = GMSync.describe(stats);
-  el.textContent = d.tone === 'ok' ? '' : d.text;
+  el.textContent = d.tone === 'error' ? t('sync.failed', { n: stats.failed })
+    : d.tone === 'pending' ? t('sync.pending', { n: stats.pending }) : '';
   el.className = 'sync-state ' + d.tone;
   el.classList.toggle('hidden', d.tone === 'ok');
 }
@@ -103,7 +139,7 @@ function showQueue() {
   // Status bar is shown whenever the driver is signed in.
   $('statusbar').classList.remove('hidden');
   $('statusbar').className = 'statusbar ok';
-  $('sbText').textContent = 'Signed in — select an order from your queue.';
+  $('sbText').textContent = t('drv.signedIn');
   $('sbTime').textContent = new Date().toLocaleTimeString();
   $('logoutBtn').classList.remove('hidden');
   loadQueue();
@@ -132,11 +168,11 @@ async function loadQueue() {
       <div class="card" style="background:var(--panel-2);cursor:pointer" data-id="${o.id}">
         <div class="row" style="align-items:center;">
           <div><strong>#${GMIds.shortId(o.id)}</strong> · $${Number(o.total_amount).toFixed(2)}</div>
-          <span class="badge ${o.status === 'PAID_UNASSIGNED' ? 'paid' : 'pending'}">${o.status}</span>
+          <span class="badge ${o.status === 'PAID_UNASSIGNED' ? 'paid' : 'pending'}">${label(o.status)}</span>
         </div>
         <div class="muted">${o.landmark_text || ''}</div>
       </div>`).join('')
-    : '<p class="muted">No orders in the queue.</p>';
+    : `<p class="muted">${t('drv.none')}</p>`;
   $('queue').querySelectorAll('[data-id]').forEach((el) =>
     el.addEventListener('click', () => openDetail(el.dataset.id))
   );
@@ -144,17 +180,17 @@ async function loadQueue() {
 
 async function openDetail(id) {
   const res = await api(`/driver/orders/${id}`);
-  if (res.error) return toast(res.error);
+  if (res.error) return toast(GMI18n.err(res.error));
   current = res.order;
   $('queueView').classList.add('hidden');
   $('detailView').classList.remove('hidden');
   $('dOrderId').textContent = GMIds.shortId(current.id);
-  $('dStatus').textContent = current.status;
+  $('dStatus').textContent = label(current.status);
   $('dBudget').textContent = Number(current.total_amount).toFixed(2);
-  $('dLandmark').textContent = current.landmark_text || '(none given)';
+  $('dLandmark').textContent = current.landmark_text || t('drv.noLandmark');
   $('dItems').innerHTML = (current.items || [])
     .map((it) => `<div>• ${it.text || JSON.stringify(it)}${it.price ? ` — $${it.price}` : ''}</div>`)
-    .join('') || '<div class="muted">No structured items — read the chat.</div>';
+    .join('') || `<div class="muted">${t('drv.noItems')}</div>`;
 
   // geo: link triggers the driver's own OS-native map app (zero Google dependency).
   if (current.lat != null && current.lng != null) {
@@ -176,13 +212,13 @@ async function loadPhotos(orderId) {
   try {
     const { photos } = await api(`/orders/${orderId}/photos`);
     const el = $('dPhotos');
-    if (!photos || !photos.length) { el.innerHTML = '<span class="muted">No photos yet.</span>'; return; }
+    if (!photos || !photos.length) { el.innerHTML = `<span class="muted">${t('photos.none')}</span>`; return; }
     // Photo bytes are authorized, so a bare <img src> gets a 401 — fetch with the bearer
     // token and render from an object URL.
     el.innerHTML = photos.map((p) => `
       <figure class="photo">
         <img data-src="${p.url}" alt="${p.kind}" loading="lazy" />
-        <figcaption class="muted">${p.kind === 'delivery_proof' ? 'Delivery proof' : 'Reference'}</figcaption>
+        <figcaption class="muted">${p.kind === 'delivery_proof' ? t('photo.proof') : t('photo.ref')}</figcaption>
       </figure>`).join('');
     el.querySelectorAll('img[data-src]').forEach(async (img) => {
       try {
@@ -197,7 +233,7 @@ async function loadPhotos(orderId) {
 }
 $('proofBtn').addEventListener('click', async () => {
   const file = $('proofPhoto').files[0];
-  if (!file) return toast('Choose a photo first.');
+  if (!file) return toast(t('drv.proof.choose'));
   if (!current) return;
   try {
     // Raw bytes (not JSON), so bypass the JSON api() helper but keep the auth token.
@@ -209,8 +245,8 @@ $('proofBtn').addEventListener('click', async () => {
     if (!r.ok) throw new Error('upload failed');
     $('proofPhoto').value = '';
     await loadPhotos(current.id);
-    toast('Delivery photo uploaded ✓');
-  } catch (e) { toast(e.message); }
+    toast(t('drv.proof.ok'));
+  } catch { toast(t('drv.proof.fail')); }
 });
 
 function renderActions() {
@@ -219,13 +255,13 @@ function renderActions() {
   // No "Accept" button: dispatch is operator-driven, so a driver never self-claims an order.
   // A PAID_UNASSIGNED order can't reach this screen anyway — the queue only returns orders
   // already assigned to this driver.
-  if (s === 'DISPATCHED') btns.push(['Items secured — heading to customer', 'secured', '']);
-  if (s === 'IN_TRANSIT') btns.push(['Mark delivered', 'delivered', '']);
+  if (s === 'DISPATCHED') btns.push([t('drv.act.secured'), 'secured', '']);
+  if (s === 'IN_TRANSIT') btns.push([t('drv.act.delivered'), 'delivered', '']);
   if (['DISPATCHED', 'IN_TRANSIT'].includes(s))
-    btns.push(['Report failure / refund', 'failed', 'danger']);
+    btns.push([t('drv.act.failed'), 'failed', 'danger']);
   $('actions').innerHTML = btns
     .map(([label, action, cls]) => `<button class="${cls}" data-action="${action}">${label}</button>`)
-    .join('') || '<p class="muted">No actions available.</p>';
+    .join('') || `<p class="muted">${t('drv.act.none')}</p>`;
   $('actions').querySelectorAll('[data-action]').forEach((b) =>
     b.addEventListener('click', () => doAction(b.dataset.action))
   );
@@ -254,7 +290,7 @@ async function doAction(action) {
       orderId: current.id, transitionTo: target,
     });
     applyOptimistic(target);
-    return toast('Saved — will send when you have signal.');
+    return toast(t('drv.saved'));
   }
 
   const res = await api(path, { method: 'POST', body });
@@ -266,15 +302,15 @@ async function doAction(action) {
         label: action, orderId: current.id, transitionTo: target,
       });
       applyOptimistic(target);
-      return toast('Saved — will send when you have signal.');
+      return toast(t('drv.saved'));
     }
-    return toast(res.error);
+    return toast(GMI18n.err(res.error));
   }
   current = res.order;
-  $('dStatus').textContent = current.status;
+  $('dStatus').textContent = label(current.status);
   setStatus(current.id, current.status);
   renderActions();
-  toast('Updated ✓');
+  toast(t('drv.updated'));
 }
 
 // Move the local view forward before the server has confirmed. The server is still the
@@ -282,21 +318,21 @@ async function doAction(action) {
 function applyOptimistic(status) {
   if (!current || !status) return;
   current.status = status;
-  $('dStatus').textContent = `${status} (waiting to send)`;
+  $('dStatus').textContent = `${label(status)} ${t('drv.waiting')}`;
   setStatus(current.id, status);
   renderActions();
 }
 
 $('adjustBtn').addEventListener('click', async () => {
   const note = $('adjustNote').value.trim();
-  if (!note) return toast('Describe the adjustment.');
+  if (!note) return toast(t('drv.adjust.err'));
   const res = await api(`/driver/orders/${current.id}/adjust`, {
     method: 'POST',
     body: JSON.stringify({ items: current.items, note }),
   });
-  if (res.error) return toast(res.error);
+  if (res.error) return toast(GMI18n.err(res.error));
   $('adjustNote').value = '';
-  toast('Sent to customer ✓');
+  toast(t('drv.adjust.ok'));
 });
 
 // ── Socket: refresh queue on any new order/state change ──
@@ -325,7 +361,7 @@ function connectSocket() {
     // Live-update the status bar for the order the driver is currently working.
     if (m.type === 'order_state' && current && String(m.orderId) === String(current.id)) {
       current.status = m.to;
-      $('dStatus').textContent = m.to;
+      $('dStatus').textContent = label(m.to);
       setStatus(current.id, m.to);
       renderActions();
     }
@@ -334,6 +370,16 @@ function connectSocket() {
     }
   };
 }
+
+// Language switch: static text is redone by GMI18n.apply(); redraw what this script drew.
+document.addEventListener('gm:lang', () => {
+  $('msisdn').dispatchEvent(new Event('input'));
+  $('sPhone').dispatchEvent(new Event('input'));
+  if (lastSyncStats) renderSyncState(lastSyncStats);
+  if (!token) return;
+  if (current && !$('detailView').classList.contains('hidden')) openDetail(current.id);
+  else { $('sbText').textContent = t('drv.signedIn'); loadQueue(); }
+});
 
 let toastTimer;
 function toast(msg) {

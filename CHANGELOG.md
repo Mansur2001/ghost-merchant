@@ -9,7 +9,59 @@ first build served to a real paying customer.
 
 ---
 
-## [Unreleased] — documentation and naming cleanup
+## [Unreleased] — launch prep: ClickSend, staff onboarding, Somali, production hardening
+
+Migration `20261015120000_staff_invites` (additive). Back up before deploying.
+
+### Added
+- **Staff onboarding by invite.** An admin creates a driver/operator account, from an approved
+  access request or directly. The person gets a one-time setup code by SMS and chooses their
+  own PIN/password (`POST /api/staff/setup`, "Set up account" in both apps). "Send setup code"
+  doubles as a reset. New `staff_invites` table; `operators.is_admin`, `operators.phone`,
+  `drivers.pin_set_at`, and `access_requests.account_created_at`/`account_ref`.
+- **Admin role.** Only admins create, disable or reset staff, review access requests, or view
+  ID documents. The last active admin can't be removed. The bootstrap `admin` is the first admin.
+- **English ↔ Somali** toggle on the customer and driver apps (`shared/i18n.js`), in plain,
+  everyday Somali.
+- **🇸🇴 +252 / 🇺🇸 +1 switch** on every phone field. Within the chosen country, any format is
+  accepted.
+- **Play review login** (`REVIEW_PHONE` / `REVIEW_CODE`): one fixed number with a fixed code
+  and no SMS, so a reviewer can sign in.
+- **Production files:** `docker-compose.prod.yml` + `Caddyfile.prod` (domain, HSTS, no `:8080`,
+  no published database port).
+- Privacy page at `/privacy.html`, built from `docs/PRIVACY.md` by `scripts/build-privacy.mjs`,
+  which refuses to build while placeholders remain.
+- Brand icons from `GuriKaabe-brandsheet.png` (`scripts/brandsheet-icons.py`).
+
+### Changed
+- **SMS: ClickSend replaces Twilio, and carries every number.** The Oracle no longer sends
+  login codes by default (`OTP_TRANSPORT=oracle` still selects it); it only reads payments.
+- **MinIO → AIStor**, pinned to `RELEASE.2026-09-19T17-05-25Z`, with the license read from the
+  git-ignored `./minio.license`.
+- Customer and driver copy rewritten for accuracy. It said customers pay "a driver" (they pay
+  the merchant), and claimed "no foreign servers". Status badges show words, not
+  `IN_TRANSIT`.
+- Seed: refuses unless `NODE_ENV` is explicitly `development`/`test`, and refuses to wipe data
+  it didn't create without `SEED_CONFIRM=wipe-local-data`. The `SEED_FORCE` override is gone.
+
+### Fixed (security)
+- **The 5-wrong-tries cap on login codes never took effect.** The `attempts++` was rolled back
+  along with the error inside the same transaction. It now commits before the error is raised.
+- **"Add driver" with an existing number silently replaced that driver's PIN** (an upsert),
+  which was an account takeover. It now refuses with a 409.
+- Customer-typed landmarks and driver names were rendered into the operator dashboard without
+  escaping. Now escaped.
+- Production refuses to boot while any seeded (public) password or PIN still logs in.
+- Dev never texts numbers outside `DEV_SMS_ALLOWLIST`. Seed numbers may belong to real people.
+
+### Fixed
+- "Pay now" stayed visible on paid and delivered orders, inviting double payment.
+- A US number was displayed, and rewritten in the input, as `+252 20 668 76538`.
+- Header buttons overflowed on 360px phones (theme and log-out pushed off screen).
+
+---
+
+## [Earlier unreleased] — documentation and naming cleanup
 
 No behaviour changes. Everything here is naming, documentation, or de-duplication; the 340
 unit tests pass unchanged before and after.

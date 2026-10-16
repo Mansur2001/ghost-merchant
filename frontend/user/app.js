@@ -3,6 +3,7 @@
 // tel: USSD pay -> subscribe over WebSocket -> live timeline + chat until DELIVERED.
 
 const $ = (id) => document.getElementById(id);
+const t = GMI18n.t;
 
 // ── Session ──
 // The token is the proof that this handset holds the phone number every order is authorized
@@ -47,7 +48,7 @@ async function api(path, opts = {}) {
   if (res.status === 401 && token) {
     clearSession();
     showView('authView');
-    toast('Your session expired. Please sign in again.');
+    toast(t('session.expired'));
     return { error: 'session expired' };
   }
   return res.json().catch(() => ({ error: 'unexpected server response' }));
@@ -60,14 +61,11 @@ const STATES = [
   'IN_TRANSIT',
   'DELIVERED',
 ];
-const LABELS = {
-  PENDING_PAYMENT: 'Awaiting payment',
-  PAID_UNASSIGNED: 'Payment confirmed',
-  DISPATCHED: 'Driver on the way to market',
-  IN_TRANSIT: 'Driver bringing your items',
-  DELIVERED: 'Delivered',
-  FAILED_REFUND: 'Cancelled / refund',
-};
+const label = (s) => t(`st.${s}`);
+// Server errors arrive in English; show them in the customer's language.
+const errText = (res) => (res.retryAfter
+  ? t('auth.retry', { err: GMI18n.err(res.error), s: res.retryAfter })
+  : GMI18n.err(res.error));
 
 let coords = null; // { lat, lng }
 let order = null;
@@ -96,10 +94,10 @@ $('authHome').addEventListener('click', () => showView('landingView'));
 
 // ── Sign-in: request a code, then verify it ──
 async function requestCode() {
-  if (!phoneValid) return toast('Enter a valid Somali mobile number.');
+  if (!phoneValid) return toast(t('err.phone'));
   $('sendCodeBtn').disabled = true;
   $('resendBtn').disabled = true;
-  $('otpStatus').textContent = 'Sending code…';
+  $('otpStatus').textContent = t('auth.sending');
   const res = await api('/auth/otp/request', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -108,9 +106,7 @@ async function requestCode() {
   $('sendCodeBtn').disabled = false;
   if (res.error) {
     // 429 carries retryAfter — tell them exactly how long, don't just fail.
-    $('otpStatus').textContent = res.retryAfter
-      ? `${res.error}. Try again in ${res.retryAfter}s.`
-      : res.error;
+    $('otpStatus').textContent = errText(res);
     $('resendBtn').disabled = false;
     return;
   }
@@ -118,27 +114,33 @@ async function requestCode() {
   $('codeInput').focus();
   // devCode is only ever present with the log transport in a non-production backend.
   $('otpStatus').textContent = res.devCode
-    ? `Dev mode — your code is ${res.devCode}`
-    : `Code sent to ${res.phone}. It expires in ${Math.round(res.expiresInSeconds / 60)} minutes.`;
+    ? t('auth.dev', { code: res.devCode })
+    : t('auth.sent', { phone: res.phone, m: Math.round(res.expiresInSeconds / 60) });
   startResendCountdown();
 }
 
 // The server enforces a 60s cooldown; mirror it in the UI so the button isn't a lie.
+let resendLeft = 0;
+let resendTimer = null;
+function renderResend() {
+  $('resendBtn').textContent = resendLeft > 0 ? t('auth.resendIn', { s: resendLeft }) : t('auth.resend');
+}
 function startResendCountdown(seconds = 60) {
-  let left = seconds;
+  resendLeft = seconds;
   $('resendBtn').disabled = true;
+  clearInterval(resendTimer);
   const tick = () => {
-    $('resendBtn').textContent = left > 0 ? `Send a new code (${left}s)` : 'Send a new code';
-    if (left <= 0) { $('resendBtn').disabled = false; clearInterval(timer); }
-    left -= 1;
+    renderResend();
+    if (resendLeft <= 0) { $('resendBtn').disabled = false; clearInterval(resendTimer); }
+    resendLeft -= 1;
   };
-  const timer = setInterval(tick, 1000);
+  resendTimer = setInterval(tick, 1000);
   tick();
 }
 
 async function verifyCode() {
   const code = $('codeInput').value.trim();
-  if (!/^\d{6}$/.test(code)) return toast('Enter the 6-digit code.');
+  if (!/^\d{6}$/.test(code)) return toast(t('err.code'));
   $('verifyBtn').disabled = true;
   const res = await api('/auth/otp/verify', {
     method: 'POST',
@@ -147,7 +149,7 @@ async function verifyCode() {
   });
   $('verifyBtn').disabled = false;
   if (res.error || !res.token) {
-    $('otpStatus').textContent = res.error || 'Could not verify that code.';
+    $('otpStatus').textContent = res.error ? GMI18n.err(res.error) : t('err.badCode');
     return;
   }
   setSession(res.token, res.phone);
@@ -156,7 +158,7 @@ async function verifyCode() {
   $('codeStep').classList.add('hidden');
   $('signedInAs').textContent = res.phone;
   showView('startView');
-  toast('Phone verified ✓');
+  toast(t('auth.ok'));
 }
 
 // ── Missed-call verification ──
@@ -169,6 +171,7 @@ async function verifyCode() {
 // makes the session ours rather than "whoever asks about this number". Held in memory only:
 // it must not outlive the tab, and it is never shown to the customer.
 let callTicket = null;
+let callNumber = null;
 let callPollTimer = null;
 
 async function loadAuthMethods() {
@@ -186,7 +189,7 @@ function stopCallPolling() {
 }
 
 async function startCallVerification() {
-  if (!phoneValid) return toast('Enter a valid mobile number.');
+  if (!phoneValid) return toast(t('err.phone'));
   $('callVerifyBtn').disabled = true;
   $('otpStatus').textContent = '';
 
@@ -198,9 +201,7 @@ async function startCallVerification() {
   $('callVerifyBtn').disabled = false;
 
   if (res.error || !res.ticket) {
-    $('otpStatus').textContent = res.retryAfter
-      ? `${res.error}. Try again in ${res.retryAfter}s.`
-      : res.error || 'Could not start verification.';
+    $('otpStatus').textContent = res.error ? errText(res) : t('err.callStart');
     return;
   }
 
@@ -211,8 +212,9 @@ async function startCallVerification() {
   // A plain voice call also works on iOS, where USSD from a tel: link is blocked — so this is
   // the more portable half of the app.
   $('callLink').href = `tel:${res.callNumber}`;
-  $('callLink').textContent = `Tap to call ${res.callNumber}`;
-  $('callWaiting').textContent = 'Waiting for your call…';
+  callNumber = res.callNumber;
+  $('callLink').textContent = t('auth.call.tap', { n: callNumber });
+  $('callWaiting').textContent = t('auth.call.waiting');
 
   const interval = res.pollIntervalMs || 2000;
   callPollTimer = setInterval(() => pollCallStatus(), interval);
@@ -234,7 +236,7 @@ async function pollCallStatus() {
     setSession(res.token, res.phone);
     $('signedInAs').textContent = res.phone;
     showView('startView');
-    toast('Phone verified ✓');
+    toast(t('auth.ok'));
     return;
   }
 
@@ -242,7 +244,7 @@ async function pollCallStatus() {
   // number). Stop rather than polling a dead ticket forever, and say what to do next.
   if (res.error) {
     stopCallPolling();
-    $('callWaiting').textContent = 'That verification expired — tap to try again.';
+    $('callWaiting').textContent = t('auth.call.expired');
     $('callInstructions').classList.add('hidden');
     $('callVerifyBtn').classList.remove('hidden');
   }
@@ -265,7 +267,7 @@ $('signOutBtn').addEventListener('click', () => {
   order = null;
   clearSession();
   showView('landingView');
-  toast('Signed out.');
+  toast(t('signedOut'));
 });
 
 // Status bar was removed from the customer PWA (kept only for signed-in operator/driver).
@@ -287,14 +289,14 @@ const STATUS_KIND = {
 
 // ── Geolocation (silent capture + landmark mask, per SRS 3.5) ──
 $('locBtn').addEventListener('click', () => {
-  $('locStatus').textContent = 'Detecting location…';
+  $('locStatus').textContent = t('loc.finding');
   navigator.geolocation.getCurrentPosition(
     (pos) => {
       coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      $('locStatus').textContent = `Location detected (±${Math.round(pos.coords.accuracy)}m). Add a landmark below.`;
+      $('locStatus').textContent = t('loc.ok', { m: Math.round(pos.coords.accuracy) });
     },
-    (err) => {
-      $('locStatus').textContent = `Could not get location: ${err.message}. You can still order using the landmark.`;
+    () => {
+      $('locStatus').textContent = t('loc.fail');
     },
     { enableHighAccuracy: true, timeout: 10000 }
   );
@@ -309,9 +311,9 @@ $('submitBtn').addEventListener('click', async () => {
   const landmark = $('landmark').value.trim();
 
   if (!token) return showView('authView');
-  if (!request) return toast('Describe what you need.');
-  if (!(totalAmount >= 0)) return toast('Enter a valid amount.');
-  if (!landmark) return toast('Landmark is required.');
+  if (!request) return toast(t('start.err.request'));
+  if (!(totalAmount >= 0)) return toast(t('start.err.amount'));
+  if (!landmark) return toast(t('start.err.landmark'));
 
   $('submitBtn').disabled = true;
   // Mint the id here, once, and reuse it if we retry. A lost response on a bad connection
@@ -345,7 +347,7 @@ $('submitBtn').addEventListener('click', async () => {
     const file = $('refPhoto').files[0];
     if (file) { try { await uploadPhoto(order.id, file); await loadPhotos(order.id); } catch { /* non-fatal */ } }
   } catch (e) {
-    toast(e.message);
+    toast(GMI18n.err(e.message));
   } finally {
     $('submitBtn').disabled = false;
   }
@@ -361,7 +363,7 @@ function enterOrderView(payment) {
   renderPayment(payment || {});
   renderTimeline(order.status);
   updateBadge(order.status);
-  setStatus(`Order #${GMIds.shortId(order.id)}: ${LABELS[order.status] || order.status}`, STATUS_KIND[order.status]);
+  setStatus(`#${GMIds.shortId(order.id)}: ${label(order.status)}`, STATUS_KIND[order.status]);
   loadThread();
   loadPhotos(order.id);
   connectSocket();
@@ -370,18 +372,20 @@ function enterOrderView(payment) {
 // Show the pay button only when this order can actually be paid that way. A dead
 // `tel:*712*...#` link on a +1 number produces a dial string the network rejects — worse
 // than no button, because the customer thinks they've paid.
+let lastPayment = {};
 function renderPayment(payment) {
+  lastPayment = payment;
   const link = $('payLink');
   const note = $('payNote');
   if (payment.paymentMethod === 'ussd' && payment.ussdUri) {
     // CRITICAL: use the server-built URI verbatim; the trailing # is already %23-encoded.
     link.setAttribute('href', payment.ussdUri);
     link.classList.remove('hidden');
-    note.textContent = 'Tapping opens your dialer with the USSD code pre-filled. Approve the transfer on your phone — this page updates automatically when payment is confirmed.';
+    note.textContent = t('pay.note');
   } else {
+    // The server's paymentNote is English; the method alone says which message applies.
     link.classList.add('hidden');
-    note.textContent = payment.paymentNote
-      || 'Pay the operator directly; they will confirm this order.';
+    note.textContent = t('pay.manual');
   }
 }
 
@@ -400,13 +404,13 @@ async function loadPhotos(orderId) {
   try {
     const { photos } = await api(`/orders/${orderId}/photos`);
     const el = $('photos');
-    if (!photos || !photos.length) { el.innerHTML = '<span class="muted">No photos yet.</span>'; return; }
+    if (!photos || !photos.length) { el.innerHTML = `<span class="muted">${t('photos.none')}</span>`; return; }
     // Photo bytes are authorized too, so they can't be loaded with a plain <img src>.
     // Fetch each with the token and render from an object URL.
     el.innerHTML = photos.map((p) => `
       <figure class="photo">
         <img data-src="${p.url}" alt="${p.kind}" loading="lazy" />
-        <figcaption class="muted">${p.kind === 'delivery_proof' ? 'Delivery proof' : 'Reference'}</figcaption>
+        <figcaption class="muted">${p.kind === 'delivery_proof' ? t('photo.proof') : t('photo.ref')}</figcaption>
       </figure>`).join('');
     el.querySelectorAll('img[data-src]').forEach(async (img) => {
       try {
@@ -444,11 +448,14 @@ function flushQueue() {
   });
 }
 
+let lastSyncStats = null;
 function renderSyncState(stats) {
   const el = $('syncState');
   if (!el) return;
+  lastSyncStats = stats;
   const d = GMSync.describe(stats);
-  el.textContent = d.tone === 'ok' ? '' : d.text;
+  el.textContent = d.tone === 'error' ? t('sync.failed', { n: stats.failed })
+    : d.tone === 'pending' ? t('sync.pending', { n: stats.pending }) : '';
   el.className = 'sync-state ' + d.tone;
   el.classList.toggle('hidden', d.tone === 'ok');
 }
@@ -483,11 +490,11 @@ function connectSocket() {
       order.status = m.to;
       renderTimeline(m.to);
       updateBadge(m.to);
-      setStatus(`Order #${GMIds.shortId(order.id)}: ${LABELS[m.to] || m.to}`, STATUS_KIND[m.to]);
+      setStatus(`#${GMIds.shortId(order.id)}: ${label(m.to)}`, STATUS_KIND[m.to]);
     } else if (m.type === 'payment_confirmed') {
       updateBadge('PAID_UNASSIGNED');
-      setStatus(`Order #${GMIds.shortId(order.id)}: Payment confirmed ✓`, 'ok');
-      toast('Payment confirmed ✓');
+      setStatus(`#${GMIds.shortId(order.id)}: ${t('pay.confirmed')}`, 'ok');
+      toast(t('pay.confirmed'));
     } else if (m.type === 'message') {
       appendMessage(m.message);
       // A system line accompanies every photo upload → refresh the gallery live.
@@ -504,14 +511,22 @@ function renderTimeline(status) {
     let cls = '';
     if (!isFail && i < idx) cls = 'done';
     else if (!isFail && i === idx) cls = 'active';
-    return `<li class="${cls}"><div class="label">${LABELS[s]}</div></li>`;
-  }).join('') + (isFail ? `<li class="active"><div class="label">${LABELS.FAILED_REFUND}</div></li>` : '');
+    return `<li class="${cls}"><div class="label">${label(s)}</div></li>`;
+  }).join('') + (isFail ? `<li class="active"><div class="label">${label('FAILED_REFUND')}</div></li>` : '');
 }
 
 function updateBadge(status) {
   const b = $('statusBadge');
-  b.textContent = status;
+  b.textContent = label(status);
   b.className = 'badge ' + (status === 'FAILED_REFUND' ? 'fail' : status === 'PENDING_PAYMENT' ? 'pending' : 'paid');
+  // Once paid (or failed), a live "Pay now" button invites paying twice. Runs after
+  // renderPayment() and on every socket transition, so it always has the last word.
+  if (status !== 'PENDING_PAYMENT') {
+    $('payLink').classList.add('hidden');
+    $('payNote').classList.add('hidden');
+  } else {
+    $('payNote').classList.remove('hidden');
+  }
 }
 
 // ── Chat ──
@@ -585,7 +600,7 @@ $('faqBack').addEventListener('click', () => showView(order ? 'orderView' : 'lan
 $('resumeBtn').addEventListener('click', async () => {
   if (!token) return showView('authView');
   const res = await api('/orders/mine');
-  if (res.error) return toast(res.error);
+  if (res.error) return toast(GMI18n.err(res.error));
   showResumeList(res.orders || []);
 });
 $('resumeBack').addEventListener('click', () => showView('startView'));
@@ -596,18 +611,18 @@ function showResumeList(orders) {
         <div class="card" style="background:var(--panel-2);cursor:pointer" data-id="${o.id}">
           <div class="row" style="align-items:center;">
             <div><strong>#${GMIds.shortId(o.id)}</strong> · $${Number(o.total_amount).toFixed(2)}</div>
-            <span class="badge ${badgeClass(o.status)}">${o.status}</span>
+            <span class="badge ${badgeClass(o.status)}">${label(o.status)}</span>
           </div>
           <div class="muted">${o.landmark_text || ''}</div>
         </div>`).join('')
-    : '<p class="muted">No orders found for this number.</p>';
+    : `<p class="muted">${t('resume.none')}</p>`;
   $('resumeList').querySelectorAll('[data-id]').forEach((el) =>
     el.addEventListener('click', () => resumeOrder(el.dataset.id))
   );
 }
 async function resumeOrder(id) {
   const res = await api(`/orders/${id}`);
-  if (res.error) return toast(res.error);
+  if (res.error) return toast(GMI18n.err(res.error));
   order = res.order;
   localStorage.setItem('gm_last', JSON.stringify({ orderId: order.id }));
   enterOrderView(res);
@@ -668,11 +683,11 @@ $('joinSubmit').addEventListener('click', async () => {
   const role = $('joinRole').value;
   const message = $('joinMessage').value.trim();
 
-  if (name.length < 2) return toast('Please enter your name.');
-  if (!joinPhoneValid) return toast('Enter a valid phone number so we can call you back.');
+  if (name.length < 2) return toast(t('join.err.name'));
+  if (!joinPhoneValid) return toast(t('err.phone'));
 
   $('joinSubmit').disabled = true;
-  $('joinStatus').textContent = 'Sending…';
+  $('joinStatus').textContent = t('join.sending');
   const res = await api('/signup', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -681,9 +696,7 @@ $('joinSubmit').addEventListener('click', async () => {
   $('joinSubmit').disabled = false;
 
   if (res.error) {
-    $('joinStatus').textContent = res.retryAfter
-      ? `${res.error} (try again in ${res.retryAfter}s)`
-      : res.error;
+    $('joinStatus').textContent = errText(res);
     return;
   }
   // Upload the ID sides second, using the short-lived token scoped to this request. Doing it
@@ -697,7 +710,7 @@ $('joinSubmit').addEventListener('click', async () => {
   if (sides.length && res.uploadToken) {
     const failed = [];
     for (const [side, file] of sides) {
-      $('joinStatus').textContent = `Sending the ${side} of your ID…`;
+      $('joinStatus').textContent = t('join.sendingId', { side: t(`join.side.${side}`) });
       try {
         const up = await fetch(GMConfig.api(`/signup/id-document/${side}`), {
           method: 'POST',
@@ -709,20 +722,20 @@ $('joinSubmit').addEventListener('click', async () => {
         });
         if (!up.ok) {
           const b = await up.json().catch(() => ({}));
-          failed.push(`${side} (${b.error || 'failed'})`);
+          failed.push(t(`join.side.${side}`));
         }
       } catch {
-        failed.push(`${side} (no connection)`);
+        failed.push(t(`join.side.${side}`));
       }
     }
     if (failed.length) {
       $('joinStatus').textContent =
-        `${res.message}\n\nCouldn't upload: ${failed.join(', ')} — we may call you to arrange it.`;
+        `${t('join.done')} ${t('join.uploadFailed', { list: failed.join(', ') })}`;
       return;
     }
   }
 
-  $('joinStatus').textContent = res.message;
+  $('joinStatus').textContent = t('join.done');
   $('joinName').value = '';
   $('joinMessage').value = '';
   $('joinIdFront').value = '';
@@ -736,12 +749,32 @@ function updateIdHint() {
   const back = $('joinIdBack').files[0];
   if (!front && !back) { $('joinIdHint').textContent = ''; return; }
   const parts = [];
-  if (front) parts.push('front ✓'); else parts.push('front missing');
-  if (back) parts.push('back ✓'); else parts.push('back missing');
-  $('joinIdHint').textContent = `${parts.join(' · ')} — deleted once your request is reviewed`;
+  for (const [side, file] of [['front', front], ['back', back]]) {
+    parts.push(`${t(`join.side.${side}`)} ${file ? '✓' : t('join.missing')}`);
+  }
+  $('joinIdHint').textContent = t('join.idHint', { parts: parts.join(' · ') });
 }
 $('joinIdFront').addEventListener('change', updateIdHint);
 $('joinIdBack').addEventListener('change', updateIdHint);
+
+// ── Language switch ──
+// Static text is redone by GMI18n.apply(); this redraws what the script rendered itself.
+document.addEventListener('gm:lang', () => {
+  if (order) {
+    renderPayment(lastPayment);
+    renderTimeline(order.status);
+    updateBadge(order.status);
+    loadPhotos(order.id);
+  }
+  if (resendLeft > 0 || !$('codeStep').classList.contains('hidden')) renderResend();
+  if (callNumber) $('callLink').textContent = t('auth.call.tap', { n: callNumber });
+  if (lastSyncStats) renderSyncState(lastSyncStats);
+  // Re-run the live phone hints in the new language.
+  ['phone', 'joinPhone'].forEach((id) => $(id).dispatchEvent(new Event('input')));
+  if (!$('resumeView').classList.contains('hidden')) $('resumeBtn').click();
+  updateIdHint();
+  $('otpStatus').textContent = '';
+});
 
 // ── Tiny toast ──
 let toastTimer;

@@ -88,18 +88,30 @@ export const config = {
 
   otp: {
     // 'log'    — dev only, prints the code. Refused under NODE_ENV=production.
-    // 'oracle' — real SMS via the Oracle phone (no vendor). The Somali path. Needs no URL:
-    //            the backend queues, and the phone polls for what to send (see notify/smsQueue.js).
-    // 'twilio' — real SMS via Twilio. Non-Somali numbers (testing, Play review).
-    // 'auto'   — per country: +252 via the Oracle, everything else via Twilio.
+    // 'clicksend' — real SMS via ClickSend, every number. The production setting.
+    // 'auto'      — same as clicksend, but a dev box without credentials falls back to 'log'.
+    // 'oracle'    — legacy: the Oracle phone sends over its own SIM. Explicit only.
     transport: process.env.OTP_TRANSPORT || 'log',
     sendTimeoutMs: parseInt(process.env.OTP_SEND_TIMEOUT_MS || '10000', 10),
-    twilio: {
-      accountSid: process.env.TWILIO_ACCOUNT_SID || '',
-      authToken: process.env.TWILIO_AUTH_TOKEN || '',
-      from: process.env.TWILIO_FROM || '',
-      messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID || '',
+    clicksend: {
+      username: process.env.CLICKSEND_USERNAME || '',
+      apiKey: process.env.CLICKSEND_API_KEY || '',
+      from: process.env.CLICKSEND_FROM || '',
     },
+    // Play review login: ONE fixed phone whose code is this value instead of an SMS. A
+    // reviewer can't receive a text at a number you control, and an app they can't sign in to
+    // is rejected as broken. Both unset = disabled. See commands/auth.js.
+    review: {
+      phone: process.env.REVIEW_PHONE || '',
+      code: process.env.REVIEW_CODE || '',
+    },
+    // Outside production, real SMS goes ONLY to these numbers (comma-separated); everything
+    // else gets the dev log transport. The seed's numbers are valid Somali numbers that may
+    // belong to strangers, and a dev box with live ClickSend keys must never text them.
+    devSmsAllowlist: (process.env.DEV_SMS_ALLOWLIST || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
   },
 
   // Missed-call verification: the number customers call to prove they hold their phone.

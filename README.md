@@ -24,6 +24,8 @@ cp .env.example .env
 docker compose up -d --build
 
 # 3. Demo data — one order in every state, two drivers, seeded photos.
+#    It wipes every domain table, so it asks first if it finds data it didn't create
+#    (e.g. your own test login): add -e SEED_CONFIRM=wipe-local-data to confirm.
 docker compose exec backend npm run seed
 
 # 4. Unit tests (no database needed).
@@ -36,13 +38,19 @@ and geolocation refuse to run without it.
 
 | App | URL | Login |
 |---|---|---|
-| Customer | https://localhost/ | any phone; the passcode is printed to the backend log |
-| Driver | https://localhost/driver/ | `Amina` / `1234` or `Bashir` / `5678` |
-| Operator | https://localhost/operator/ | `hodan` / `seeded-operator-pw-1` |
+| Customer | https://localhost/ | any phone; in dev the code is shown on screen |
+| Driver | https://localhost/driver/ | `619876543` / `1234` (Amina) or `651112223` / `5678` (Bashir) |
+| Operator | https://localhost/operator/ | `admin` / `change-me-please-1` (admin) or `hodan` / `seeded-operator-pw-1` |
 
-Customer login needs the code from `docker compose logs -f backend` — look for the
-`[OTP][dev-transport]` line. That is dev-only behaviour; the backend refuses to boot in
-production with the log transport enabled.
+In dev, the customer's code appears on screen and in `docker compose logs -f backend`, on the
+`[OTP][dev-transport]` line. That only happens outside production: the backend refuses to
+boot in production on the log transport.
+
+With ClickSend keys in `.env`, dev sends real texts **only** to numbers on
+`DEV_SMS_ALLOWLIST`, so a login as a seeded number never texts a stranger.
+
+Every phone field has a **🇸🇴 +252 / 🇺🇸 +1** switch: pick the country, then type the number
+any way you like.
 
 **Exercise a full payment without owning a phone.** The simulator posts the same signed webhook
 the real Android device would:
@@ -101,7 +109,7 @@ Where things live:
 | `backend/src/domain/` | Pure logic — state machine, phone parsing, USSD, receipts. No I/O, fully unit-tested. |
 | `backend/src/commands/` · `queries/` | The CQRS write and read sides. |
 | `backend/src/events/` | Event bus + transactional outbox. |
-| `backend/src/notify/` | Outbound SMS (Oracle queue, Twilio) and the IMAP payment sensor. |
+| `backend/src/notify/` | Outbound SMS (ClickSend) and the IMAP payment sensor. |
 | `frontend/{user,driver,operator}/` | Three vanilla-JS PWAs; `frontend/shared/` is common code. |
 | `oracle/` | Termux scripts for the Android sensor phone, plus the simulator. |
 | `mobile/` | Capacitor wrapper that ships the PWAs as an Android app. |
@@ -115,7 +123,7 @@ one is there because the alternative loses money or leaks customer data.
 ## Testing
 
 ```bash
-cd backend && npm test          # 340 Jest unit tests, no database required
+cd backend && npm test          # 369 Jest unit tests, no database required
 ./scripts/verify/run-all.sh     # live end-to-end suites against the running stack
 ```
 
@@ -131,26 +139,38 @@ quietly stop running.
 
 ## Deploying to a VPS
 
-Any Linux box with Docker. The differences from local are a real domain, real secrets, and no
-seed.
+Any Linux box with Docker. Compared with local, it has a real domain, real secrets, and no
+seed data.
 
 **Prerequisites:** a domain with an A/AAAA record pointing at the VPS, and ports **80 and 443**
-open — Caddy needs 80 for the ACME challenge.
+open. Caddy needs port 80 to get its certificate.
 
-1. **Point Caddy at your domain.** Replace the `localhost` block in `./Caddyfile` with
-   `app.example.com { …same handle blocks… }`. Certificates are then automatic.
-2. **Write a real `.env`.** Every `change_me_*` must be replaced.
-   `openssl rand -hex 32` generates `ORACLE_WEBHOOK_SECRET` and `SESSION_SECRET`. Also set:
-   - `NODE_ENV=production`
-   - `CORS_ORIGINS=https://app.example.com`
-   - `OPERATOR_PASSWORD` — bootstraps the first operator account, then goes inert
-   - `MERCHANT_MSISDN`, `USSD_TEMPLATE`, `TELECOM_SENDER_IDS` — match the live telecom
-   - `OTP_TRANSPORT=oracle` (or `auto`) — **required**; the backend refuses to boot in
-     production with the dev `log` transport, which would print login codes to the server log
-3. **Launch:** `docker compose up -d --build`. Migrations run on boot.
-   **Never run the seed** — it truncates the domain tables.
-4. **Point the Oracle phone at the domain** (`oracle/Instructions.md`) and confirm the operator's
-   Oracle badge goes green before taking live orders.
+1. **Write a real `.env`.** Replace every `change_me_*`. Use `openssl rand -hex 32` to
+   generate `ORACLE_WEBHOOK_SECRET` and `SESSION_SECRET`. Also set:
+   - `DOMAIN=app.example.com`, `NODE_ENV=production`, `CORS_ORIGINS=https://app.example.com,https://localhost`
+   - `OPERATOR_PASSWORD`: a **new** password of at least 12 characters. It creates the first
+     admin account, `admin`, which must change it at first sign-in. Never reuse a value from
+     `CREDENTIALS.md`: the backend refuses to boot while any seeded password still works.
+   - `OTP_TRANSPORT=clicksend` plus the `CLICKSEND_*` keys ([`docs/LIVE_SMS_SETUP.md`](docs/LIVE_SMS_SETUP.md))
+   - `REVIEW_PHONE` / `REVIEW_CODE` for the Play reviewer ([`docs/PLAY_RELEASE.md`](docs/PLAY_RELEASE.md) §3)
+   - `MERCHANT_MSISDN`, `USSD_TEMPLATE`, `TELECOM_SENDER_IDS`, matching the live telecom
+   - `VERIFY_CALL_NUMBER` left **blank** unless the Oracle phone is running
+2. **Put the MinIO AIStor license on the server** as `./minio.license`. It's git-ignored,
+   like `.env`, and MinIO won't start without it.
+3. **Launch with the production overrides:**
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+   ```
+   `docker-compose.prod.yml` swaps in `Caddyfile.prod`, which uses your domain, an automatic
+   certificate and HSTS. It removes the dev listener on port 8080 and the published database
+   port. Migrations run on boot. **Never run the seed**: it refuses anyway unless
+   `NODE_ENV=development`.
+4. **Sign in as `admin`** and change the password. Then add staff from the dashboard. Each
+   person gets a setup code by text and chooses their own PIN or password.
+5. **Publish the privacy policy:** fill in the placeholders in `docs/PRIVACY.md`, then run
+   `node scripts/build-privacy.mjs`. It's served at `https://<domain>/privacy.html`.
+6. **Payments:** to match them automatically, point the Oracle phone at the domain
+   (`oracle/Instructions.md`). Without it, operators confirm payments with "Mark as paid".
 
 ### Operational rules
 
@@ -181,9 +201,9 @@ photos in MinIO, authentication and per-order authorization on every route and s
 transactional outbox, refunds as a ledger, staff access requests with ID review, the offline
 write queue, and multi-instance operation behind Redis.
 
-**The one blocker to a real launch is hardware validation.** USSD `tel:` dialing, Oracle SMS
-interception, and outbound login codes are all built and pass against the live stack, but none
-has run on a Somali network. See `oracle/Instructions.md` and P4 in `CLAUDE.md`.
+Login and staff setup codes go out through ClickSend, which has been verified delivering to a
+real US handset. **Still unvalidated on a Somali network:** USSD `tel:` dialing, Oracle receipt
+interception, and ClickSend delivery to `+252`. See `oracle/Instructions.md`.
 
 Known gaps: push notifications aren't started, and refunds are settled off-platform by design.
 
@@ -196,7 +216,8 @@ Known gaps: push notifications aren't started, and refunds are settled off-platf
 | `oracle/Instructions.md` | Setting up the Android sensor phone. |
 | `mobile/README.md` | Building the Android app. |
 | `docs/PLAY_RELEASE.md` | Getting the app into the Play Store. |
-| `docs/LIVE_SMS_SETUP.md` | Real SMS delivery on hardware. |
+| `docs/LIVE_SMS_SETUP.md` | Real SMS delivery (ClickSend) and the dev allowlist. |
 | `docs/MISSED_CALL_VERIFICATION.md` | Verifying a phone without sending anything. |
 | `docs/EMAIL_SENSOR_SETUP.md` | Payment sensing over IMAP. |
 | `docs/PRIVACY.md` · `docs/PLAY_LISTING.md` | Play submission pack. |
+| `scripts/brandsheet-icons.py` | Cuts every app icon out of `GuriKaabe-brandsheet.png`. |

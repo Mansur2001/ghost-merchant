@@ -11,33 +11,6 @@ export class OperatorError extends Error {
   }
 }
 
-// Create an account. `createdBy` is the actor label of whoever is doing it, so the roster
-// itself carries a provenance trail.
-export async function createOperator({ username, displayName, password, createdBy }) {
-  const u = validateUsername(username);
-  if (!u.valid) throw new OperatorError(u.reason);
-  const p = validatePassword(password, { username: u.username });
-  if (!p.valid) throw new OperatorError(p.reason);
-
-  try {
-    return await prisma.operator.create({
-      data: {
-        username: u.username,
-        display_name: String(displayName || u.username).slice(0, 80),
-        password_hash: hashSecret(p.password),
-        created_by: createdBy || null,
-      },
-      select: { id: true, username: true, display_name: true, active: true, created_at: true },
-    });
-  } catch (err) {
-    // P2002 is Prisma's unique-constraint violation (Postgres 23505).
-    if (err.code === 'P2002' || err.code === '23505') {
-      throw new OperatorError('that username is already taken', 409);
-    }
-    throw err;
-  }
-}
-
 // Verify a login. Returns the operator row on success, null on ANY failure — the caller must
 // not be able to tell "no such user" from "wrong password" (that difference enumerates the
 // staff roster, which is exactly what an attacker wants before a phishing attempt).
@@ -97,17 +70,47 @@ export async function setOperatorActive(operatorId, active, actingOperatorId) {
       where: { active: true, id: { not: BigInt(operatorId) } },
     });
     if (others === 0) throw new OperatorError('cannot deactivate the last active operator', 409);
+    await assertAnotherAdmin(operatorId);
   }
   try {
     return await prisma.operator.update({
       where: { id: BigInt(operatorId) },
       data: { active },
-      select: { id: true, username: true, display_name: true, active: true },
+      select: { id: true, username: true, display_name: true, active: true, is_admin: true },
     });
   } catch (err) {
     if (err.code === 'P2025') throw new OperatorError('account not found', 404);
     throw err;
   }
+}
+
+// Grant or remove admin. Admins create and disable staff accounts; with none left, nobody
+// could ever add a driver again, so the last active admin can't be demoted.
+export async function setOperatorAdmin(operatorId, admin) {
+  if (!admin) await assertAnotherAdmin(operatorId);
+  try {
+    return await prisma.operator.update({
+      where: { id: BigInt(operatorId) },
+      data: { is_admin: Boolean(admin) },
+      select: { id: true, username: true, display_name: true, active: true, is_admin: true },
+    });
+  } catch (err) {
+    if (err.code === 'P2025') throw new OperatorError('account not found', 404);
+    throw err;
+  }
+}
+
+// Throws unless some OTHER active admin would remain after `operatorId` loses admin rights.
+async function assertAnotherAdmin(operatorId) {
+  const target = await prisma.operator.findUnique({
+    where: { id: BigInt(operatorId) },
+    select: { is_admin: true, active: true },
+  });
+  if (!target?.is_admin || !target.active) return; // not an active admin: nothing to protect
+  const otherAdmins = await prisma.operator.count({
+    where: { active: true, is_admin: true, id: { not: BigInt(operatorId) } },
+  });
+  if (otherAdmins === 0) throw new OperatorError('cannot remove the last active admin', 409);
 }
 
 // First-boot bootstrap: if the roster is empty, seed one account from the environment so a
@@ -135,6 +138,7 @@ export async function ensureBootstrapOperator() {
         display_name: 'Bootstrap operator',
         password_hash: hashSecret(p.password),
         must_change_password: true,
+        is_admin: true,
         created_by: 'system:bootstrap',
       },
       select: { id: true, username: true },

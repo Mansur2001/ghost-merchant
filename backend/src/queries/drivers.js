@@ -9,7 +9,7 @@ import { prisma } from '../db/prisma.js';
 export async function getDriversWithStats() {
   const [drivers, active, delivered] = await Promise.all([
     prisma.driver.findMany({
-      select: { id: true, name: true, msisdn: true, active: true },
+      select: { id: true, name: true, msisdn: true, active: true, pin_set_at: true },
       orderBy: { name: 'asc' },
     }),
     prisma.order.groupBy({
@@ -32,6 +32,8 @@ export async function getDriversWithStats() {
   // The dashboard renders these as numbers; pg returned them as counts, so keep that.
   return drivers.map((d) => ({
     ...d,
+    // An invited driver who hasn't chosen a PIN yet can't sign in — the desk needs to see that.
+    setup_pending: d.pin_set_at === null,
     active_orders: activeBy.get(String(d.id)) ?? 0,
     delivered_orders: deliveredBy.get(String(d.id)) ?? 0,
   }));
@@ -47,6 +49,6 @@ export async function getDriverById(id) {
   }
   return prisma.driver.findUnique({
     where: { id: key },
-    select: { id: true, name: true, msisdn: true, active: true },
+    select: { id: true, name: true, msisdn: true, active: true, pin_set_at: true },
   });
 }

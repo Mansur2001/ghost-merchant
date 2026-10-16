@@ -1,0 +1,25 @@
+# Production overrides. Run on the VPS with BOTH files:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Everything else (images, volumes, healthchecks) comes from docker-compose.yml, so there is
+# one definition of the stack and this file holds only what MUST differ on a public server.
+services:
+  postgres:
+    # No host port at all. The dev file publishes 5432 on loopback for the Prisma CLI; on a
+    # VPS there is no reason for the database to listen anywhere but the internal network.
+    ports: !reset []
+
+  caddy:
+    # 80 (ACME certificate challenge + redirect) and 443 only — the dev :8080 cleartext
+    # listener is gone, and so is its port.
+    ports: !override
+      - "80:80"
+      - "443:443"
+    volumes: !override
+      - ./Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - ./frontend:/srv/frontend:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env to your domain, e.g. app.gurikaabe.com}

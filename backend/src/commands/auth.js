@@ -13,8 +13,11 @@ import {
   MAX_ATTEMPTS,
   OTP_TTL_MS,
   RESEND_COOLDOWN_MS,
+  reviewCodeFor,
 } from '../domain/otp.js';
+import { maskPhone } from '../domain/redact.js';
 import { sendOtpSms } from '../notify/smsSender.js';
+import { config } from '../config.js';
 
 export class OtpCooldownError extends Error {
   constructor(retryAfterMs) {
@@ -39,7 +42,8 @@ export class OtpInvalidError extends Error {
 // cannot both win, and the loser learns nothing except "wait".
 export async function requestOtp(rawPhone) {
   const phone = normalizeMsisdnOrThrow(rawPhone);
-  const code = generateCode();
+  const reviewCode = reviewCodeFor(phone, config.otp.review);
+  const code = reviewCode ?? generateCode();
   const cooldownSeconds = Math.ceil(RESEND_COOLDOWN_MS / 1000);
   const ttlSeconds = Math.ceil(OTP_TTL_MS / 1000);
 
@@ -69,6 +73,13 @@ export async function requestOtp(rawPhone) {
     throw new OtpCooldownError(cooldownRemainingMs(existing?.last_sent_at));
   }
 
+  // The review number gets no SMS: nobody holds a handset for it. Its transport is not `log`,
+  // so the route never echoes the code back either — the reviewer has it from the Console notes.
+  if (reviewCode) {
+    console.warn(`[OTP] review login challenge issued for ${maskPhone(phone)}`);
+    return { phone, transport: 'review', expiresInSeconds: ttlSeconds, code };
+  }
+
   try {
     const { transport } = await sendOtpSms(phone, code);
     return { phone, transport, expiresInSeconds: ttlSeconds, code };
@@ -86,7 +97,10 @@ export async function requestOtp(rawPhone) {
 export async function verifyOtp(rawPhone, submittedCode) {
   const phone = normalizeMsisdnOrThrow(rawPhone);
 
-  return withTransaction(async (tx) => {
+  // Failures RETURN from the transaction instead of throwing inside it. A throw rolls the
+  // transaction back — including the attempts++ and the burn below — which silently turned
+  // the 5-attempt cap into no cap at all. The error is raised only after the count commits.
+  const outcome = await withTransaction(async (tx) => {
     // RAW, and it must stay raw: FOR UPDATE. Without the lock, concurrent guesses both read
     // attempts=4 and are each granted a "last" try — turning a 5-attempt cap into as many
     // tries as the attacker can run in parallel.
@@ -95,12 +109,12 @@ export async function verifyOtp(rawPhone, submittedCode) {
        WHERE phone = ${phone} FOR UPDATE
     `;
     const challenge = rows[0];
-    if (!challenge) throw new OtpInvalidError();
+    if (!challenge) return { ok: false };
 
     const expired = new Date(challenge.expires_at).getTime() <= Date.now();
     if (expired || challenge.attempts >= MAX_ATTEMPTS) {
       await tx.otpCode.deleteMany({ where: { phone } });
-      throw new OtpInvalidError();
+      return { ok: false };
     }
 
     if (!verifyCode(String(submittedCode ?? ''), challenge.code_hash)) {
@@ -111,7 +125,7 @@ export async function verifyOtp(rawPhone, submittedCode) {
       } else {
         await tx.otpCode.update({ where: { phone }, data: { attempts } });
       }
-      throw new OtpInvalidError();
+      return { ok: false };
     }
 
     // Success: single-use, so the code dies with this transaction.
@@ -121,8 +135,11 @@ export async function verifyOtp(rawPhone, submittedCode) {
       update: {},
       create: { phone_number: phone },
     });
-    return { phone };
+    return { ok: true };
   });
+
+  if (!outcome.ok) throw new OtpInvalidError();
+  return { phone };
 }
 
 // Housekeeping: expired challenges are dead weight (and PII-adjacent). Cheap indexed delete.

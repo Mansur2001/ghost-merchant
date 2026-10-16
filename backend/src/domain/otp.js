@@ -8,6 +8,7 @@
 //                         so an uncapped resend loop is both a DoS and a direct cash cost.
 //   * Biased codes     -> crypto.randomInt is uniform; never `Math.random() % 1e6`.
 import crypto from 'node:crypto';
+import { parsePhone } from './phone.js';
 
 export const OTP_LENGTH = 6;
 export const OTP_TTL_MS = 5 * 60 * 1000; // a code is dead 5 minutes after it is issued
@@ -43,6 +44,19 @@ export function verifyCode(code, stored) {
   }
   const derived = crypto.scryptSync(String(code), Buffer.from(saltHex, 'hex'), 32);
   return expected.length === derived.length && crypto.timingSafeEqual(expected, derived);
+}
+
+// The Play review login: if `phone` (canonical E.164) is the configured review number, its
+// code is the configured one instead of a random code sent by SMS. Null for every other number,
+// and for a half-configured or malformed review setting, so a typo disables it rather than
+// opening a login with an empty or guessable code.
+//
+// It still runs through the whole OTP path — cooldown, attempt cap, rate limits, single use —
+// and it can only ever mint a session for that ONE number, which sees only its own orders.
+export function reviewCodeFor(phone, review) {
+  if (!review?.phone || !isWellFormedCode(review.code)) return null;
+  const parsed = parsePhone(review.phone);
+  return parsed.valid && parsed.e164 === phone ? review.code : null;
 }
 
 // Milliseconds a caller must still wait before another send is allowed (0 = send now).

@@ -1,0 +1,68 @@
+# PRODUCTION Caddyfile — used by docker-compose.prod.yml instead of ./Caddyfile.
+#
+# Differences from the dev file, all deliberate:
+#   * the site is {$DOMAIN} (set DOMAIN in .env), so Caddy fetches a real Let's Encrypt
+#     certificate on its own — ports 80 and 443 must be open for that;
+#   * NO :8080 plain-HTTP listener. On a public IP it would serve customer addresses, chat and
+#     session tokens in the clear;
+#   * HSTS is on.
+# The privacy policy is served at https://{$DOMAIN}/privacy.html (frontend/user/privacy.html).
+
+{$DOMAIN} {
+	encode gzip
+
+	# Security headers for the PWA documents. The API sets its own (middleware/securityHeaders.js);
+	# these protect the DOM, which is where an injected script would actually do damage —
+	# it would sit next to a live session token.
+	header {
+		# script-src 'self' means NO inline <script> runs: that's why service-worker
+		# registration lives in app.js instead of an inline block. Keep it that way.
+		# 'unsafe-inline' for styles only, because the markup uses style="" attributes.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; font-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		# The customer PWA needs geolocation (delivery point) and camera (reference photo);
+		# everything else is denied outright.
+		Permissions-Policy "geolocation=(self), camera=(self), microphone=(), payment=(), usb=(), interest-cohort=()"
+		# Real domain: browsers remember to use HTTPS only, so a network can't downgrade them.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	# API + webhook + heartbeat -> backend
+	handle /api/* {
+		reverse_proxy backend:3000
+	}
+
+	# WebSocket real-time layer -> backend (Caddy proxies the upgrade automatically)
+	handle /ws {
+		reverse_proxy backend:3000
+	}
+
+	# Shared assets (stylesheet) reachable from all three PWAs.
+	handle /shared/* {
+		root * /srv/frontend
+		file_server
+	}
+
+	# Driver PWA
+	handle_path /driver/* {
+		root * /srv/frontend/driver
+		file_server
+		try_files {path} /index.html
+	}
+
+	# Operator PWA
+	handle_path /operator/* {
+		root * /srv/frontend/operator
+		file_server
+		try_files {path} /index.html
+	}
+
+	# User PWA (default)
+	handle {
+		root * /srv/frontend/user
+		file_server
+		try_files {path} /index.html
+	}
+}

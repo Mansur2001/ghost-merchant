@@ -13,7 +13,7 @@ a mismatch is grounds for removal, and it's the kind of thing that gets checked.
 | Play Console account | one-off $25 registration |
 | Identity verification | required for all developers; personal accounts also need a **D-U-N-S**-free individual verification. Start this early — it can take days |
 | Closed testing requirement | **personal (non-organisation) accounts must run a closed test with at least 12 testers opted in for 14 continuous days before applying for production access.** Plan the soft launch around this — it is the single most common surprise |
-| Privacy policy URL | `PRIVACY.md`, published publicly |
+| Privacy policy URL | `https://<your domain>/privacy.html`, built from `PRIVACY.md` by `scripts/build-privacy.mjs` |
 | Backend | live on a real domain with a valid certificate |
 
 ---
@@ -108,6 +108,14 @@ email address, no social media login.
 **Not collected:** name, email, address book, financial/payment info, health, browsing
 history, app activity, device IDs, advertising ID, crash logs, diagnostics.
 
+**Staff only:** drivers and operators also give a **name** (Personal info → Name). Customers
+never do.
+
+**Shared? No, for every type.** ClickSend delivers login codes, so it receives the phone
+number and the message text. Google's definition doesn't count a service provider processing
+data on your behalf as "sharing". `PRIVACY.md` still names ClickSend, because the policy must
+be accurate even where the form doesn't ask.
+
 **Payment info deserves a note:** the answer is genuinely *not collected*. Money moves phone
 to phone over the telecom's own rails; the app records only the confirmation reference the
 telecom sends.
@@ -155,10 +163,9 @@ stranger. Say so in the free-text box. Expect **PEGI 3 / Everyone**.
 
 Google reviews the app against what you declared. The realistic risks here:
 
-1. **Login codes reach nobody.** The app's whole entry point is an SMS code. If the Oracle SMS
-   path isn't working on real hardware, a reviewer cannot get past the first screen and the
-   app is rejected as broken. **This is the top risk — validate it before you submit.**
-   Consider a documented test account for the reviewer.
+1. **The reviewer can't sign in.** The app's whole entry point is an SMS code, and reviewers
+   don't receive texts at your numbers. Set `REVIEW_PHONE` / `REVIEW_CODE` on the server
+   (`PLAY_RELEASE.md` §3) and give both in the notes below. **This is the top risk.**
 2. **Backend down or unreachable during review** — same outcome. Review can happen days after
    submission; the server has to stay up.
 3. **Location without prominent disclosure** — use the wording above.
@@ -167,8 +174,11 @@ Google reviews the app against what you declared. The realistic risks here:
 **Reviewer notes — put this in the Console's "App access" section:**
 ```
 GuriKaabe requires a phone number and an SMS code to sign in. For review, please use:
-  Phone: [A NUMBER YOU CONTROL]
-  Code:  [DESCRIBE HOW THE REVIEWER OBTAINS IT]
+  1. Tap "I'm a customer".
+  2. Tap the 🇺🇸 +1 switch, then enter: [REVIEW_PHONE without +1]
+  3. Tap "Text me a code", then enter: [REVIEW_CODE]
+No text message is sent to this number; the code above always works for it.
+Language: the SO / EN button in the top bar switches between Somali and English.
 
 The app coordinates deliveries in Somalia. Payment is peer-to-peer over the customer's own
 mobile-money account (EVC Plus / eDahab) using the phone's dialer — the app never processes
@@ -180,14 +190,15 @@ or holds money. Customer, driver and operator sign-in are all reachable from the
 ## 8. Release checklist
 
 - [ ] Backend on a real domain, valid certificate, `NODE_ENV=production`
-- [ ] `OTP_TRANSPORT=oracle`, SMS send path validated **on real hardware**
-- [ ] Dev `:8080` cleartext listener removed from the Caddyfile and docker-compose
+- [ ] `OTP_TRANSPORT=clicksend`; a real code received on a US **and** a Somali handset
+- [ ] `REVIEW_PHONE` / `REVIEW_CODE` set; review login tested with the +1 switch
+- [ ] Deployed with `docker-compose.prod.yml` (no `:8080` listener, no published DB port)
 - [ ] `CORS_ORIGINS` = your domain + `https://localhost`
 - [ ] Database backups running (`pg_dump`, off the box)
 - [ ] `GM_API_BASE=https://your-domain npm run build` — **never** an http:// base
 - [ ] `versionCode` bumped
 - [ ] Signed AAB from `./gradlew bundleRelease`
 - [ ] Keystore backed up somewhere that is not the build laptop
-- [ ] Privacy policy live at a public URL
+- [ ] Privacy policy placeholders filled, `node scripts/build-privacy.mjs` run, page live
 - [ ] Data Safety form matches this document
 - [ ] Closed test: 12+ testers, 14 continuous days (personal accounts)

@@ -29,3 +29,10 @@ mobile/android/capacitor-cordova-android-plugins/
 
 # Release signing credentials — never commit.
 mobile/android/app/keystore.properties
+
+# MinIO AIStor license — a credential, like .env.
+minio.license
+*.license
+
+# Store screenshots are re-captured from seed data before each listing update.
+play-screenshots/

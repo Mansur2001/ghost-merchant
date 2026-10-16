@@ -173,13 +173,17 @@ right hardware.
 4. **Does the carrier notice?** A number receiving many short inbound calls is a less unusual
    pattern than a SIM sending many texts, but it is not nothing.
 
+> **Requires the Oracle phone.** The call is detected by that handset. A deployment running on
+> ClickSend alone must leave `VERIFY_CALL_NUMBER` blank, or customers get a "call to verify"
+> button that never completes.
+
 ## Rollout
 
 Both mechanisms can run at once — they answer the same question and mint the same token, so
 this needs no big-bang switch.
 
 - `+252` → missed call, with the SMS queue as the fallback if no call arrives within a minute
-- everything else → SMS (Twilio), unchanged; a US customer should not be calling Somalia
+- everything else → SMS (ClickSend), unchanged; a US customer should not be calling Somalia
 - operator-vouch stays as the backstop for both
 
 The FAQ has to carry this. "Call this number and hang up" is unfamiliar enough that customers

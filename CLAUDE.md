@@ -124,34 +124,26 @@ operator never touches it; that is the in-app chat over WebSocket.
   so a deployment without one shows "Payments: manual" rather than a permanent red DOWN — an
   alarm that is always on is one people learn to ignore.
 
-### Outbound SMS: how login codes reach a Somali handset
+### Outbound SMS: ClickSend, not the Oracle
 
-There is deliberately **no Golis/Hormuud A2P agreement** — it needs a registered local company,
-a Somali bank account, and volume pricing this business doesn't have. The code goes out over the
-merchant's own SIM as an ordinary subscriber text.
+Every text the platform sends — customer login codes (`+252` and `+1`) and staff setup codes —
+goes through **ClickSend** (`notify/smsSender.js`), pay-as-you-go with no monthly fee. It is the
+one deliberate vendor exception, and it is bounded: it carries a code, never money.
 
-**The backend never pushes to the phone.** A phone cannot accept inbound connections (carrier
-NAT on mobile data, a router on WiFi), so an address for it would mean a VPN or tunnel — another
-dependency that dies silently. Direction is inverted: the backend queues
-(`notify/smsQueue.js`, `sms_outbox`), and the phone POLLS on the tick it already uses for
-receipts.
+The Oracle phone USED to send login codes over its own SIM (`notify/smsQueue.js`, polled via
+`POST /api/oracle/sms/pending`). That path is kept but never selected automatically
+(`OTP_TRANSPORT=oracle` only): it made every login depend on a handset in another country
+staying charged, and a subscriber SIM sending near-identical texts gets rate-limited.
 
-`queue → POST /api/oracle/sms/pending (HMAC) → termux-sms-send → POST /api/oracle/sms/sent`
-
-- Collected rows are **claimed** (`FOR UPDATE SKIP LOCKED` + a 60s claim timeout), so two polls
-  in flight can't send two *different* codes for one login — which would leave a customer unable
-  to sign in.
-- A confirmed send **DELETES** the row. Until then it holds a login code in plaintext; the
-  hashed copy in `otp_codes` is authoritative. Undelivered rows are swept after 10 minutes — the
-  code died at 5, so it's a credential with no remaining purpose.
-- `isConfigured('oracle')` means **a phone is actually polling**, not that a setting exists.
-  With no phone ever seen, dev falls back to `log` — otherwise every local login silently queues
-  into a black hole and sign-in just stops working with no error.
-- Backlog is visible at `GET /api/operator/sms-queue`. A stalled queue is invisible from the
-  inside: customers don't report it, they conclude the app is broken and leave.
-- **Honest limit:** a subscriber SIM sending hundreds of near-identical texts a day gets
-  rate-limited or blocked. Fine at soft-launch volume; at scale the answer is a commercial
-  agreement, and only the transport module changes.
+- `OTP_TRANSPORT`: `clicksend` (production), `auto` (= clicksend, but a dev box without keys
+  shows the code on screen), `log` (dev only — **refuses to boot** in production), `oracle`.
+- **Dev never texts strangers.** Outside production, real SMS goes only to numbers on
+  `DEV_SMS_ALLOWLIST`; everything else gets the on-screen code. The seed's numbers are valid
+  Somali numbers that may belong to real people.
+- ClickSend answers HTTP 200 for a batch whose one message was refused — the sender checks the
+  per-message status, so a refused message is a failure, never "sent".
+- US delivery needs a **verified toll-free** sender (`CLICKSEND_FROM`); carriers filter
+  unregistered ones. Setup and troubleshooting: `docs/LIVE_SMS_SETUP.md`.
 
 ---
 
@@ -163,23 +155,23 @@ Three identities, one signing secret (`SESSION_SECRET`), all tokens HMAC-signed
 | Role | Authenticates with | Token TTL | Sees |
 |---|---|---|---|
 | `customer` | phone + 6-digit OTP over SMS | 30 days | only orders under their verified phone |
-| `driver` | msisdn + PIN (scrypt) | 12 hours | only orders the operator assigned to them |
-| `operator` | username + password (scrypt) | 12 hours | everything |
+| `driver` | msisdn + PIN (scrypt), chosen by the driver via a setup code | 12 hours | only orders the operator assigned to them |
+| `operator` | username + password (scrypt), chosen via a setup code | 12 hours | everything; **admins** also manage staff |
 
 - **OTP** (`domain/otp.js`, `commands/auth.js`, `routes/auth.js`): 6 uniform random digits,
   scrypt-hashed at rest, 5-minute TTL, single-use, max 5 attempts, 60s resend cooldown enforced
   atomically in the DB (`otp_codes`, one live challenge per phone). Verification returns ONE
   generic error for every failure mode — distinguishing "no challenge" from "wrong code" would
   make the endpoint a phone-number oracle.
-- **Delivery is per-country, not global** (`notify/smsSender.js`, `OTP_TRANSPORT=auto`):
-  `+252` → the **Oracle phone** (no vendor, no platform fee: the sovereignty requirement);
-  everything else → **Twilio** on a toll-free number (your US test handset, and a Play reviewer
-  who must receive a code to get past the first screen). A Somali SIM sending internationally is
-  slow, costly and often silently dropped. Toll-free carries A2P traffic without 10DLC brand
-  registration but **delivers to US/Canada only** — it is not a fallback for `+252`. If Twilio
-  is unconfigured, Somali logins are unaffected; the business does not depend on it. `log`
-  prints the code and the backend **refuses to boot** with it under `NODE_ENV=production`.
-  Setup: `docs/LIVE_SMS_SETUP.md`.
+- **Delivery** is ClickSend for every number (see *Outbound SMS* above). **Play review login**:
+  `REVIEW_PHONE` + `REVIEW_CODE` (6 digits) make one fixed number's code fixed, with no SMS —
+  a reviewer can't receive texts at your number. It still runs the whole OTP path (cooldown,
+  attempt cap, rate limits, single use), reaches only that account, and a half-set or malformed
+  pair refuses to boot (`domain/otp.js` `reviewCodeFor`).
+- **Failure paths RETURN from the transaction, then throw.** A throw inside `withTransaction`
+  rolls back everything — including the `attempts++` that enforces "5 wrong tries burns the
+  code". That bug made the cap a no-op. `verifyOtp` and `claimSetup` now return a
+  failure outcome, commit the count, and raise after.
 - **Deny = 404, never 403.** A 403 confirms "this order exists, it just isn't yours" — exactly
   what an enumeration script wants. Same for WebSocket `subscribe`.
 - **The client never chooses its own identity.** Order creation takes the phone from the token
@@ -194,15 +186,37 @@ Three identities, one signing secret (`SESSION_SECRET`), all tokens HMAC-signed
   chars, scrypt-hashed, may not contain the username. Login answers one generic error for both
   "no such account" and "wrong password" — the difference enumerates the staff roster. Accounts
   are **deactivated, never deleted** (the audit trail references them), you cannot deactivate
-  yourself, and the last active operator cannot be deactivated — locking the whole desk out of a
-  running delivery business is a worse outage than any account. First boot creates `admin` from
-  `OPERATOR_PASSWORD`, flagged `must_change_password`, because that value lives in `.env` and
-  shell history: it is a delivery mechanism, not a secret.
+  yourself, and neither the last active operator nor the **last active admin** can be
+  deactivated or demoted. First boot creates `admin` (an admin) from `OPERATOR_PASSWORD`,
+  flagged `must_change_password`: that value lives in `.env` and shell history, so it is a
+  delivery mechanism, not a secret.
+- **Admins** (`operators.is_admin`) create, disable and reset staff accounts and review access
+  requests (including ID documents); ordinary operators dispatch. Checked against the DB on
+  every request (`adminOnly` in `routes/operator.js`), so removing admin rights is immediate.
+
 - **Rate limits** (`middleware/rateLimit.js`): sliding window on OTP request/verify, driver
-  login and operator login, keyed per IP and per identity. Backed by Redis when configured
+  login, operator login and staff setup, keyed per IP and per identity. Backed by Redis when configured
   (shared across instances, via a Lua script so the read-then-write can't interleave), otherwise
   in-process. If Redis is unreachable it falls back to the in-process limiter rather than failing
   closed — failing closed would take down login for everyone during a blip.
+
+### Staff onboarding by invite (`commands/staffAccounts.js`, `domain/staffInvite.js`)
+
+The industry-standard pattern, and the only way staff accounts are created:
+**admin creates the account → system texts a one-time setup code → the person chooses their
+own PIN/password with it.** Nobody ever types or knows another person's secret.
+
+- An invited account holds an **unclaimable** random secret until claimed (`drivers.pin_set_at`
+  null = waiting for setup). Setup codes: 8 digits, scrypt-hashed, 24h, 5 attempts, deleted on
+  use, **one live code per account** (re-send replaces it). `POST /api/staff/setup` is public,
+  rate-limited, and answers one generic error for every failure.
+- **Re-send doubles as reset**: the old PIN/password keeps working until the new one is set, so
+  a reset can't lock anyone out.
+- **Never upsert a driver by phone.** "Add driver" with an existing number is a 409 — the old
+  upsert silently replaced that driver's PIN, an account takeover by anyone with a dashboard.
+- Driver PINs chosen at setup: 6 digits, not repeated or sequential (old 4-digit PINs still log in).
+- The SMS goes out **after** the transaction commits (a text can't be rolled back); if it
+  fails, the account exists and "Send setup code" retries.
 
 ### Phone verification by missed call
 
@@ -224,6 +238,8 @@ per-message cost. It also kills OTP phishing by construction — with no code in
 - `VERIFY_CALL_NUMBER` unset = the flow is advertised as unavailable (`GET /api/auth/methods`)
   and clients fall back to SMS. Never hardcode "Somali numbers call" in a client — whether a
   call-capable device exists is deployment config, and a dead button is worse than no button.
+- **It needs the Oracle phone** to see the call. With no phone running, leave
+  `VERIFY_CALL_NUMBER` blank, or customers get a button that never completes.
 - **Android is the weak part**: a call only reaches the log after ringing out (20–30s). A USB
   GSM modem reports caller ID on the first ring (`AT+CLIP`) and rejects instantly (`ATH`). If
   this becomes the primary path, the modem is the right hardware.
@@ -310,12 +326,18 @@ Over Somali mobile networks **P is not optional**, so the design picks C or A *p
   `reviewed_by` as who checked it. Holding a government ID after the decision it supported turns
   a routine breach into identity theft. Customers are NEVER asked for one.
 - **Nobody self-registers as staff.** `POST /api/signup` records a REQUEST and grants nothing; an
-  operator reviews it and then creates the account explicitly, with a password they choose. An
-  operator account reads every customer's phone, address, chat and photos — the gate has to be a
-  human who recognises the applicant. Reviewing is *not* wired to account creation on purpose:
-  minting a credential should be a deliberate act, not a side effect of clicking Approve.
+  **admin** approves it, then — as a separate, deliberate click — creates the account, which
+  texts the applicant a setup code (*Staff onboarding by invite*). An operator account reads
+  every customer's phone, address, chat and photos — the gate has to be a human who recognises
+  the applicant. Approving is *not* wired to account creation on purpose: minting a credential
+  should never be a side effect of clicking Approve. An approved request stays in the queue
+  until its account exists (`access_requests.account_created_at`).
 
 ## Photos / object storage (MinIO)
+
+MinIO runs the **AIStor** image, pinned to an exact release in `docker-compose.yml`. It reads its
+license from a **file** (`./minio.license`, git-ignored like `.env`) and will not start without
+it. Never `latest`: an `up` must not change the storage engine under the photos by accident.
 
 Two photo types, stored in MinIO and indexed in `order_photos`:
 **`order_ref`** (customer attaches at checkout) and **`delivery_proof`** (driver uploads at
@@ -354,6 +376,19 @@ Worker that cache-first serves its shell.
   A Drivers panel lists the roster with live workload stats.
 - **Theme** (`shared/theme.js`): black ↔ white with constant gold trim, set before paint (no
   flash), persisted in `localStorage` (`gm_theme`) across all three PWAs.
+- **Language** (`shared/i18n.js`): English ↔ Somali toggle (SO/EN in the header) on the customer
+  and driver PWAs, persisted as `gm_lang`. Static text via `data-i18n*` attributes, dynamic text
+  via `GMI18n.t()`, server errors mapped by `GMI18n.err()`. **The Somali is deliberately plain,
+  everyday Somali** — short sentences, common words, nothing formal. Every new string needs both
+  languages, equally brief. The operator console is English only.
+- **Phone fields** (`shared/phone.js` `attach()`): a **🇸🇴 +252 / 🇺🇸 +1 switch** in front of every
+  phone input. The switch picks the country; within it, any format is understood. Send
+  `SomPhone.e164Of(input)`, never the raw text. The server still never guesses: bare digits are
+  Somali, because a Somali number with an extra digit (`6123456789`) is also a valid US number.
+- **Escape everything user-supplied** before it reaches `innerHTML` (`escapeHtml` in the operator
+  app). Landmarks, names and chat come from the public; CSP blocks script, not injected markup.
+- **Icons** come from `GuriKaabe-brandsheet.png`: `scripts/brandsheet-icons.py` (needs Pillow)
+  writes the masters, `mobile/make-icons.sh` resizes them into Android densities.
 
 ### ⚠️ When you change any frontend shell file (index.html / app.js / styles.css / phone.js)
 
@@ -365,18 +400,24 @@ serving the cached old version. This is the #1 "my change isn't showing" gotcha 
 ## Seeding
 
 `backend/src/db/seed.js` (`docker compose exec backend npm run seed`). `TRUNCATE … RESTART
-IDENTITY` then a fixed dataset, so **every run converges to the same state** — reset here
-whenever data drifts. Covers one order in every state, two drivers (Amina/1234, Bashir/5678),
-matched receipts, one **unmatched** receipt for the reconcile queue, chat/audit rows, and two
-seeded SVG photos. There is no static seed anywhere else.
+IDENTITY` then a fixed dataset (`db/seedFixtures.js`), so **every run converges to the same
+state** — reset here whenever data drifts. Covers one order in every state, two drivers
+(Amina/1234, Bashir/5678), two operators (`admin` — an admin — and `hodan`), matched receipts,
+one **unmatched** receipt for the reconcile queue, chat/audit rows, and two seeded SVG photos.
 
-**Seed data is the only data that may appear in screenshots or demo videos.** The seed refuses
-to run under `NODE_ENV=production` — never point it at prod, it truncates.
+**Seed data is the only data that may appear in screenshots or demo videos.**
+
+Guards (`db/seedSafety.js`), because the seed truncates everything and its passwords are public:
+- Runs only with `NODE_ENV` **explicitly** `development` or `test` — no override. ("Not
+  production" isn't enough: an unset `NODE_ENV` reads as development in `config.js`.)
+- Refuses to wipe rows it didn't create (your own test login, staff, access requests) unless
+  `SEED_CONFIRM=wipe-local-data`. `scripts/verify/run-all.sh` passes it for its throwaway stack.
+- **Production refuses to boot while any seeded password or PIN still logs in** (`index.js`).
 
 ## Testing
 
 ```bash
-cd backend && npm install && npm test   # 340 Jest unit tests, ESM via --experimental-vm-modules
+cd backend && npm install && npm test   # 369 Jest unit tests, ESM via --experimental-vm-modules
 ./scripts/verify/run-all.sh             # live suites over real HTTP + WebSocket
 ```
 
@@ -417,18 +458,18 @@ Quick syntax check without the runner:
 
 ---
 
-## Status and the one remaining blocker
+## Status and what's left before launch
 
 Working and verified against the live stack: full order lifecycle over WebSocket,
-operator-driven dispatch, payment matching (Oracle SMS + IMAP), photos in MinIO, authentication
-and per-order authorization everywhere, the transactional outbox, refunds as a ledger, staff
-access requests with ID review, the offline write queue, missed-call verification, and
-multi-instance operation behind Redis. The Android app builds and installs.
+operator-driven dispatch, payment matching (Oracle SMS + IMAP), photos in MinIO AIStor,
+authentication and per-order authorization everywhere, the transactional outbox, refunds as a
+ledger, staff onboarding by invite (admin-only), the offline write queue, missed-call
+verification, multi-instance operation behind Redis, ClickSend login codes delivered to a real
+US handset, and the EN/SO interface. The Android app builds and installs.
 
-**The blocker to a real launch is hardware validation.** `tel:`/USSD `%23` dialing, Oracle SMS
-interception, and outbound login-code delivery are all built and pass against the live stack,
-but **none has run on a Somali network**. The backend refuses to boot in production without a
-real OTP transport, and a Play reviewer who can't receive a login code sees a broken app. See
-`oracle/Instructions.md` and `docs/PLAY_RELEASE.md`.
+**Still to validate on a Somali network:** ClickSend delivery to `+252`, `tel:`/USSD `%23`
+dialing, and Oracle receipt interception. A Play reviewer signs in with the review login
+(`REVIEW_PHONE`/`REVIEW_CODE`), not a real text. Production deploy: `docker-compose.prod.yml`
+(+ `Caddyfile.prod`). See `docs/PLAY_RELEASE.md`.
 
 Not started: push notifications.

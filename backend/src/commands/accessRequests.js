@@ -108,9 +108,16 @@ export async function attachIdDocument({ requestId, side, bytes, contentType }) 
 }
 
 // The reviewer's queue: open requests, oldest first.
+// An APPROVED request stays in the queue until its account exists — approving records the
+// decision, creating the account is the separate step the admin still has to take.
 export async function listAccessRequests({ includeClosed = false } = {}) {
   return prisma.accessRequest.findMany({
-    where: includeClosed ? {} : { status: { in: ['new', 'contacted'] } },
+    where: includeClosed ? {} : {
+      OR: [
+        { status: { in: ['new', 'contacted'] } },
+        { status: 'approved', account_created_at: null },
+      ],
+    },
     orderBy: { created_at: 'asc' },
     take: 200,
   });
@@ -120,10 +127,9 @@ export async function countOpenAccessRequests() {
   return prisma.accessRequest.count({ where: { status: 'new' } });
 }
 
-// Record the outcome of a review. Does NOT create an account — the operator does that
-// explicitly through the existing "add driver" / "add operator" forms, because creating a
-// credential should be a deliberate act with a password typed for it, not a side effect of
-// clicking Approve on a list.
+// Record the outcome of a review. Does NOT create an account — an admin does that as a
+// separate, deliberate step (commands/staffAccounts.js), which texts the person a setup code.
+// Minting a credential should never be a side effect of clicking Approve on a list.
 export async function reviewAccessRequest({ requestId, status, note, reviewedBy }) {
   if (!['contacted', 'approved', 'declined'].includes(status)) {
     throw new AccessRequestError('unknown review status');

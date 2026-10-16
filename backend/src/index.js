@@ -10,6 +10,8 @@ import { driversRouter } from './routes/drivers.js';
 import { operatorRouter } from './routes/operator.js';
 import { authRouter } from './routes/auth.js';
 import { signupRouter } from './routes/signup.js';
+import { staffSetupRouter } from './routes/staffSetup.js';
+import { sweepExpiredSetupCodes } from './commands/staffAccounts.js';
 import { attachSocketServer } from './realtime/socketServer.js';
 import { startOracleMonitor } from './realtime/oracleMonitor.js';
 import { ensureBucket } from './storage/objectStore.js';
@@ -19,12 +21,17 @@ import { ensureBootstrapOperator } from './commands/operators.js';
 import { securityHeaders } from './middleware/securityHeaders.js';
 import { requestLog } from './middleware/requestLog.js';
 import { apiNotFound, errorHandler } from './middleware/errorHandler.js';
-import { disconnect as disconnectDb } from './db/prisma.js';
+import { prisma, disconnect as disconnectDb } from './db/prisma.js';
+import { SEED_OPERATORS, SEED_DRIVERS } from './db/seedFixtures.js';
+import { liveSeedCredentials } from './db/seedSafety.js';
 import { startBusSubscriber } from './events/bus.js';
 import { startEmailSensor, stopEmailSensor } from './notify/emailSensor.js';
 import { sweepSmsQueue } from './notify/smsQueue.js';
 import { sweepExpiredCallChallenges } from './commands/callAuth.js';
 import { warnIfSingleInstance, closeRedis } from './redis/client.js';
+import { parsePhone } from './domain/phone.js';
+import { isWellFormedCode } from './domain/otp.js';
+import { maskPhone } from './domain/redact.js';
 
 const app = express();
 
@@ -57,6 +64,7 @@ app.use('/api', webhookRouter);
 app.use(express.json({ limit: '32kb' })); // order payloads must stay small
 app.use('/api', authRouter);
 app.use('/api', signupRouter);
+app.use('/api', staffSetupRouter);
 app.use('/api', ordersRouter);
 app.use('/api', driversRouter);
 app.use('/api', operatorRouter);
@@ -92,21 +100,32 @@ const housekeeping = setInterval(() => {
   sweepExpiredCallChallenges().catch((err) =>
     console.error('call challenge sweep failed:', err.message)
   );
+  sweepExpiredSetupCodes().catch((err) => console.error('setup code sweep failed:', err.message));
 }, 60 * 60 * 1000);
 housekeeping.unref();
 
 async function boot() {
-  // Refuse to be quietly insecure: with the log transport there is no SMS, so anyone who can
-  // read the logs can log in as any customer. Fine in dev, fatal in production.
   // The `log` transport prints login codes to the server log, so anyone with log access could
-  // sign in as any customer. Fine in dev, fatal in production. `oracle`, `twilio` and `auto`
+  // sign in as any customer. Fine in dev, fatal in production. `oracle`, `clicksend` and `auto`
   // all deliver over a real channel.
-  if (config.env === 'production' && !['oracle', 'twilio', 'auto'].includes(config.otp.transport)) {
+  if (config.env === 'production' && !['oracle', 'clicksend', 'auto'].includes(config.otp.transport)) {
     console.error(
-      'FATAL: OTP_TRANSPORT must be oracle | twilio | auto in production — ' +
+      'FATAL: OTP_TRANSPORT must be oracle | clicksend | auto in production — ' +
         `"${config.otp.transport}" prints login codes to the server log.`
     );
     process.exit(1);
+  }
+
+  // A half-set review login is silently disabled by reviewCodeFor(), which would surface as a
+  // Play rejection days later. Say so now, while someone is watching the deploy.
+  const review = config.otp.review;
+  if (review.phone || review.code) {
+    const reviewOk = parsePhone(review.phone).valid && isWellFormedCode(review.code);
+    if (!reviewOk) {
+      console.error('FATAL: REVIEW_PHONE must be a valid number and REVIEW_CODE exactly 6 digits.');
+      process.exit(1);
+    }
+    console.warn(`[OTP] Play review login is ENABLED for ${maskPhone(parsePhone(review.phone).e164)}`);
   }
 
   // Create the first named operator if the roster is empty, so a fresh deploy is reachable.
@@ -115,6 +134,31 @@ async function boot() {
   } catch (err) {
     console.error('FATAL: operator bootstrap failed:', err.message);
     process.exit(1);
+  }
+
+  // The dev seed's passwords and PINs are in the repository, so they are public. If one still
+  // logs in here — a dev database promoted to the VPS, the seed run by mistake, or a bootstrap
+  // password copied from CREDENTIALS.md — anyone can read every customer's details. Refuse to
+  // serve until it is changed or deactivated.
+  if (config.env === 'production') {
+    const [operators, drivers] = await Promise.all([
+      prisma.operator.findMany({
+        where: { username: { in: SEED_OPERATORS.map((o) => o.username) } },
+        select: { username: true, password_hash: true, active: true },
+      }),
+      prisma.driver.findMany({
+        where: { msisdn: { in: SEED_DRIVERS.map((d) => d.msisdn) } },
+        select: { msisdn: true, pin_hash: true, active: true },
+      }),
+    ]);
+    const live = liveSeedCredentials(operators, drivers);
+    if (live.length) {
+      console.error(
+        `FATAL: public seed credentials still log in: ${live.join(', ')}. ` +
+          'Change or deactivate them before running in production.'
+      );
+      process.exit(1);
+    }
   }
 
   try {

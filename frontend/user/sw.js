@@ -1,15 +1,15 @@
 // Service Worker: caches the app shell on first load so repeat visits render from local
 // storage with near-zero mobile data (SRS 3.1). Bump CACHE to ship new assets.
-const CACHE = 'gurikaabe-user-v18';
+const CACHE = 'gurikaabe-user-v25';
 const SHELL = [
   '/',
   '/index.html',
   '/app.js',
   '/manifest.json',
-  '/icon.svg',
+  '/favicon-32.png', '/icon-192.png', '/icon-512.png',
   '/shared/styles.css',
   '/shared/config.js', '/shared/ids.js', '/shared/syncPolicy.js', '/shared/queue.js', '/shared/phone.js',
-  '/shared/theme.js',
+  '/shared/theme.js', '/shared/i18n.js',
 ];
 
 self.addEventListener('install', (event) => {

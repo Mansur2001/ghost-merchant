@@ -36,12 +36,14 @@ reset_stack() {
     [ "$(curl -sk -o /dev/null -w '%{http_code}' --max-time 2 https://localhost/api/health)" = "200" ] && break
     sleep 1
   done
-  docker compose exec -T backend npm run seed >/dev/null 2>&1
+  # The suites create accounts the seed didn't, so the seed (rightly) asks before wiping them.
+  # This is a throwaway test stack; confirming here is the point of the reset.
+  docker compose exec -T -e SEED_CONFIRM=wipe-local-data backend npm run seed >/dev/null 2>&1
 }
 
 # The suites read the passcode back out of the request response, so they need the dev-log
 # transport regardless of what .env is set to for real device testing. Exported here rather
-# than assumed, so `OTP_TRANSPORT=twilio` in .env doesn't silently break suite 01.
+# than assumed, so `OTP_TRANSPORT=clicksend` in .env doesn't silently break suite 01.
 export OTP_TRANSPORT=log
 
 export OPERATOR_USERNAME=${OPERATOR_USERNAME:-hodan}

@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#000000" />
   <link rel="manifest" href="/manifest.json" />
-  <link rel="icon" href="/icon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
   <link rel="stylesheet" href="/shared/styles.css" />
   <script src="/shared/theme.js"></script>
   <title>GuriKaabe</title>
@@ -16,8 +17,9 @@
       <span class="dot" id="liveDot" title="realtime connection"></span>
       <h1>GuriKaabe</h1>
       <span class="sync-state hidden" id="syncState"></span>
-      <button class="linkbtn" id="navHome" type="button" style="margin-left:auto;">Home</button>
-      <button class="linkbtn" id="faqBtn" type="button">FAQ</button>
+      <button class="linkbtn" id="navHome" type="button" style="margin-left:auto;" data-i18n="nav.home">Home</button>
+      <button class="linkbtn" id="faqBtn" type="button" data-i18n="nav.faq">FAQ</button>
+      <button class="linkbtn" id="langToggle" type="button">SO</button>
       <button class="linkbtn" id="themeToggle" type="button" title="Toggle theme">☀️</button>
     </header>
     <main>
@@ -25,41 +27,37 @@
            auto-hidden when we resume an existing order. -->
       <section id="landingView" class="card landing">
         <div class="hero">
-          <h2>Order anything from the market — pay from your own phone.</h2>
-          <p class="muted">
-            GuriKaabe is a sovereign, local-first delivery service. You pay a driver
-            directly with EVC&nbsp;Plus / eDahab — no bank account, no app store account, no
-            foreign servers. Just your phone number and a landmark.
-          </p>
+          <h2 data-i18n="hero.title">Order from the market. Pay from your phone.</h2>
+          <p class="muted" data-i18n="hero.sub">Pay the merchant with EVC Plus or eDahab. We never hold your money. All you need is a phone number and a nearby landmark.</p>
         </div>
 
         <div class="roles">
           <button class="role" id="asCustomer" type="button">
             <span class="role-icon">🛒</span>
-            <span class="role-title">I'm a customer</span>
-            <span class="role-sub muted">Place an order &amp; track it live</span>
+            <span class="role-title" data-i18n="role.customer">I'm a customer</span>
+            <span class="role-sub muted" data-i18n="role.customer.sub">Order and track it live</span>
           </button>
           <a class="role" href="/driver/">
             <span class="role-icon">🏍️</span>
-            <span class="role-title">I'm a driver</span>
-            <span class="role-sub muted">Sign in with your PIN, pick up jobs</span>
+            <span class="role-title" data-i18n="role.driver">I'm a driver</span>
+            <span class="role-sub muted" data-i18n="role.driver.sub">See the deliveries assigned to you</span>
           </a>
           <a class="role" href="/operator/">
             <span class="role-icon">🛡️</span>
-            <span class="role-title">I'm an operator</span>
-            <span class="role-sub muted">Coordinate orders &amp; payments</span>
+            <span class="role-title" data-i18n="role.operator">I'm an operator</span>
+            <span class="role-sub muted" data-i18n="role.operator.sub">Coordinate orders and payments</span>
           </a>
         </div>
 
         <p class="muted" style="margin-top:14px;">
-          Want to drive or help run deliveries?
-          <button class="linkbtn" id="joinBtn" type="button">Ask to join the team →</button>
+          <span data-i18n="join.prompt">Want to drive or work with us?</span>
+          <button class="linkbtn" id="joinBtn" type="button" data-i18n="join.link">Ask to join →</button>
         </p>
 
         <ul class="how muted">
-          <li><strong>1.</strong> Tell us what you need and your landmark.</li>
-          <li><strong>2.</strong> Tap to pay — your dialer opens with the code pre-filled.</li>
-          <li><strong>3.</strong> Watch your order go from paid → dispatched → delivered.</li>
+          <li><strong>1.</strong> <span data-i18n="how.1">Tell us what you need and your nearest landmark.</span></li>
+          <li><strong>2.</strong> <span data-i18n="how.2">Tap Pay — your phone's dialer opens with the code filled in.</span></li>
+          <li><strong>3.</strong> <span data-i18n="how.3">Follow your order live until it arrives.</span></li>
         </ul>
       </section>
 
@@ -68,59 +66,48 @@
            nothing. An operator reads it, calls the number, and decides. Anyone who could
            create their own operator account could read every customer's address and chat. -->
       <section id="joinView" class="card hidden">
-        <button class="secondary" id="joinHome" type="button" style="max-width:110px;margin:0 0 12px;">← Home</button>
-        <h2 style="margin:0 0 6px;">Join the GuriKaabe team</h2>
-        <p class="muted" style="margin:0 0 16px;">
-          Tell us who you are and we'll call you back. Accounts are created by hand after we've
-          spoken — drivers carry real money and goods, and operators can see every customer's
-          details, so we don't hand those out from a form.
-        </p>
+        <button class="secondary" id="joinHome" type="button" style="max-width:130px;margin:0 0 12px;" data-i18n="nav.back">← Back</button>
+        <h2 style="margin:0 0 6px;" data-i18n="join.title">Join the GuriKaabe team</h2>
+        <p class="muted" style="margin:0 0 16px;" data-i18n="join.intro">Send a request and we'll call you. Accounts are only created after we talk.</p>
 
-        <label for="joinRole">What would you like to do?</label>
+        <label for="joinRole" data-i18n="join.role">What would you like to do?</label>
         <select id="joinRole">
-          <option value="driver">Drive and deliver orders</option>
-          <option value="operator">Coordinate orders and payments</option>
+          <option value="driver" data-i18n="join.role.driver">Deliver orders</option>
+          <option value="operator" data-i18n="join.role.operator">Coordinate orders and payments</option>
         </select>
 
-        <label for="joinName">Your name</label>
+        <label for="joinName" data-i18n="join.name">Your name</label>
         <input id="joinName" type="text" autocomplete="name" placeholder="Amina Yusuf" />
 
-        <label for="joinPhone">Your phone number</label>
+        <label for="joinPhone" data-i18n="join.phone">Your phone number</label>
         <input id="joinPhone" type="tel" inputmode="tel" autocomplete="tel" placeholder="61 234 5678" />
-        <div class="phone-hint muted" id="joinPhoneHint">We'll call you on this number</div>
+        <div class="phone-hint muted" id="joinPhoneHint" data-i18n="join.phoneHint">We'll call you on this number</div>
 
-        <label for="joinMessage">Anything we should know? (optional)</label>
-        <textarea id="joinMessage" placeholder="Which area you cover, whether you have a motorbike, when you're free…"></textarea>
+        <label for="joinMessage" data-i18n="join.msg">Anything we should know? (optional)</label>
+        <textarea id="joinMessage" data-i18n-ph="join.msg.ph" placeholder="Your area, whether you have a motorbike, when you're free…"></textarea>
 
-        <label>Photo of your ID — both sides</label>
-        <p class="muted" style="margin:0 0 8px;font-size:13px;">
-          Drivers carry other people's money and goods, so we check who you are before handing
-          over an account. Any government ID is fine. Your photos are shown only to the person
-          reviewing your request and are <strong>deleted as soon as they decide</strong> — we
-          don't keep them.
-        </p>
-        <label for="joinIdFront" class="muted" style="font-size:13px;">Front</label>
+        <label data-i18n="join.id">Photo of your ID — both sides</label>
+        <p class="muted" style="margin:0 0 8px;font-size:13px;" data-i18n-html="join.id.note">Any government ID. Only the reviewer sees it, and it's <strong>deleted once they decide</strong>.</p>
+        <label for="joinIdFront" class="muted" style="font-size:13px;" data-i18n="join.front">Front</label>
         <input id="joinIdFront" type="file" accept="image/*" capture="environment" />
-        <label for="joinIdBack" class="muted" style="font-size:13px;margin-top:8px;">Back</label>
+        <label for="joinIdBack" class="muted" style="font-size:13px;margin-top:8px;" data-i18n="join.back">Back</label>
         <input id="joinIdBack" type="file" accept="image/*" capture="environment" />
         <div class="muted" id="joinIdHint" style="font-size:13px;margin-top:6px;"></div>
 
-        <button id="joinSubmit" type="button">Send my request</button>
+        <button id="joinSubmit" type="button" data-i18n="join.submit">Send request</button>
         <div class="muted" id="joinStatus" style="margin-top:10px;"></div>
 
         <hr style="margin:20px 0;border:none;border-top:1px solid var(--border,#333);" />
-        <h3 style="margin:0 0 6px;">Or reach out directly</h3>
-        <p class="muted" style="margin:0 0 10px;">
-          Prefer to talk to a person? Contact the owner:
-        </p>
+        <h3 style="margin:0 0 6px;" data-i18n="join.direct">Or contact us directly</h3>
+        <p class="muted" style="margin:0 0 10px;" data-i18n="join.direct.sub">Contact the owner:</p>
         <div id="ownerContact" class="muted"></div>
       </section>
 
       <!-- Step 1: prove you hold the phone number. It is the identity every order,
            chat thread and photo is authorized against, so it has to be verified once. -->
       <section id="authView" class="card hidden">
-        <button class="secondary" id="authHome" type="button" style="max-width:110px;margin:0 0 12px;">← Home</button>
-        <label for="phone">Your phone number (this is your identity)</label>
+        <button class="secondary" id="authHome" type="button" style="max-width:130px;margin:0 0 12px;" data-i18n="nav.back">← Back</button>
+        <label for="phone" data-i18n="auth.phone">Your phone number</label>
         <input id="phone" type="tel" inputmode="tel" placeholder="61 234 5678" autocomplete="tel" />
         <div class="phone-hint muted" id="phoneHint">Enter your mobile number</div>
         <!-- Missed-call verification is the primary path where a call-capable device is
@@ -128,88 +115,87 @@
              is why it costs nothing, cannot be throttled by a telecom, and leaves no code
              for anyone pretending to be support to ask for. -->
         <div id="callStep" class="hidden">
-          <button id="callVerifyBtn" type="button">Verify by calling — it's free</button>
+          <button id="callVerifyBtn" type="button" data-i18n="auth.call">Verify with a free call</button>
           <div id="callInstructions" class="hidden">
-            <p class="muted">Call the number below from <strong>this phone</strong>, then hang up
-              as soon as it rings. We never answer, so you are never charged.</p>
-            <a id="callLink" class="paylink" href="#">Tap to call</a>
-            <p class="muted" id="callWaiting">Waiting for your call…</p>
-            <button class="secondary" id="callCancelBtn" type="button">Use a text code instead</button>
+            <p class="muted" data-i18n-html="auth.call.how">Call this number from <strong>this phone</strong> and hang up when it rings. We never answer, so it’s free.</p>
+            <a id="callLink" class="paylink" href="#"></a>
+            <p class="muted" id="callWaiting" data-i18n="auth.call.waiting">Waiting for your call…</p>
+            <button class="secondary" id="callCancelBtn" type="button" data-i18n="auth.call.cancel">Text me a code instead</button>
           </div>
         </div>
 
-        <button id="sendCodeBtn" type="button">Send me a code by text</button>
+        <button id="sendCodeBtn" type="button" data-i18n="auth.send">Text me a code</button>
 
         <div id="codeStep" class="hidden">
-          <label for="codeInput">Enter the 6-digit code we sent you</label>
+          <label for="codeInput" data-i18n="auth.code">Enter the 6-digit code</label>
           <input id="codeInput" type="text" inputmode="numeric" autocomplete="one-time-code"
                  maxlength="6" placeholder="123456" />
-          <button id="verifyBtn" type="button">Verify &amp; continue</button>
-          <button class="secondary" id="resendBtn" type="button">Send a new code</button>
+          <button id="verifyBtn" type="button" data-i18n="auth.verify">Verify</button>
+          <button class="secondary" id="resendBtn" type="button" data-i18n="auth.resend">Send a new code</button>
         </div>
         <div id="otpStatus" class="muted"></div>
       </section>
 
       <!-- Step 2: describe the need (chat-first coordination) -->
       <section id="startView" class="card hidden">
-        <button class="secondary" id="homeBtn" type="button" style="max-width:110px;margin:0 0 12px;">← Home</button>
+        <button class="secondary" id="homeBtn" type="button" style="max-width:130px;margin:0 0 12px;" data-i18n="nav.back">← Back</button>
         <div class="row" style="align-items:center;">
-          <div class="muted">Ordering as <strong id="signedInAs"></strong></div>
-          <button class="linkbtn" id="signOutBtn" type="button" style="margin-left:auto;">Sign out</button>
+          <div class="muted"><span data-i18n="start.as">Signed in as</span> <strong id="signedInAs"></strong></div>
+          <button class="linkbtn" id="signOutBtn" type="button" style="margin-left:auto;" data-i18n="start.signout">Sign out</button>
         </div>
-        <button class="secondary" id="resumeBtn" type="button">Resume a previous order</button>
+        <button class="secondary" id="resumeBtn" type="button" data-i18n="start.resume">My orders</button>
 
-        <label for="request">What do you need? Describe it in your own words.</label>
-        <textarea id="request" placeholder="e.g. 2kg rice, cooking oil, and 6 eggs from the market near me"></textarea>
+        <label for="request" data-i18n="start.request">What do you need?</label>
+        <textarea id="request" data-i18n-ph="start.request.ph" placeholder="e.g. 2kg rice, cooking oil, 6 eggs"></textarea>
 
-        <label for="amount">Agreed total (USD)</label>
+        <label for="amount" data-i18n="start.amount">Agreed total (USD)</label>
         <input id="amount" type="number" step="0.01" min="0" placeholder="5.50" />
 
-        <div id="locStatus" class="muted">Location not set.</div>
-        <button class="secondary" id="locBtn" type="button">Set my delivery location</button>
+        <div id="locStatus" class="muted" data-i18n="loc.none">Location not set.</div>
+        <button class="secondary" id="locBtn" type="button" data-i18n="loc.btn">Use my location</button>
 
-        <label for="landmark">Nearest landmark (required — drivers navigate by this)</label>
-        <input id="landmark" type="text" placeholder="Green house next to the yellow pharmacy" />
+        <label for="landmark" data-i18n="start.landmark">Nearest landmark (required)</label>
+        <input id="landmark" type="text" data-i18n-ph="start.landmark.ph" placeholder="Green house next to the yellow pharmacy" />
 
-        <label for="refPhoto">Reference photo (optional — helps the driver find the item)</label>
+        <label for="refPhoto" data-i18n="start.photo">Photo of the item (optional)</label>
         <input id="refPhoto" type="file" accept="image/*" capture="environment" />
 
-        <button id="submitBtn" type="button">Create order &amp; get payment code</button>
+        <button id="submitBtn" type="button" data-i18n="start.submit">Place order</button>
       </section>
 
       <!-- Step 2: pay + track -->
       <section id="orderView" class="card hidden">
         <div class="row" style="align-items:center;">
           <div>
-            <div class="muted">Order #<span id="orderId"></span></div>
-            <div>Total: $<span id="orderTotal"></span></div>
+            <div class="muted"><span data-i18n="order.num">Order #</span><span id="orderId"></span></div>
+            <div><span data-i18n="order.total">Total: $</span><span id="orderTotal"></span></div>
           </div>
           <div style="text-align:right;">
-            <span class="badge pending" id="statusBadge">PENDING_PAYMENT</span>
+            <span class="badge pending" id="statusBadge"></span>
           </div>
         </div>
 
-        <a id="payLink" href="#"><button id="payBtn" type="button">Pay now (EVC&nbsp;Plus)</button></a>
-        <p class="muted" id="payNote">Tapping opens your dialer with the USSD code pre-filled. Approve the transfer on your phone — this page updates automatically when payment is confirmed.</p>
+        <a id="payLink" href="#"><button id="payBtn" type="button" data-i18n="pay.btn">Pay now (EVC Plus)</button></a>
+        <p class="muted" id="payNote"></p>
 
-        <h3 style="margin:18px 0 8px;">Progress</h3>
+        <h3 style="margin:18px 0 8px;" data-i18n="order.progress">Progress</h3>
         <ul class="timeline" id="timeline"></ul>
 
-        <h3 style="margin:18px 0 8px;">Photos</h3>
-        <div class="photos" id="photos"><span class="muted">No photos yet.</span></div>
+        <h3 style="margin:18px 0 8px;" data-i18n="order.photos">Photos</h3>
+        <div class="photos" id="photos"></div>
 
-        <h3 style="margin:18px 0 8px;">Chat</h3>
+        <h3 style="margin:18px 0 8px;" data-i18n="order.chat">Chat</h3>
         <div class="thread" id="thread"></div>
         <div class="row" style="margin-top:10px;">
-          <input id="chatInput" type="text" placeholder="Message the driver / operator…" />
-          <button id="chatSend" type="button" style="max-width:96px;margin-top:0;">Send</button>
+          <input id="chatInput" type="text" data-i18n-ph="chat.ph" placeholder="Message the driver or operator…" />
+          <button id="chatSend" type="button" style="max-width:96px;margin-top:0;" data-i18n="chat.send">Send</button>
         </div>
       </section>
       <!-- Resume: list of the customer's orders looked up by phone -->
       <section id="resumeView" class="card hidden">
         <div class="row" style="align-items:center;">
-          <h3 style="margin:0;">Your orders</h3>
-          <button class="secondary" id="resumeBack" type="button" style="max-width:90px;margin:0;">← Back</button>
+          <h3 style="margin:0;" data-i18n="resume.title">Your orders</h3>
+          <button class="secondary" id="resumeBack" type="button" style="max-width:110px;margin:0;" data-i18n="nav.back">← Back</button>
         </div>
         <div id="resumeList" class="scroll-list"></div>
       </section>
@@ -217,25 +203,21 @@
       <!-- FAQ: how the service works, in plain language. -->
       <section id="faqView" class="card hidden">
         <div class="row" style="align-items:center;">
-          <h3 style="margin:0;">FAQ</h3>
-          <button class="secondary" id="faqBack" type="button" style="max-width:90px;margin:0;">← Back</button>
+          <h3 style="margin:0;" data-i18n="faq.title">FAQ</h3>
+          <button class="secondary" id="faqBack" type="button" style="max-width:110px;margin:0;" data-i18n="nav.back">← Back</button>
         </div>
-        <details><summary>Why am I calling instead of getting a code?</summary>
-          <p class="muted">Because it is faster and it costs you nothing. Your call proves you're
-          holding the phone you're signing up with — that's all a code was ever doing. Hang up as
-          soon as it rings; we never answer, so you are never charged.
-          <strong>We will never call you and ask for a code or a PIN.</strong></p></details>
-
-        <details open><summary>What is GuriKaabe?</summary>
-          <p class="muted">A local-first way to order goods from the market and have a driver bring them to you. You pay the driver directly from your own phone — no bank account or foreign app needed.</p></details>
-        <details><summary>How do I pay?</summary>
-          <p class="muted">After you create an order, tap <strong>Pay now</strong>. Your phone's dialer opens with the EVC&nbsp;Plus / eDahab code pre-filled. Approve the transfer and this page updates automatically once payment is confirmed.</p></details>
-        <details><summary>Is my phone number safe?</summary>
-          <p class="muted">Your number is your identity here — it isn't shared with advertisers or foreign servers. Everything runs on self-hosted infrastructure.</p></details>
-        <details><summary>Why do you need a landmark?</summary>
-          <p class="muted">Street addresses are unreliable, so drivers navigate by a nearby landmark (e.g. "green house next to the yellow pharmacy"). A reference photo helps too.</p></details>
-        <details><summary>How do I track my order?</summary>
-          <p class="muted">The progress timeline and chat update live as the driver accepts, shops, and delivers. You'll also see a delivery-proof photo when it arrives.</p></details>
+        <details><summary data-i18n="faq.call.q"></summary>
+          <p class="muted" data-i18n-html="faq.call.a"></p></details>
+        <details open><summary data-i18n="faq.what.q"></summary>
+          <p class="muted" data-i18n-html="faq.what.a"></p></details>
+        <details><summary data-i18n="faq.pay.q"></summary>
+          <p class="muted" data-i18n-html="faq.pay.a"></p></details>
+        <details><summary data-i18n="faq.privacy.q"></summary>
+          <p class="muted" data-i18n-html="faq.privacy.a"></p></details>
+        <details><summary data-i18n="faq.landmark.q"></summary>
+          <p class="muted" data-i18n-html="faq.landmark.a"></p></details>
+        <details><summary data-i18n="faq.track.q"></summary>
+          <p class="muted" data-i18n-html="faq.track.a"></p></details>
       </section>
     </main>
   </div>
@@ -245,6 +227,7 @@
   <script src="/shared/syncPolicy.js"></script>
   <script src="/shared/queue.js"></script>
   <script src="/shared/phone.js"></script>
+  <script src="/shared/i18n.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

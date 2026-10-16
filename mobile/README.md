@@ -82,17 +82,21 @@ All three roles are in the one app — the landing page is the role picker.
 | Role | How to sign in | Seeded credentials |
 |---|---|---|
 | Customer | phone + SMS code | any number; in dev the code is shown on screen |
-| Driver | msisdn + PIN | `+252619876543` / `1234` (Amina), `+252651112223` / `5678` (Bashir) |
-| Operator | username + password | `hodan` / `seeded-operator-pw-1` |
+| Driver | phone + PIN | `619876543` / `1234` (Amina), `651112223` / `5678` (Bashir) |
+| Operator | username + password | `admin` / `change-me-please-1` (admin), `hodan` / `seeded-operator-pw-1` |
 
-**US numbers work for login and everything else**, so you can test on your own handset:
-enter it with the country code (`+1 206 555 1234`). A `+1` number **cannot pay by USSD** —
+New drivers and operators are added by an admin in the dashboard. They get a setup code by
+text and choose their own PIN or password under **Set up account**.
+
+**US numbers work for login and everything else**, so you can test on your own handset: tap
+the **🇺🇸 +1** switch in front of the phone field, then type the number any way you like. A `+1` number **cannot pay by USSD** —
 EVC Plus is a Somali telecom rail with no NANP equivalent — so the app shows an explanation
 instead of a dead pay button, and the operator's "Mark as paid" is the path. That's the
 honest behaviour, not a limitation to work around.
 
-A bare 10-digit number is rejected on purpose: without the `+1`, a Somali customer typing one
-digit too many (`6123456789`) would silently become a valid US number.
+With the switch on 🇸🇴 +252, a 10-digit number is refused with a hint to tap +1. It isn't
+guessed, because a Somali customer typing one digit too many (`6123456789`) would otherwise
+become a valid US number.
 
 ### A full end-to-end pass
 1. **Customer:** landing → *I'm a customer* → enter your number → code appears on screen →
@@ -156,12 +160,13 @@ duplicate.
 
 ### 3. Before you submit
 - [ ] Backend deployed on a real domain with a valid certificate (see the root `README.md`)
-- [ ] `OTP_TRANSPORT=oracle` and the Oracle SMS path **validated on real hardware** — the
-      backend refuses to boot in production otherwise, because the dev transport prints
-      login codes into the server log
+- [ ] `OTP_TRANSPORT=clicksend` with a real code received on a handset
+      (`../docs/LIVE_SMS_SETUP.md`). The backend refuses to boot in production on the dev
+      transport, which prints login codes into the server log.
+- [ ] `REVIEW_PHONE` / `REVIEW_CODE` set for the Play reviewer (`../docs/PLAY_RELEASE.md` §3)
 - [ ] `NODE_ENV=production`, `CORS_ORIGINS` includes your domain **and** `https://localhost`
       (the app's own WebView origin)
-- [ ] Dev `:8080` listener removed from the Caddyfile
+- [ ] Deployed with `docker-compose.prod.yml` (no dev `:8080` listener)
 - [ ] Privacy policy published at a public URL (see `../docs/PRIVACY.md`)
 - [ ] Data Safety form filled in (see `../docs/PLAY_LISTING.md`)
 
@@ -173,7 +178,7 @@ duplicate.
 |---|---|
 | `build-www.mjs` | assembles `www/` from `frontend/`, injects `GM_API_BASE` |
 | `configure-android.mjs` | generates the network-security config + WebView scheme from that URL |
-| `make-icons.sh` | rasterizes `resources/*.svg` into launcher icons + the Play listing icon |
+| `make-icons.sh` | resizes the icon masters in `resources/` (cut from the brand sheet by `../scripts/brandsheet-icons.py`) into launcher icons |
 | `env.sh` | sets `ANDROID_HOME`, picks a Gradle-compatible JDK |
 | `android/` | the native project — **committed**, because it carries hand-edited config |
 | `www/` | generated; git-ignored |

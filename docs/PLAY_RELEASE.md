@@ -24,39 +24,53 @@ testers → run the 14 days → apply for production → submit. Budget a month,
 
 - Register a Play Console account — one-off $25.
 - Complete **identity verification**. Required for everyone; start it immediately.
-- Publish the privacy policy at a public URL. Content is drafted in
-  [`PRIVACY.md`](PRIVACY.md); it must be reachable at a stable link before submission.
+- Publish the privacy policy at a public URL. Fill in the placeholders in
+  [`PRIVACY.md`](PRIVACY.md), then run `node scripts/build-privacy.mjs`. It writes
+  `frontend/user/privacy.html`, which is served at `https://<your domain>/privacy.html`. The
+  script refuses to build while placeholders remain.
 
 ## 2. Get the backend production-ready
 
 The app is a thin shell over the PWAs — a reviewer opening it is hitting your live server. If
 the backend is down or unreachable during review, the app is rejected as broken.
 
-Follow *Deploying to a VPS* in the root [`README.md`](../README.md), then confirm:
+Follow *Deploying to a VPS* in the root [`README.md`](../README.md). It runs the stack with
+`docker-compose.prod.yml`, which uses `Caddyfile.prod`: your domain, a real certificate and
+HSTS, with no dev listener on port 8080 and no published database port. Then confirm:
 
-- Real domain with a valid certificate, `NODE_ENV=production`.
-- `CORS_ORIGINS` includes your domain **and** `https://localhost` — the WebView's own origin.
-- The dev `:8080` cleartext listener is removed from the `Caddyfile` and `docker-compose.yml`.
-- Database backups are running, off the box.
+- `DOMAIN` is set, `NODE_ENV=production`, and the certificate is valid.
+- `CORS_ORIGINS` includes your domain **and** `https://localhost`, the WebView's own origin.
+- The backend booted. It refuses to start while any of the dev seed's public passwords still
+  works, so never copy a dev database to the server.
+- Database backups are running, and stored off the server.
 
 ## 3. Make sure a reviewer can actually sign in
 
-**This is the top rejection risk for this app.** The only way into GuriKaabe is a phone number
-plus a login code. A reviewer who never receives one cannot get past the first screen.
+**This is the top rejection risk for this app.** The only way in is a phone number plus a
+login code. A reviewer who never receives one can't get past the first screen.
 
-The reviewer will be using a **US number**, which routes through Twilio rather than the Oracle
-phone (`backend/src/notify/smsSender.js`). So before submitting:
+Reviewers don't receive texts at a number you control, so give them a **review login**: one
+fixed number whose code is fixed, with no SMS sent.
 
-- Configure Twilio and verify the toll-free number in the console. Toll-free carries A2P
-  traffic without 10DLC brand registration, but it must be verified to deliver at volume, and
-  **it reaches US and Canadian numbers only**.
-- Set `OTP_TRANSPORT=auto` so `+252` keeps using the Oracle and `+1` uses Twilio. (Plain
-  `oracle` also satisfies the production boot check, but then a US reviewer gets nothing.)
-- **Send yourself a real code on a real US handset.** Not the simulator, not the log transport.
-- Validate the Oracle SMS path on Somali hardware for your actual customers — see
-  [`LIVE_SMS_SETUP.md`](LIVE_SMS_SETUP.md) and `oracle/Instructions.md`.
-- Fill in the reviewer notes under **App access** in the Console, including a test number and
-  how the reviewer gets its code. Template is in [`PLAY_LISTING.md`](PLAY_LISTING.md) §7.
+```bash
+# .env on the server
+REVIEW_PHONE=+1XXXXXXXXXX   # a number nobody else will register: it's a real customer account
+REVIEW_CODE=XXXXXXXX        # exactly 6 digits, not 123456
+```
+The backend refuses to boot if only one of the two is set, or if the code isn't 6 digits. The
+review login still goes through every normal limit: resend cooldown, attempt cap, rate limits,
+single use. It can only ever reach that one account's own orders.
+
+Before submitting:
+
+- Set up ClickSend for real customers ([`LIVE_SMS_SETUP.md`](LIVE_SMS_SETUP.md)), with
+  `OTP_TRANSPORT=clicksend` and a **verified toll-free** sender for US numbers.
+- **Send yourself a real code on a real handset**, from the deployed server. Not the log
+  transport.
+- Sign in with the review number yourself, using the switch on 🇺🇸 +1 and the review code.
+- Fill in the reviewer notes under **App access** in the Console: the review number, its
+  code, and that the switch must be on +1. The template is in
+  [`PLAY_LISTING.md`](PLAY_LISTING.md) §7.
 
 ## 4. Build and sign the release
 

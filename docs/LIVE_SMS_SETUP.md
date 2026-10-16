@@ -1,129 +1,93 @@
-# Turning on real SMS login codes
+# Real SMS: login codes and staff setup codes
 
-Right now a login code is printed to the server log (`OTP_TRANSPORT` falls back to `log` in
-development). To sign in on your own US handset you need a real message, which means a
-provider. **You have to create the account and paste in the credentials yourself** — I can't
-sign up on your behalf, and you shouldn't want me handling a token that can send messages
-billed to you.
+Every text GuriKaabe sends goes through **ClickSend**:
+- customer login codes, for `+252` and `+1` numbers alike;
+- the one-time setup codes new drivers and operators receive.
 
-Fifteen minutes, most of it waiting for a verification text.
+ClickSend is pay-as-you-go, with no monthly fee. **You create the account and paste in the
+credentials yourself.** A key that can send messages billed to you should never pass through
+anyone else.
 
 ---
 
-## Why a provider at all, when the whole point is no vendors
+## Why a provider, when the rule is "no vendors"
 
-CLAUDE.md says to reject dependencies that add a monthly cost or a vendor relationship, and
-that still holds **for the Somali market**: `+252` numbers keep going through the Oracle
-phone, which is a SIM you own and costs whatever the telecom charges for an SMS.
+CLAUDE.md says to reject dependencies that add a monthly cost or a vendor relationship.
+ClickSend is the deliberate, bounded exception:
 
-The exception is narrow and deliberate:
+- **It's outside the money path.** It carries a login code, never a payment, so invariant 6 is
+  untouched.
+- **The alternative was hardware in another country.** Sending from the Oracle phone's SIM
+  meant every login depended on a handset staying charged and online. It also depended on a
+  subscriber SIM not being rate-limited for sending near-identical texts. That path still
+  exists (`OTP_TRANSPORT=oracle`), but nothing selects it automatically.
+- **No commitment.** Credit is prepaid, and nothing renews.
 
-| Number | Channel | Why |
-|---|---|---|
-| `+252…` | Oracle phone | The real market. No vendor, no per-message platform fee. |
-| everything else | Twilio | Your US test handset, and a Play reviewer who has to receive a code to get past the first screen. |
-
-A Somali SIM sending internationally is slow, expensive, and often silently dropped — which
-the person on the other end experiences as "the app is broken". And if Twilio is unconfigured
-or its account lapses, **Somali logins are unaffected**. The business does not depend on it.
-
-That routing is `OTP_TRANSPORT=auto`, which is already set in your `.env`.
-
-### How the Somali half works without any provider
-
-This is the part that sounds impossible, so it's worth being concrete. There is no Golis or
-Hormuud integration, and there is no plan to get one — a commercial A2P agreement needs a
-registered local company, a Somali bank account, and per-message pricing that only makes
-sense at volume you don't have yet.
-
-Instead the login code goes out from **your own SIM**, on the Oracle phone, as an ordinary
-text. To the telecom it is a person sending a message.
-
-```
-customer taps "send me a code"
-  → backend writes the code (hashed) and queues the message
-  → Oracle phone asks "anything to send?"   POST /api/oracle/sms/pending
-  → termux-sms-send  →  the customer's handset
-  → phone reports back                      POST /api/oracle/sms/sent   → the plaintext row is deleted
-```
-
-**The phone asks; the backend never pushes.** That isn't a style choice — a phone can't accept
-inbound connections. On mobile data it's behind carrier-grade NAT, on WiFi behind a router, so
-there is no address to send to without a VPN or tunnel. Polling works from any network with
-nothing configured, and the phone is already polling for incoming receipts anyway.
-
-Signed with `ORACLE_WEBHOOK_SECRET`, the same key as the inbound webhook — an unsigned request
-gets a 401, and so does an operator's token. Nobody reads codes in flight.
-
-**Where this stops working.** A subscriber SIM sending hundreds of near-identical texts a day
-looks like spam, and telecoms rate-limit or block it. At soft-launch volume — a few logins a
-day — it looks like normal use and is fine. If GuriKaabe gets busy enough for that to break,
-that is the point at which a commercial agreement becomes worth its cost, and the only thing
-that changes is one transport module.
-
-`GET /api/operator/sms-queue` shows the backlog. If `pending` is climbing, the phone has
-stopped polling, and customers are experiencing that as "the app won't let me in".
+The Oracle phone keeps its real job: reading payment receipts.
 
 ---
 
 ## Setup
 
-### 1. Create a Twilio account
-<https://www.twilio.com/try-twilio> — free trial, no card required to start. Verify your own
-mobile number when it asks; on a trial account **Twilio will only send to numbers you have
-verified**, so this step is not optional.
+### 1. Create a ClickSend account
+Sign up at <https://dashboard.clicksend.com> and add a little credit. A few dollars covers
+hundreds of codes.
 
-### 2. Get a phone number
-Console → **Phone Numbers → Manage → Buy a number**. Pick any US number with SMS enabled. The
-trial credit covers it.
+### 2. Get a sender for US numbers: a TOLL-FREE number
+US carriers filter texts from unregistered senders. Texts from a personal number or ClickSend's
+shared pool may arrive late, or not at all.
+
+**Buy a toll-free number in ClickSend and complete toll-free verification.** Until that's done,
+your own number works for testing, but texts are slow. `+252` delivery doesn't depend on this.
 
 ### 3. Copy three values into `.env`
-From the Console dashboard:
-
 ```bash
-TWILIO_ACCOUNT_SID=AC...        # "Account SID" on the dashboard
-TWILIO_AUTH_TOKEN=...           # "Auth Token" — click to reveal
-TWILIO_FROM=+1XXXXXXXXXX        # the number you just bought, E.164
+CLICKSEND_USERNAME=you@example.com   # the username you log in with
+CLICKSEND_API_KEY=...                # Dashboard → Developers → API Credentials
+CLICKSEND_FROM=+18XXXXXXXXX          # your toll-free number (blank = shared sender)
 ```
-
-`TWILIO_AUTH_TOKEN` can send messages billed to your account. It belongs in `.env` (git-ignored)
-and nowhere else — not in a screenshot, not in a commit, not in a demo video.
+`CLICKSEND_API_KEY` can send messages billed to you. It belongs in `.env` (git-ignored) and
+nowhere else: not in a screenshot, a commit, or a demo video.
 
 ### 4. Prove it works before touching the app
 ```bash
-node scripts/sms-preflight.mjs                      # credentials only — sends nothing
-node scripts/sms-preflight.mjs --send +12066876538  # a real text to your handset
+node scripts/sms-preflight.mjs                      # credentials + balance; sends nothing
+node scripts/sms-preflight.mjs --send +12066876538  # one real text to your handset
 ```
+When a code doesn't arrive, the cause could be bad credentials, no credit, a sender that
+carriers filter, a malformed number, or the app never reaching ClickSend at all. The preflight
+tells these apart and explains ClickSend's status codes.
 
-"No code arrived" has five plausible causes — bad credentials, an unverified trial
-destination, a from-number that can't send SMS, a malformed destination, or the app never
-reaching the transport. Debugging that through the sign-in screen gives you one guess per
-round trip. The preflight separates them, and translates Twilio's error codes.
-
-### 5. Switch the transport on and restart
+### 5. Choose the transport and restart
 ```bash
 # .env
-OTP_TRANSPORT=twilio
+OTP_TRANSPORT=clicksend      # production: every number, no fallback
+# OTP_TRANSPORT=auto         # dev: same, but shows the code on screen when keys are missing
 ```
 ```bash
-docker compose up -d --build backend   # --build: the image COPYs src/
+docker compose up -d --no-deps --force-recreate backend   # reloads .env
 ```
 
-**A transport you name explicitly never falls back to the dev log.** With `auto`, an
-unconfigured Twilio quietly becomes `log` and the code comes back in the HTTP response — so
-you would believe you were testing real delivery while testing nothing. Naming `twilio` means
-you meant it: it sends, or it 502s and the backend log names the missing variable.
+A transport named explicitly never falls back to showing the code on screen. With
+`clicksend`, either the text is sent, or the request fails and the backend log says why.
 
-Running the verification suites does not require changing this back. Four of them read the
-passcode out of the response, so `run-all.sh` forces `OTP_TRANSPORT=log` for its own stack
-through a Compose override.
+---
 
-### 5. Sign in with your real number
-Open the app, choose **I'm a customer**, and enter your number **with the country code**:
-`+1 206 687 6538`. A bare 10-digit number is rejected on purpose — see the note at the bottom.
+## Development safety: `DEV_SMS_ALLOWLIST`
 
-The code arrives by SMS. It is no longer shown on screen: the on-screen code only ever appears
-with the `log` transport in development.
+Outside production, real texts go **only** to the numbers on `DEV_SMS_ALLOWLIST`
+(comma-separated). Every other number gets the code on screen instead. Production ignores the
+allowlist.
+
+This matters because the seed data's customer and driver numbers are valid Somali numbers that
+may belong to real people. With live keys, a dev login as "612345678" would text a stranger.
+
+```bash
+DEV_SMS_ALLOWLIST=+12066876538
+```
+
+The verification suites force `OTP_TRANSPORT=log` for their own stack
+(`scripts/verify/run-all.sh`), so running them never spends credit.
 
 ---
 
@@ -131,35 +95,45 @@ with the `log` transport in development.
 
 | What you see | What it means |
 |---|---|
-| `twilio send failed: ... (code 21608)` | The destination number isn't verified on your trial account. Console → Phone Numbers → Verified Caller IDs. This is the most common first-run failure. |
-| `twilio send failed: ... (code 21211)` | Twilio rejected the `To` number — check it's full E.164 (`+1206…`). |
-| `twilio send failed: ... (code 21606)` | Your `TWILIO_FROM` can't send SMS, or isn't a number you own. |
-| `transport "twilio" is not configured` | One of the three values is missing. In development this falls back to the log rather than blocking sign-in — check the backend logs for the code. |
-| `HTTP 401` from Twilio | Wrong Account SID or Auth Token. |
+| `clicksend send failed: UNAUTHORIZED` | Wrong username / API key pair. |
+| `clicksend send failed: INSUFFICIENT_CREDIT` | Top up the account. |
+| `clicksend send failed: INVALID_RECIPIENT` | The number isn't valid: check the country code. |
+| `clicksend send failed: COUNTRY_NOT_ENABLED` | Enable the destination country in ClickSend's settings. |
+| `clicksend send failed: INVALID_SENDER_ID` | `CLICKSEND_FROM` isn't a number you own or have verified. |
+| Accepted, but nothing arrives on a US phone | An unregistered sender is being filtered. Use a verified toll-free number. |
+| `transport "clicksend" is not configured` | The keys are missing. In dev with `auto`, the code shows on screen instead. |
+| `not on DEV_SMS_ALLOWLIST` in the dev log | Working as intended: dev won't text that number. |
 
-The backend logs the provider's own error text and code rather than a generic failure,
-because the API has already told us exactly what's wrong.
+ClickSend answers HTTP 200 for a whole batch even when the one message inside it was refused.
+The backend checks each message's own status, so a refused message is reported as a failure,
+never as sent.
 
 ---
 
-## Before you ship this
+## Before you ship
 
-- [ ] `OTP_TRANSPORT=auto` (or `oracle` for a Somalia-only deployment)
-- [ ] `NODE_ENV=production` — the backend **refuses to boot** on the `log` transport, so a
-      production box cannot silently print login codes into its logs
-- [ ] The Oracle SMS path validated on a real Somali SIM — the send loop is built and tested
-      against the live stack (`scripts/verify/09-sms-delivery.sh`), but it has never run on a
-      Somali network. Still the P4 blocker; Twilio does not solve it, it only covers `+1`.
-- [ ] Twilio account upgraded off trial if you want to reach *unverified* numbers
-- [ ] Cost sanity check: SMS is a few US cents each. A login costs one message; a customer
-      logging in monthly is negligible, but an SMS-bomb against your endpoint would not be.
-      The per-phone and per-IP rate limits plus the 60-second resend cooldown are what stand
-      between you and that bill — don't loosen them.
+- [ ] `OTP_TRANSPORT=clicksend` and `NODE_ENV=production`. The backend refuses to boot on the
+      `log` transport in production.
+- [ ] Toll-free number bought **and verified**, and set as `CLICKSEND_FROM`.
+- [ ] A real code received from the deployed server on a US handset **and** on a Somali handset.
+- [ ] Credit topped up, with a low-balance alert set in ClickSend.
+- [ ] Rate limits left as they are. The per-phone and per-IP limits plus the 60-second resend
+      cooldown are what stand between an SMS-bomb and your bill.
+- [ ] `VERIFY_CALL_NUMBER` left **blank** unless the Oracle phone is running. Missed-call
+      sign-in needs that phone to see the call, so without it customers get a button that
+      never completes.
 
-## A note on the country code
+## Phone numbers: the country switch
 
-`+1 206 687 6538` works. A bare `2066876538` is rejected, deliberately: without the `+1`, a
-Somali customer typing one digit too many (`6123456789`) would become a valid US number and
-create an account under an identity that isn't theirs, whose payments could never match. The
-inconvenience is one plus sign; the alternative is a class of bug that only shows up in the
-market this is actually for.
+Every phone field has a **🇸🇴 +252 / 🇺🇸 +1** switch. The switch decides the country, and
+within that country people type the number any way they like:
+- Somalia: `61 234 5678`, `0612345678`, `252612345678`
+- US: `206 687 6538`, `(206) 687-6538`, `1 206 687 6538`
+
+A number typed with `+` carries its own country code and flips the switch to match.
+
+The server never guesses. A number without a country code is Somali, and the app always sends
+the full international number. This matters because the guess is where the damage would be:
+a Somali number with one digit too many (`6123456789`) is also a valid US number. Read as US,
+it would create an account under an identity that isn't theirs, whose payments could never
+match.

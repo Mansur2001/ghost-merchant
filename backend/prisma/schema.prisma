@@ -44,6 +44,8 @@ model Driver {
   pin_hash   String
   active     Boolean  @default(true)
   created_at DateTime @default(now()) @db.Timestamptz(6)
+  /// Null until an invited driver chooses their own PIN.
+  pin_set_at DateTime? @db.Timestamptz(6)
   orders     Order[]
 
   @@map("drivers")
@@ -61,6 +63,10 @@ model Operator {
   last_login_at        DateTime? @db.Timestamptz(6)
   created_at           DateTime  @default(now()) @db.Timestamptz(6)
   created_by           String?
+  /// Admins manage staff accounts; ordinary operators dispatch.
+  is_admin             Boolean   @default(false)
+  /// Where a setup code is texted. Contact data only — operators sign in by username.
+  phone                String?
 
   @@map("operators")
 }
@@ -276,6 +282,8 @@ model AccessRequest {
   reviewed_by  String?
   review_note  String?
   created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  account_created_at DateTime? @db.Timestamptz(6)
+  account_ref        String?
 
   @@index([created_at], map: "idx_access_requests_created")
   @@map("access_requests")
@@ -314,4 +322,23 @@ enum order_status {
   IN_TRANSIT
   DELIVERED
   FAILED_REFUND
+}
+
+/// One-time setup code for a staff account an admin created. The person proves they hold the
+/// phone by entering it, then chooses their own PIN/password — the admin never knows it.
+/// Hashed at rest, 24h TTL, 5 attempts, deleted on use; one live code per account.
+model StaffInvite {
+  id         BigInt   @id @default(autoincrement())
+  role       String   // 'driver' | 'operator'  (CHECK constraint in migration SQL)
+  account_id BigInt
+  phone      String
+  code_hash  String
+  expires_at DateTime @db.Timestamptz(6)
+  attempts   Int      @default(0)
+  created_by String?
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([role, account_id], map: "idx_staff_invites_account")
+  @@index([role, phone], map: "idx_staff_invites_phone")
+  @@map("staff_invites")
 }

@@ -3,19 +3,17 @@
 // business rather than a broken one.
 import { Router } from 'express';
 import { prisma, withTransaction } from '../db/prisma.js';
-import {
-  signToken,
-  requireRole,
-  hashSecret,
-} from '../middleware/auth.js';
+import { signToken, requireRole } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import {
-  createOperator,
   verifyOperatorLogin,
   changeOwnPassword,
   setOperatorActive,
+  setOperatorAdmin,
   OperatorError,
 } from '../commands/operators.js';
+import { createStaffAccount, resendSetupCode, StaffError } from '../commands/staffAccounts.js';
+import { config } from '../config.js';
 import { listOperators, getOperatorById } from '../queries/operators.js';
 import { normalizeUsername } from '../domain/operator.js';
 import { actorLabel } from '../domain/redact.js';
@@ -27,7 +25,6 @@ import {
 } from '../queries/orders.js';
 import { getDriversWithStats, getDriverById } from '../queries/drivers.js';
 import { STATUS } from '../domain/stateMachine.js';
-import { parsePhone } from '../domain/phone.js';
 import { oracleStatus } from '../realtime/oracleMonitor.js';
 import { wakeOutbox, outboxHealth } from '../events/outbox.js';
 import { smsQueueHealth } from '../notify/smsQueue.js';
@@ -90,6 +87,46 @@ operatorRouter.post(
 
 const operatorOnly = requireRole('operator');
 
+// Staff management is ADMIN-only: creating accounts, disabling them, reading applicants' IDs.
+// Checked against the database on every request rather than trusted from the token, so
+// removing someone's admin rights takes effect immediately, not when their session expires.
+// (403 is fine here: unlike an order, there's no hidden object whose existence it would leak.)
+const adminOnly = [
+  operatorOnly,
+  async (req, res, next) => {
+    try {
+      const op = await prisma.operator.findUnique({
+        where: { id: BigInt(req.auth.id) },
+        select: { is_admin: true, active: true },
+      });
+      if (!op?.active || !op.is_admin) return res.status(403).json({ error: 'admins only' });
+      next();
+    } catch (err) {
+      next(err);
+    }
+  },
+];
+
+// What a create/resend answers. The code itself appears ONLY in development with the log
+// transport (no SMS was sent, so the screen is the only way to see it) — never in production.
+function staffResult(r) {
+  const body = {
+    role: r.role,
+    account: r.account,
+    smsSent: Boolean(r.transport),
+    error: r.smsError || undefined,
+  };
+  if (r.transport === 'log' && config.env !== 'production') body.devCode = r.code;
+  return body;
+}
+
+function staffError(err, res, next) {
+  if (err instanceof StaffError || err instanceof OperatorError) {
+    return res.status(err.status).json({ error: err.message });
+  }
+  return next(err);
+}
+
 // Who is signed in — lets the dashboard show the name and nag about a bootstrap password.
 operatorRouter.get('/operator/me', operatorOnly, async (req, res, next) => {
   try {
@@ -102,7 +139,7 @@ operatorRouter.get('/operator/me', operatorOnly, async (req, res, next) => {
 });
 
 // ── Operator account management ──
-operatorRouter.get('/operator/operators', operatorOnly, async (req, res, next) => {
+operatorRouter.get('/operator/operators', adminOnly, async (req, res, next) => {
   try {
     res.json({ operators: await listOperators() });
   } catch (err) {
@@ -110,31 +147,52 @@ operatorRouter.get('/operator/operators', operatorOnly, async (req, res, next) =
   }
 });
 
-// POST /api/operator/operators { username, displayName, password }
-operatorRouter.post('/operator/operators', operatorOnly, async (req, res, next) => {
+// POST /api/operator/operators { username, displayName, phone }
+// Creates the account with NO usable password and texts a setup code to `phone`; the person
+// chooses their own password with it. Nobody types someone else's password anywhere.
+operatorRouter.post('/operator/operators', adminOnly, async (req, res, next) => {
   try {
-    const { username, displayName, password } = req.body || {};
-    const operator = await createOperator({
-      username,
-      displayName,
-      password,
+    const { username, displayName, phone } = req.body || {};
+    const r = await createStaffAccount({
+      role: 'operator', name: displayName || username, phone, username,
       createdBy: actorLabel(req.auth),
     });
-    res.status(201).json({ operator });
+    res.status(201).json(staffResult(r));
   } catch (err) {
-    if (err instanceof OperatorError) return res.status(err.status).json({ error: err.message });
-    next(err);
+    staffError(err, res, next);
   }
 });
 
 // POST /api/operator/operators/:id/active { active: bool } — deactivate/reactivate.
-operatorRouter.post('/operator/operators/:id/active', operatorOnly, async (req, res, next) => {
+operatorRouter.post('/operator/operators/:id/active', adminOnly, async (req, res, next) => {
   try {
     const operator = await setOperatorActive(req.params.id, req.body?.active !== false, req.auth.id);
     res.json({ operator });
   } catch (err) {
-    if (err instanceof OperatorError) return res.status(err.status).json({ error: err.message });
-    next(err);
+    staffError(err, res, next);
+  }
+});
+
+// POST /api/operator/operators/:id/admin { admin: bool }
+operatorRouter.post('/operator/operators/:id/admin', adminOnly, async (req, res, next) => {
+  try {
+    const operator = await setOperatorAdmin(req.params.id, req.body?.admin === true);
+    res.json({ operator });
+  } catch (err) {
+    staffError(err, res, next);
+  }
+});
+
+// POST /api/operator/staff/:role/:id/setup-code — text a fresh setup code. Also how a
+// forgotten PIN/password is reset: the old one keeps working until the new one is chosen.
+operatorRouter.post('/operator/staff/:role/:id/setup-code', adminOnly, async (req, res, next) => {
+  try {
+    const r = await resendSetupCode({
+      role: req.params.role, accountId: req.params.id, createdBy: actorLabel(req.auth),
+    });
+    res.json(staffResult(r));
+  } catch (err) {
+    staffError(err, res, next);
   }
 });
 
@@ -245,7 +303,7 @@ operatorRouter.post('/operator/refunds/:id/waive', operatorOnly, async (req, res
 // ── Access requests: people asking to be given an account ──
 
 // GET /api/operator/access-requests
-operatorRouter.get('/operator/access-requests', operatorOnly, async (req, res, next) => {
+operatorRouter.get('/operator/access-requests', adminOnly, async (req, res, next) => {
   try {
     const requests = await listAccessRequests({ includeClosed: req.query.all === '1' });
     res.json({ requests });
@@ -258,7 +316,7 @@ operatorRouter.get('/operator/access-requests', operatorOnly, async (req, res, n
 //
 // Operator-only, streamed through the backend so object storage is never browser-reachable,
 // and no-store so it doesn't sit in a disk cache on the dispatch machine.
-operatorRouter.get('/operator/access-requests/:id/id-document/:side', operatorOnly, async (req, res, next) => {
+operatorRouter.get('/operator/access-requests/:id/id-document/:side', adminOnly, async (req, res, next) => {
   try {
     const request = await prisma.accessRequest.findUnique({ where: { id: BigInt(req.params.id) } });
     const key = req.params.side === 'back' ? request?.id_back_key : request?.id_front_key;
@@ -275,10 +333,10 @@ operatorRouter.get('/operator/access-requests/:id/id-document/:side', operatorOn
 });
 
 // POST /api/operator/access-requests/:id/review { status, note }
-// Records the decision only. Approving does NOT create an account — the operator creates it
-// explicitly with a password they choose, because minting a credential should be a deliberate
-// act, not a side effect of clicking a button in a list.
-operatorRouter.post('/operator/access-requests/:id/review', operatorOnly, async (req, res, next) => {
+// Records the decision only. Approving does NOT create an account — that is the separate
+// POST .../account below, because minting a credential should be a deliberate act, not a
+// side effect of clicking a button in a list.
+operatorRouter.post('/operator/access-requests/:id/review', adminOnly, async (req, res, next) => {
   try {
     const request = await reviewAccessRequest({
       requestId: req.params.id,
@@ -292,6 +350,22 @@ operatorRouter.post('/operator/access-requests/:id/review', operatorOnly, async 
       return res.status(err.status).json({ error: err.message });
     }
     next(err);
+  }
+});
+
+// POST /api/operator/access-requests/:id/account { username? }
+// Create the account an APPROVED request asked for, using the name/phone/role on the request,
+// and text them a setup code. `username` is required for an operator.
+operatorRouter.post('/operator/access-requests/:id/account', adminOnly, async (req, res, next) => {
+  try {
+    const r = await createStaffAccount({
+      requestId: req.params.id,
+      username: req.body?.username,
+      createdBy: actorLabel(req.auth),
+    });
+    res.status(201).json(staffResult(r));
+  } catch (err) {
+    staffError(err, res, next);
   }
 });
 
@@ -413,23 +487,33 @@ operatorRouter.post('/operator/orders/:id/message', operatorOnly, async (req, re
   res.json({ message });
 });
 
-// POST /api/operator/drivers  { name, msisdn, pin } — admin creates a driver account.
-operatorRouter.post('/operator/drivers', operatorOnly, async (req, res) => {
+// POST /api/operator/drivers  { name, msisdn } — admin adds a driver directly (no request).
+// Same invite flow: the driver gets a setup code and chooses their own PIN. Never an upsert —
+// typing an existing driver's number must not replace their PIN.
+operatorRouter.post('/operator/drivers', adminOnly, async (req, res, next) => {
   try {
-    const { name, msisdn, pin } = req.body || {};
-    if (!name || !msisdn || !pin) {
-      return res.status(400).json({ error: 'name, msisdn, pin required' });
-    }
-    const phone = parsePhone(msisdn);
-    if (!phone.valid) return res.status(400).json({ error: `driver number: ${phone.reason}` });
-    const driver = await prisma.driver.upsert({
-      where: { msisdn: phone.e164 },
-      update: { name, pin_hash: hashSecret(String(pin)) },
-      create: { name, msisdn: phone.e164, pin_hash: hashSecret(String(pin)) },
-      select: { id: true, name: true, msisdn: true },
+    const { name, msisdn } = req.body || {};
+    const r = await createStaffAccount({
+      role: 'driver', name, phone: msisdn, createdBy: actorLabel(req.auth),
     });
-    res.status(201).json({ driver });
+    res.status(201).json(staffResult(r));
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    staffError(err, res, next);
+  }
+});
+
+// POST /api/operator/drivers/:id/active { active: bool } — take a driver off (or back on).
+// Deactivated, never deleted: their deliveries reference them.
+operatorRouter.post('/operator/drivers/:id/active', adminOnly, async (req, res, next) => {
+  try {
+    const driver = await prisma.driver.update({
+      where: { id: BigInt(req.params.id) },
+      data: { active: req.body?.active !== false },
+      select: { id: true, name: true, active: true },
+    });
+    res.json({ driver });
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'driver not found' });
+    next(err);
   }
 });

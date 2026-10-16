@@ -7,6 +7,7 @@ import {
   cooldownRemainingMs,
   OTP_LENGTH,
   RESEND_COOLDOWN_MS,
+  reviewCodeFor,
 } from '../src/domain/otp.js';
 import {
   signToken,
@@ -127,5 +128,22 @@ describe('session tokens', () => {
 
   test('customer sessions are long-lived by design', () => {
     expect(CUSTOMER_TOKEN_TTL_SECONDS).toBeGreaterThan(60 * 60 * 24 * 7);
+  });
+});
+
+describe('reviewCodeFor (Play review login)', () => {
+  const review = { phone: '+1 206 555 0100', code: '246810' };
+
+  test('returns the fixed code only for the configured number, after normalization', () => {
+    expect(reviewCodeFor('+12065550100', review)).toBe('246810');
+    expect(reviewCodeFor('+12065550199', review)).toBeNull();
+    expect(reviewCodeFor('+252612345678', review)).toBeNull();
+  });
+
+  test('a half-set or malformed config disables it instead of opening a weak login', () => {
+    expect(reviewCodeFor('+12065550100', { phone: '+12065550100', code: '' })).toBeNull();
+    expect(reviewCodeFor('+12065550100', { phone: '+12065550100', code: '1234' })).toBeNull();
+    expect(reviewCodeFor('+12065550100', { phone: '', code: '246810' })).toBeNull();
+    expect(reviewCodeFor('+12065550100', undefined)).toBeNull();
   });
 });

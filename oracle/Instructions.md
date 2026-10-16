@@ -113,9 +113,11 @@ These cannot be proven in code:
    `ignored (not a receipt)`, paste the real text (amount and number changed) and adjust
    `PROVIDERS` — a server-side change, no phone access needed.
 
-3. **Outbound SMS for login codes.** Built, and it is the same script — `pollOutbound()` in
-   `termux-oracle.js`. This is how a Somali customer receives a login code with no telecom
-   contract: the code goes out over your own SIM at the ordinary subscriber rate.
+3. **Outbound SMS for login codes — LEGACY, off by default.** Login and staff setup codes now
+   go through ClickSend (`docs/LIVE_SMS_SETUP.md`), so this phone does **not** need to send
+   anything. The path below still exists, but the backend only uses it with
+   `OTP_TRANSPORT=oracle`: `pollOutbound()` in `termux-oracle.js` sends the code over your own
+   SIM at the ordinary subscriber rate.
 
    **The phone is never listened to.** An earlier design had the backend POST to a listener on
    this device; that cannot work. On mobile data the phone sits behind carrier-grade NAT and on
@@ -136,8 +138,7 @@ These cannot be proven in code:
    What still needs a real Somali SIM: that send latency stays under the 5-minute code TTL, and
    that the telecom doesn't rate-limit automated sends from a subscriber SIM. At soft-launch
    volume this is a handful of texts a day and looks like ordinary use; at scale it is a real
-   constraint, and the honest answer then is a commercial A2P agreement. US numbers don't touch
-   this path at all — they go through Twilio (`docs/LIVE_SMS_SETUP.md`).
+   constraint — which is why ClickSend carries login codes by default.
 
 4. **Inbound calls for verification.** Built — `pollCalls()` in the same script. A customer
    calls this phone from the number they're registering and hangs up; the caller ID is the

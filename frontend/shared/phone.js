@@ -37,7 +37,8 @@
   // Decide country + national digits. MUST match backend/src/domain/phone.js:
   // bare digits are always Somali; US requires an explicit +1 / 1 / 001. Accepting a bare
   // 10-digit number as US would let a Somali typo ("6123456789") silently become a valid
-  // US number, creating an order under an identity that isn't theirs.
+  // US number, creating an order under an identity that isn't theirs. The country SWITCH
+  // (attach() below) is how a person says "this is a US number" without typing +1.
   function split(raw) {
     var d = digits(raw);
     if (d.indexOf('00') === 0) d = d.slice(2);
@@ -118,26 +119,113 @@
     return out.trim();
   }
 
+  // Hint text in the page's language when shared/i18n.js is loaded (customer, driver);
+  // English otherwise (operator). `parse` keeps its English reasons: they are the contract
+  // the parity tests check against the backend.
+  function tr(key, fallback, vars) {
+    return global.GMI18n ? global.GMI18n.t(key, vars) : fallback;
+  }
+  function reasonText(r) {
+    if (/prefix/.test(r.reason)) return tr('phone.badPrefix', r.reason);
+    if (/Too many/.test(r.reason)) return tr('phone.tooLong', r.reason);
+    if (/US number/.test(r.reason)) return tr('phone.badUs', r.reason);
+    return r.reason;
+  }
+
+  // Parse as a number from `country` — the country switch's choice. Within that country,
+  // whatever the person typed is understood: "61 234 5678", "0612345678", "252612345678" for
+  // Somalia; "206 687 6538", "(206) 687-6538", "1 206 687 6538" for the US. A number typed
+  // WITH a "+" or "00" carries its own country code, and that always wins over the switch.
+  function parseAs(raw, country) {
+    var s = raw == null ? '' : String(raw).trim();
+    var d = digits(raw);
+    var explicit = s.charAt(0) === '+' || d.indexOf('00') === 0;
+    if (!explicit && country === 'US' && d) {
+      return parse('+1' + (d.charAt(0) === '1' ? d.slice(1) : d));
+    }
+    return parse(raw);
+  }
+
+  // The canonical number for an attached input ('' while it isn't valid). Send THIS to the
+  // server, never the raw text: "206 687 6538" only means +1 because of the switch.
+  function e164Of(input) {
+    return (input && input.dataset && input.dataset.e164) || '';
+  }
+
+  var COUNTRY_KEY = 'gm_phone_country';
+  var PLACEHOLDER = { SO: '61 234 5678', US: '(206) 555-1234' };
+  function savedCountry() {
+    try { return localStorage.getItem(COUNTRY_KEY) === 'US' ? 'US' : 'SO'; } catch (e) { return 'SO'; }
+  }
+
+  // The +252 / +1 switch, placed in front of the input. The input is wrapped so the pair
+  // behaves as one field inside existing layouts (rows, cards).
+  function buildSwitch(input, country, onPick) {
+    var wrap = document.createElement('div');
+    wrap.className = 'phone-field';
+    var sw = document.createElement('div');
+    sw.className = 'cc-switch';
+    sw.setAttribute('role', 'group');
+    sw.setAttribute('aria-label', tr('phone.country', 'Country'));
+    var buttons = {};
+    [['SO', '🇸🇴 +252'], ['US', '🇺🇸 +1']].forEach(function (c) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = c[1];
+      b.addEventListener('click', function () { onPick(c[0]); input.focus(); });
+      buttons[c[0]] = b;
+      sw.appendChild(b);
+    });
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(sw);
+    wrap.appendChild(input);
+    return function show(cc) {
+      Object.keys(buttons).forEach(function (k) {
+        buttons[k].setAttribute('aria-pressed', k === cc ? 'true' : 'false');
+      });
+    };
+  }
+
   // Wire a live-validating input. opts: { input, hint, onChange }.
   function attach(opts) {
     var input = opts.input;
     var hint = opts.hint;
+    var country = savedCountry();
+    var show = buildSwitch(input, country, function (cc) {
+      country = cc;
+      try { localStorage.setItem(COUNTRY_KEY, cc); } catch (e) { /* private mode */ }
+      // Keep what was typed, minus any country code it carried — it's re-read as the new country.
+      if (/^\s*(\+|00)/.test(input.value)) input.value = '';
+      update();
+    });
+
     function update() {
-      var r = parse(input.value);
+      var r = parseAs(input.value, country);
+      // A typed "+1..." / "+252..." names its own country: move the switch to match.
+      if (r.country && r.country !== country && /^\s*(\+|00)/.test(input.value)) country = r.country;
+      show(country);
+      input.placeholder = PLACEHOLDER[country];
+      input.dataset.e164 = r.valid ? r.e164 : '';
       if (hint) {
         if (r.valid) {
           // Say plainly when a number can't use the USSD rail, before they reach the pay step.
-          var note = r.canUssd ? '' : ' · pay via operator';
-          hint.textContent = '✓ ' + r.operator + ' · ' + format(r.national) + note;
+          var note = r.canUssd ? '' : ' · ' + tr('phone.payOperator', 'pay via operator');
+          hint.textContent = '✓ ' + r.operator + ' · ' + format(r.e164) + note;
           hint.style.color = 'var(--accent)';
         } else if (r.partial) {
-          hint.textContent = (r.operator ? r.operator + ' · ' : '') + (r.reason || '');
+          var left = (r.country === 'US' ? US_LENGTH : SO_LENGTH) - r.national.length;
+          var more = r.reason === 'typing' ? '' : tr('phone.more', left + ' more digit(s)', { n: left });
+          hint.textContent = (r.operator ? r.operator + (more ? ' · ' : '') : '') + more;
           hint.style.color = 'var(--muted)';
         } else if (r.reason === 'empty') {
-          hint.textContent = 'Enter your mobile number';
+          hint.textContent = tr('phone.enter', 'Enter your mobile number');
           hint.style.color = 'var(--muted)';
+        } else if (country === 'SO' && r.national && r.national.length === US_LENGTH) {
+          // Ten digits on the Somali setting: most likely a US number. Point at the switch.
+          hint.textContent = '✕ ' + tr('phone.tryUs', 'US number? Tap 🇺🇸 +1');
+          hint.style.color = 'var(--danger)';
         } else {
-          hint.textContent = '✕ ' + r.reason;
+          hint.textContent = '✕ ' + reasonText(r);
           hint.style.color = 'var(--danger)';
         }
       }
@@ -145,12 +233,16 @@
     }
     input.addEventListener('input', update);
     input.addEventListener('blur', function () {
-      var r = parse(input.value);
-      if (r.valid) input.value = format(r.national);
+      var r = parseAs(input.value, country);
+      // Tidy to the national format; the switch already shows the country code.
+      if (r.valid) input.value = format(r.e164).replace(/^\+(252|1)\s*/, '');
     });
     update();
     return update;
   }
 
-  global.SomPhone = { parse: parse, format: format, attach: attach, PREFIX_TO_OPERATOR: PREFIX_TO_OPERATOR };
+  global.SomPhone = {
+    parse: parse, parseAs: parseAs, format: format, attach: attach, e164Of: e164Of,
+    PREFIX_TO_OPERATOR: PREFIX_TO_OPERATOR,
+  };
 })(window);

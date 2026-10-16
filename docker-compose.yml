@@ -29,14 +29,19 @@ services:
       retries: 10
 
   minio:
-    image: minio/minio:latest
+    # MinIO AIStor, pinned to an exact release: `latest` would let a routine `up` change the
+    # storage engine under the photos without anyone deciding to. Bump deliberately.
+    image: quay.io/minio/aistor/minio:RELEASE.2026-09-19T17-05-25Z
     restart: unless-stopped
-    command: server /data --console-address ":9001"
+    # AIStor refuses to run without its license, read from a FILE (not an env var). The file is
+    # git-ignored like .env — put it at ./minio.license, or point MINIO_LICENSE_FILE elsewhere.
+    command: server /data --console-address ":9001" --license /etc/minio/minio.license
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
     volumes:
       - minio_data:/data
+      - ${MINIO_LICENSE_FILE:-./minio.license}:/etc/minio/minio.license:ro
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 5s
