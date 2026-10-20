@@ -51,10 +51,12 @@ async function login() {
   const password = $('password').value;
   if (!username || !password) return toast('Enter your username and password.');
   $('loginBtn').disabled = true;
+  // A backend that is down answers through Caddy with a non-JSON 502, which api() can't parse.
+  // Say so — a button that silently does nothing looks exactly like a wrong password.
   const res = await api('/operator/login', {
     method: 'POST',
     body: JSON.stringify({ username, password }),
-  });
+  }).catch(() => ({ error: 'Can’t reach the server right now. Try again in a minute' }));
   $('loginBtn').disabled = false;
   if (res.error) {
     // 429 carries retryAfter — say how long rather than just failing.
