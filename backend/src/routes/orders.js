@@ -90,7 +90,7 @@ ordersRouter.get('/orders/:id/messages', requireAuth, requireOrderAccess, async 
   res.json({ messages: await getMessages(req.params.id) });
 });
 
-// POST /api/orders/:id/paid { reference? } — the customer says "I've paid".
+// POST /api/orders/:id/paid { reference?, wallet? } — the customer says "I've paid".
 // Tells the operator which order to check on the merchant phone. It does NOT mark the order
 // paid: a button anyone can tap is not evidence of money. Only the operator's confirmation is.
 ordersRouter.post(
@@ -100,7 +100,11 @@ ordersRouter.post(
   rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: 'too many requests' }),
   async (req, res, next) => {
     try {
-      const order = await claimPayment({ orderId: req.params.id, reference: req.body?.reference });
+      const order = await claimPayment({
+        orderId: req.params.id,
+        reference: req.body?.reference,
+        wallet: req.body?.wallet,
+      });
       res.json({ order });
     } catch (err) {
       if (err instanceof PaymentError) return res.status(err.status).json({ error: err.message });

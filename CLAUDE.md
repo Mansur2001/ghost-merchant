@@ -85,8 +85,10 @@ customer's page flips to paid live.`
    `domain/phone.js` → canonical E.164 (`+252XXXXXXXXX`). Rule: 2-digit operator prefix +
    7 digits = 9-digit national number. `frontend/shared/phone.js` mirrors this for live input
    feedback; the backend copy is the enforced source of truth. Keep the prefix maps in sync.
-5. **USSD `#` must be `%23`.** `domain/ussd.js` builds the `tel:` URI with the trailing `#`
+5. **USSD `#` must be `%23`.** `domain/ussd.js` builds the `tel:` URIs with the trailing `#`
    pre-encoded. A bare `#` reaching the browser makes Android truncate the dial string.
+   Each wallet's template is validated at boot (`domain/wallets.js`), so a bare `#` refuses to
+   start rather than reaching a customer.
 6. **Money never flows through the platform.** No wallet, no balance, no held funds, no
    platform-initiated transfer. The backend only *records* a payment an operator confirmed.
 7. **Domain events are written in the same transaction as the state they describe.** Commands
@@ -107,9 +109,16 @@ and post them to a signed webhook; it was removed with everything it needed (web
 heartbeat monitor, receipt parsers, IMAP email sensor, reconcile queue, missed-call sign-in).
 Git history has it if it's ever wanted back.
 
-- **Customer:** pays the merchant over USSD, then taps **"I've paid"**, optionally typing the
-  transaction number from their EVC/eDahab message. Stored as `orders.payment_claimed_at` /
-  `payment_claim_ref`; a `payment.claimed` event reaches operators live. Status unchanged.
+- **Wallet picker** (`domain/wallets.js`): EVC Plus, eDahab, Zaad and Sahal, each with its
+  own merchant number and dial code (`<WALLET>_MERCHANT` / `<WALLET>_USSD`). A wallet is
+  offered only when both are set — **no built-in codes or numbers**, because a guessed code or
+  placeholder number takes a customer's money nowhere. Half-set or malformed refuses to boot.
+  The customer's own network is listed first. No wallet configured = the manual path.
+- **Customer:** taps their wallet, pays over USSD, then taps **"I've paid"**, optionally typing
+  the transaction number from their payment message. Stored as `orders.payment_claimed_at` /
+  `payment_claim_ref` / `payment_claim_wallet`; a `payment.claimed` event reaches operators
+  live, naming the wallet and its merchant number so they check the right phone. Status
+  unchanged.
 - **Operator:** claimed orders sort to the top of the dashboard with the reference pre-filled.
   They check the merchant phone, then **Confirm payment**. Confirming without a reference is
   allowed but warned against: without it, the same payment could be confirmed twice.
@@ -380,7 +389,7 @@ Guards (`db/seedSafety.js`), because the seed truncates everything and its passw
 ## Testing
 
 ```bash
-cd backend && npm install && npm test   # 325 Jest unit tests, ESM via --experimental-vm-modules
+cd backend && npm install && npm test   # 343 Jest unit tests, ESM via --experimental-vm-modules
 ./scripts/verify/run-all.sh             # live suites over real HTTP + WebSocket
 ```
 

@@ -82,6 +82,29 @@ describe('claimPayment (customer: "I\'ve paid")', () => {
   test('a garbage reference is refused', async () => {
     await expect(claimPayment({ orderId: ORDER, reference: '<b>' })).rejects.toMatchObject({ status: 400 });
   });
+
+  const wallets = [
+    { id: 'evc', name: 'EVC Plus', network: 'Hormuud', merchant: '612345678', template: '*712*{NUM}*{AMT}%23' },
+    { id: 'edahab', name: 'eDahab', network: 'Somtel', merchant: '651234567', template: '*110*{NUM}*{AMT}%23' },
+  ];
+
+  test('records which wallet the customer paid with, so the operator checks the right phone', async () => {
+    await claimPayment({ orderId: ORDER, reference: 'X1', wallet: 'edahab', wallets });
+    expect(tx.order.update.mock.calls[0][0].data.payment_claim_wallet).toBe('edahab');
+    expect(postMessage.mock.calls[0][0].body).toBe('Customer says they have paid with eDahab. Reference: X1');
+    expect(enqueue).toHaveBeenCalledWith(tx, 'payment.claimed',
+      expect.objectContaining({ wallet: 'edahab', walletName: 'eDahab' }));
+  });
+
+  test('no wallet is fine (old app builds, manual orders)', async () => {
+    await claimPayment({ orderId: ORDER, wallets });
+    expect(tx.order.update.mock.calls[0][0].data.payment_claim_wallet).toBeNull();
+  });
+
+  test('a wallet we do not offer is refused before anything is written', async () => {
+    await expect(claimPayment({ orderId: ORDER, wallet: 'zaad', wallets })).rejects.toMatchObject({ status: 400 });
+    expect(tx.order.update).not.toHaveBeenCalled();
+  });
 });
 
 describe('confirmPayment (operator saw the money)', () => {

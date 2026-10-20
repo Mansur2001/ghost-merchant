@@ -257,7 +257,7 @@ $('submitBtn').addEventListener('click', async () => {
 });
 
 // `payment` is { paymentMethod, ussdUri, paymentNote } from the server. A US test number
-// has no EVC Plus rail, so there may be no URI at all — render what we're given rather than
+// has no mobile-money rail, so there may be no wallet at all — render what we're given rather than
 // assuming a pay link exists.
 function enterOrderView(payment) {
   showView('orderView');
@@ -272,24 +272,43 @@ function enterOrderView(payment) {
   connectSocket();
 }
 
-// Show the pay button only when this order can actually be paid that way. A dead
-// `tel:*712*...#` link on a +1 number produces a dial string the network rejects — worse
-// than no button, because the customer thinks they've paid.
+// One pay button per wallet the server offers. Show none when this order can't be paid that
+// way: a dead `tel:*712*...#` link on a +1 number produces a dial string the network rejects —
+// worse than no button, because the customer thinks they've paid.
 let lastPayment = {};
+// The wallet the customer tapped, sent with "I've paid" so the operator checks the right
+// merchant phone. Kept per order because opening the dialer can reload the page.
+const walletKey = (id) => `gm_wallet_${id}`;
 function renderPayment(payment) {
   lastPayment = payment;
-  const link = $('payLink');
+  const box = $('payWallets');
   const note = $('payNote');
-  if (payment.paymentMethod === 'ussd' && payment.ussdUri) {
+  const wallets = payment.paymentMethod === 'ussd' ? (payment.wallets || []) : [];
+  box.replaceChildren(...wallets.map((w) => {
     // CRITICAL: use the server-built URI verbatim; the trailing # is already %23-encoded.
-    link.setAttribute('href', payment.ussdUri);
-    link.classList.remove('hidden');
-    note.textContent = t('pay.note');
-  } else {
-    // The server's paymentNote is English; the method alone says which message applies.
-    link.classList.add('hidden');
-    note.textContent = t('pay.manual');
-  }
+    const link = document.createElement('a');
+    link.setAttribute('href', w.ussdUri);
+    link.addEventListener('click', () => {
+      try { localStorage.setItem(walletKey(order.id), w.id); } catch { /* best effort */ }
+    });
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = t('pay.btn', { wallet: w.name });
+    link.appendChild(btn);
+    return link;
+  }));
+  box.classList.toggle('hidden', !wallets.length);
+  // The server's paymentNote is English; the method alone says which message applies.
+  note.textContent = wallets.length ? t(wallets.length > 1 ? 'pay.pick' : 'pay.note') : t('pay.manual');
+}
+
+function chosenWallet() {
+  const offered = (lastPayment.wallets || []).map((w) => w.id);
+  let id = null;
+  try { id = localStorage.getItem(walletKey(order.id)); } catch { /* none */ }
+  if (offered.includes(id)) return id;
+  // Only one way to pay: that's the one they used.
+  return offered.length === 1 ? offered[0] : null;
 }
 
 // ── Photos (MinIO-backed; bytes stream through the backend) ──
@@ -425,7 +444,7 @@ function updateBadge(status) {
   // Once paid (or failed), a live "Pay now" button invites paying twice. Runs after
   // renderPayment() and on every socket transition, so it always has the last word.
   if (status !== 'PENDING_PAYMENT') {
-    $('payLink').classList.add('hidden');
+    $('payWallets').classList.add('hidden');
     $('payNote').classList.add('hidden');
   } else {
     $('payNote').classList.remove('hidden');
@@ -454,7 +473,7 @@ $('paidBtn').addEventListener('click', async () => {
   const res = await api(`/orders/${order.id}/paid`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reference: $('payRef').value.trim() }),
+    body: JSON.stringify({ reference: $('payRef').value.trim(), wallet: chosenWallet() }),
   });
   $('paidBtn').disabled = false;
   if (res.error) return toast(GMI18n.err(res.error));

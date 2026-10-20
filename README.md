@@ -1,7 +1,7 @@
 # GuriKaabe
 
 Delivery coordination for Somalia, self-hosted end to end. Customers pay the merchant directly
-over EVC Plus / eDahab using a USSD `tel:` link, tap **"I've paid"**, and an **operator
+over EVC Plus, eDahab, Zaad or Sahal using a USSD `tel:` link, tap **"I've paid"**, and an **operator
 confirms** the payment by checking the merchant phone. No AWS, no WhatsApp, no Google Maps, no
 telecom API contract, no device reading receipts.
 
@@ -111,7 +111,7 @@ one is there because the alternative loses money or leaks customer data.
 ## Testing
 
 ```bash
-cd backend && npm test          # 325 Jest unit tests, no database required
+cd backend && npm test          # 343 Jest unit tests, no database required
 ./scripts/verify/run-all.sh     # live end-to-end suites against the running stack
 ```
 
@@ -141,7 +141,9 @@ open. Caddy needs port 80 to get its certificate.
      `CREDENTIALS.md`: the backend refuses to boot while any seeded password still works.
    - `OTP_TRANSPORT=clicksend` plus the `CLICKSEND_*` keys ([`docs/LIVE_SMS_SETUP.md`](docs/LIVE_SMS_SETUP.md))
    - `REVIEW_PHONE` / `REVIEW_CODE` for the Play reviewer ([`docs/PLAY_RELEASE.md`](docs/PLAY_RELEASE.md) §3)
-   - `MERCHANT_MSISDN`, `USSD_TEMPLATE`, `TELECOM_SENDER_IDS`, matching the live telecom
+   - `<WALLET>_MERCHANT` / `<WALLET>_USSD` for each wallet you accept (EVC Plus, eDahab, Zaad,
+     Sahal). Only wallets with both lines set are shown; see `.env.example`. Dial each code by
+     hand once with a small amount before turning it on.
 2. **Put the MinIO AIStor license on the server** as `./minio.license`. It's git-ignored,
    like `.env`, and MinIO won't start without it.
 3. **Launch with the production overrides:**

@@ -211,9 +211,15 @@ operatorRouter.post(
   }
 );
 
-// GET /api/operator/orders — all active orders.
+// GET /api/operator/orders — all active orders. A claim names its wallet; attach that
+// wallet's merchant number so the operator knows which phone to check for the money.
 operatorRouter.get('/operator/orders', operatorOnly, async (req, res) => {
-  res.json({ orders: await getActiveOrders() });
+  const wallets = config.payment.wallets;
+  const orders = (await getActiveOrders()).map((o) => {
+    const w = wallets.find((x) => x.id === o.payment_claim_wallet);
+    return { ...o, claim_wallet: w ? { name: w.name, merchant: w.merchant } : null };
+  });
+  res.json({ orders });
 });
 
 // GET /api/operator/outbox — event-relay backlog. A growing `pending` count means committed

@@ -97,6 +97,23 @@ async function boot() {
     process.exit(1);
   }
 
+  // A wallet with a bad number or dial code would send a customer's money nowhere — or to the
+  // wrong person. Refuse now rather than discover it from a customer's complaint.
+  const { wallets, errors: walletErrors, warnings: walletWarnings } = config.payment;
+  if (walletErrors.length) {
+    walletErrors.forEach((e) => console.error(`FATAL: wallet ${e}`));
+    process.exit(1);
+  }
+  walletWarnings.forEach((w) => console.warn(`[wallets] ${w}`));
+  if (process.env.MERCHANT_MSISDN || process.env.USSD_TEMPLATE) {
+    console.warn('[wallets] MERCHANT_MSISDN / USSD_TEMPLATE are no longer read — use EVC_MERCHANT / EVC_USSD.');
+  }
+  console.log(
+    wallets.length
+      ? `[wallets] offering ${wallets.map((w) => w.name).join(', ')}`
+      : '[wallets] none configured — every order uses the operator-confirmed manual path'
+  );
+
   // A half-set review login is silently disabled by reviewCodeFor(), which would surface as a
   // Play rejection days later. Say so now, while someone is watching the deploy.
   const review = config.otp.review;

@@ -121,6 +121,7 @@ CTOK=$(curl -sk -X POST -H 'Content-Type: application/json' -d "{\"phone\":\"+25
   sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 chk "customer says \"I've paid\"     " 200 "$(code -X POST -H "Authorization: Bearer $CTOK" -H 'Content-Type: application/json' -d '{"reference":"evc 7788"}' $B/orders/$ORDER/paid)"
 chk "  ...claim recorded, normalized" "EVC7788" "$(psql "SELECT payment_claim_ref FROM orders WHERE id='$ORDER';")"
+chk "  ...a wallet we don't offer   " 400 "$(code -X POST -H "Authorization: Bearer $CTOK" -H 'Content-Type: application/json' -d '{"wallet":"not-a-wallet"}' $B/orders/$ORDER/paid)"
 chk "  ...but the order is NOT paid " "PENDING_PAYMENT" "$(psql "SELECT status FROM orders WHERE id='$ORDER';")"
 chk "  ...and no payment recorded   " "0" "$(psql "SELECT count(*) FROM transactions WHERE order_id='$ORDER';")"
 DEV2=$(curl -sk -X POST -H 'Content-Type: application/json' -d '{"phone":"+252651234567"}' $B/auth/otp/request |

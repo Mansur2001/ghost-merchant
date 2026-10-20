@@ -9,6 +9,27 @@ first build served to a real paying customer.
 
 ---
 
+## [Unreleased] — wallet picker
+
+Migration `20261020120000_payment_claim_wallet` adds the nullable `orders.payment_claim_wallet`.
+Additive; back up before deploying anyway.
+
+### Added
+- **Wallet picker:** the customer chooses EVC Plus, eDahab, Zaad or Sahal, and each button
+  dials that network's code to its own merchant number (`<WALLET>_MERCHANT` / `<WALLET>_USSD`).
+  Only fully configured wallets appear; the customer's own network is first.
+- "I've paid" records which wallet was used, and the operator dashboard names it with its
+  merchant number.
+
+### Changed
+- `MERCHANT_MSISDN` / `USSD_TEMPLATE` are no longer read (a warning says so); use
+  `EVC_MERCHANT` / `EVC_USSD`. There is no default merchant number any more: with no wallet
+  configured, orders use the operator-confirmed manual path instead of dialing a placeholder.
+- The boot refuses a half-set wallet, a non-Somali merchant number, or a dial code that isn't
+  `*…{NUM}…{AMT}%23`.
+
+---
+
 ## [Unreleased] — no Oracle: payments confirmed by an operator
 
 Migration `20261016090000_manual_payment_confirmation` adds `orders.payment_claimed_at` /

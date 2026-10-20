@@ -19,6 +19,7 @@ import { STATUS } from '../domain/stateMachine.js';
 import { normalizeReference, manualReceiptId } from '../domain/paymentRef.js';
 import { EVENTS } from '../events/bus.js';
 import { enqueue, wakeOutbox } from '../events/outbox.js';
+import { config } from '../config.js';
 
 export class PaymentError extends Error {
   constructor(message, status = 400) {
@@ -33,10 +34,21 @@ function referenceOrThrow(raw) {
   return ref;
 }
 
+// Which wallet the customer says they paid with, so the operator checks the right merchant
+// phone. Only a wallet we actually offer is accepted; absent is fine (old app builds, or a
+// manual-path order).
+function walletOrThrow(raw, wallets) {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const wallet = wallets.find((w) => w.id === raw);
+  if (!wallet) throw new PaymentError('unknown wallet');
+  return wallet;
+}
+
 // Customer: "I've paid". Re-claiming just updates the reference (a typo fix is not a second
 // payment). Authorization — that this is THEIR order — is the route's job (requireOrderAccess).
-export async function claimPayment({ orderId, reference }) {
+export async function claimPayment({ orderId, reference, wallet: walletId, wallets = config.payment.wallets }) {
   const ref = referenceOrThrow(reference);
+  const wallet = walletOrThrow(walletId, wallets);
 
   const order = await withTransaction(async (tx) => {
     // RAW: FOR UPDATE, so a claim can't race the operator's confirmation into a stale state.
@@ -50,13 +62,18 @@ export async function claimPayment({ orderId, reference }) {
 
     const updated = await tx.order.update({
       where: { id: orderId },
-      data: { payment_claimed_at: new Date(), payment_claim_ref: ref || null },
+      data: {
+        payment_claimed_at: new Date(),
+        payment_claim_ref: ref || null,
+        payment_claim_wallet: wallet?.id ?? null,
+      },
     });
+    const via = wallet ? ` with ${wallet.name}` : '';
     await postMessage(
       {
         orderId,
         sender: 'system',
-        body: ref ? `Customer says they have paid. Reference: ${ref}` : 'Customer says they have paid.',
+        body: `Customer says they have paid${via}.${ref ? ` Reference: ${ref}` : ''}`,
       },
       { client: tx }
     );
@@ -64,6 +81,8 @@ export async function claimPayment({ orderId, reference }) {
     await enqueue(tx, EVENTS.PAYMENT_CLAIMED, {
       orderId,
       reference: ref || null,
+      wallet: wallet?.id ?? null,
+      walletName: wallet?.name ?? null,
       claimedAt: updated.payment_claimed_at,
     });
     return updated;

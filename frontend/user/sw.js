@@ -1,6 +1,6 @@
 // Service Worker: caches the app shell on first load so repeat visits render from local
 // storage with near-zero mobile data (SRS 3.1). Bump CACHE to ship new assets.
-const CACHE = 'gurikaabe-user-v26';
+const CACHE = 'gurikaabe-user-v27';
 const SHELL = [
   '/',
   '/index.html',

@@ -28,7 +28,7 @@
       <section id="landingView" class="card landing">
         <div class="hero">
           <h2 data-i18n="hero.title">Order from the market. Pay from your phone.</h2>
-          <p class="muted" data-i18n="hero.sub">Pay the merchant with EVC Plus or eDahab. We never hold your money. All you need is a phone number and a nearby landmark.</p>
+          <p class="muted" data-i18n="hero.sub">Pay the merchant from your mobile money. We never hold your money. All you need is a phone number and a nearby landmark.</p>
         </div>
 
         <div class="roles">
@@ -161,7 +161,9 @@
           </div>
         </div>
 
-        <a id="payLink" href="#"><button id="payBtn" type="button" data-i18n="pay.btn">Pay now (EVC Plus)</button></a>
+        <!-- One button per wallet the owner configured (EVC Plus / eDahab / Zaad / Sahal). Each
+             opens the dialer with that network's code and merchant number filled in. -->
+        <div id="payWallets" class="hidden"></div>
         <p class="muted" id="payNote"></p>
 
         <!-- No device reads the merchant's receipts: the customer says "I've paid" and an
@@ -170,7 +172,7 @@
         <div id="paidBox" class="hidden">
           <label for="payRef" data-i18n="paid.refLabel">Transaction number (optional)</label>
           <input id="payRef" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false"
-                 data-i18n-ph="paid.refPh" placeholder="From your EVC / eDahab message" />
+                 data-i18n-ph="paid.refPh" placeholder="From your payment text message" />
           <button id="paidBtn" type="button" data-i18n="paid.btn">I've paid</button>
         </div>
         <p class="muted hidden" id="paidNote"></p>

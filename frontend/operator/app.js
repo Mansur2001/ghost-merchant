@@ -310,7 +310,7 @@ async function loadRefunds() {
             <span class="muted" style="margin-left:auto;">${escapeHtml(r.order?.user_phone || '')}</span>
           </div>
           <div class="muted">${escapeHtml(r.reason || '')} · opened ${new Date(r.created_at).toLocaleDateString()}</div>
-          <input placeholder="EVC / eDahab reference of the money you sent back"
+          <input placeholder="Mobile-money reference of the money you sent back"
                  id="ref-${r.id}" style="margin-top:8px;" />
           <input placeholder="note (optional)" id="note-${r.id}" style="margin-top:6px;" />
           <div class="row" style="margin-top:8px;">
@@ -555,7 +555,8 @@ async function loadOrders() {
           <span class="badge ${badgeClass(o.status)}">${o.status}</span>
         </div>
         <div class="muted">${escapeHtml(o.landmark_text || '')} ${o.driver_name ? '· driver: ' + escapeHtml(o.driver_name) : ''}</div>
-        ${claimed ? `<div style="margin-top:6px;"><strong>💰 Customer says they paid</strong>
+        ${claimed ? `<div style="margin-top:6px;"><strong>💰 Customer says they paid${o.claim_wallet
+            ? ` with ${escapeHtml(o.claim_wallet.name)} — check ${escapeHtml(o.claim_wallet.merchant)}` : ''}</strong>
           <span class="muted">${o.payment_claim_ref ? `· ref ${escapeHtml(o.payment_claim_ref)} ` : ''}· ${timeAgo(o.payment_claimed_at)}</span></div>` : ''}
         <div class="photos" id="opPhotos-${o.id}"></div>
         ${o.status === 'PAID_UNASSIGNED' ? `
@@ -706,7 +707,8 @@ function connectSocket() {
     }
     if (m.type === 'payment_claimed') {
       // The customer says they've paid: the cue to look at the merchant phone.
-      setStatus(`💰 Customer says they paid order #${GMIds.shortId(m.orderId)}${m.reference ? ` (ref ${m.reference})` : ''} — check the merchant phone.`, 'warn');
+      const via = m.walletName ? ` with ${m.walletName}` : '';
+      setStatus(`💰 Customer says they paid order #${GMIds.shortId(m.orderId)}${via}${m.reference ? ` (ref ${m.reference})` : ''} — check the merchant phone.`, 'warn');
       toast('A customer says they have paid — check the merchant phone.');
       refreshAll();
     } else if (m.type === 'order_created') {

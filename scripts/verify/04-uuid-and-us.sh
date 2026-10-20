@@ -68,8 +68,15 @@ chk "paymentMethod is manual      " "manual" "$(echo "$US_CREATE" | python3 -c "
 chk "no dead USSD link offered    " "None" "$(echo "$US_CREATE" | python3 -c "import sys,json;print(json.load(sys.stdin)['ussdUri'])")"
 chk "  ...explains why            " "yes" "$(echo "$US_CREATE" | grep -qi 'somali numbers' && echo yes || echo no)"
 SO_CREATE=$(curl -sk -X POST -H "Authorization: Bearer $SO_TOK" -H 'Content-Type: application/json' -d '{"items":[],"totalAmount":4.00,"landmark":"Mogadishu test"}' $B/orders)
-chk "somali order still gets USSD " "ussd" "$(echo "$SO_CREATE" | python3 -c "import sys,json;print(json.load(sys.stdin)['paymentMethod'])")"
-chk "  ...with %23-encoded hash   " "yes" "$(echo "$SO_CREATE" | grep -q '%23' && echo yes || echo no)"
+# Wallets come from .env and have no defaults, so what a Somali order is offered depends on
+# whether this stack configured one. Either way it must never be a fake number.
+if [ -n "$(_env_or EVC_MERCHANT '')" ]; then
+  chk "somali order gets USSD       " "ussd" "$(echo "$SO_CREATE" | python3 -c "import sys,json;print(json.load(sys.stdin)['paymentMethod'])")"
+  chk "  ...one link per wallet     " "yes" "$(echo "$SO_CREATE" | python3 -c "import sys,json;print('yes' if json.load(sys.stdin)['wallets'] else 'no')")"
+  chk "  ...with %23-encoded hash   " "yes" "$(echo "$SO_CREATE" | grep -q '%23' && echo yes || echo no)"
+else
+  chk "no wallet -> manual, no link " "manual None" "$(echo "$SO_CREATE" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['paymentMethod'],d['ussdUri'])")"
+fi
 
 echo
 echo "── 5. US customer gets the full feature set ──"

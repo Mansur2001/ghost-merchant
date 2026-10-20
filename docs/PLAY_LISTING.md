@@ -40,7 +40,7 @@ collects it and brings it to you. You follow every step live — paid, dispatche
 delivered.
 
 PAY FROM YOUR OWN PHONE
-Payment goes directly from your phone to the merchant using EVC Plus or eDahab. Tap to pay
+Payment goes directly from your phone to the merchant using your mobile money. Tap to pay
 and your dialer opens with the code already filled in. We never hold your money and we never
 ask for card or bank details.
 
@@ -182,7 +182,7 @@ No text message is sent to this number; the code above always works for it.
 Language: the SO / EN button in the top bar switches between Somali and English.
 
 The app coordinates deliveries in Somalia. Payment is peer-to-peer over the customer's own
-mobile-money account (EVC Plus / eDahab) using the phone's dialer — the app never processes
+mobile-money account (EVC Plus, eDahab, Zaad or Sahal) using the phone's dialer — the app never processes
 or holds money. Customer, driver and operator sign-in are all reachable from the home screen.
 ```
 

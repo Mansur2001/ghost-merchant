@@ -1,5 +1,6 @@
 // Central config. All secrets come from the environment (.env in dev, real env on the VPS).
 import dotenv from 'dotenv';
+import { parseWallets } from './domain/wallets.js';
 dotenv.config();
 
 const required = (key) => {
@@ -68,10 +69,9 @@ export const config = {
     username: (process.env.BOOTSTRAP_OPERATOR_USERNAME || 'admin').trim().toLowerCase(),
   },
 
-  payment: {
-    merchantMsisdn: process.env.MERCHANT_MSISDN || '61XXXXXXX',
-    ussdTemplate: process.env.USSD_TEMPLATE || '*712*{NUM}*{AMT}%23',
-  },
+  // One merchant number + dial code per mobile-money wallet (domain/wallets.js). Problems are
+  // collected here and refused at boot (index.js), where someone is watching the deploy.
+  payment: parseWallets(process.env),
 
   // Redis is OPTIONAL. Unset = single-instance mode (in-process bus + rate limiter), which
   // is exactly how this ran before P2. Set it to run more than one backend container.
