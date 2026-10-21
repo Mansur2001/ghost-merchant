@@ -59,6 +59,10 @@
           <li><strong>2.</strong> <span data-i18n="how.2">Tap Pay — your phone's dialer opens with the code filled in.</span></li>
           <li><strong>3.</strong> <span data-i18n="how.3">Follow your order live until it arrives.</span></li>
         </ul>
+        <p class="muted" style="font-size:13px;margin-top:14px;">
+          <a href="/terms.html" data-i18n="legal.terms">Terms</a> ·
+          <a href="/privacy.html" data-i18n="legal.privacy">Privacy Policy</a>
+        </p>
       </section>
 
       <!-- Ask to be given a driver or operator account.
@@ -111,6 +115,9 @@
         <input id="phone" type="tel" inputmode="tel" placeholder="61 234 5678" autocomplete="tel" />
         <div class="phone-hint muted" id="phoneHint">Enter your mobile number</div>
         <button id="sendCodeBtn" type="button" data-i18n="auth.send">Text me a code</button>
+        <!-- Consent shown where the number is collected: US carriers (10DLC) check for exactly
+             this — what we text, rates, STOP/HELP, and links to the terms and privacy policy. -->
+        <p class="muted" style="font-size:13px;" data-i18n-html="auth.consent">We text you a one-time code each time you sign in. Message and data rates may apply. Reply STOP to opt out, HELP for help. By continuing you agree to our <a href="/terms.html">Terms</a> and <a href="/privacy.html">Privacy Policy</a>.</p>
 
         <div id="codeStep" class="hidden">
           <label for="codeInput" data-i18n="auth.code">Enter the 6-digit code</label>

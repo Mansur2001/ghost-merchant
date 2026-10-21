@@ -63,7 +63,7 @@ where necessary to prevent fraud or harm.
 
 ## Where your data lives
 
-On servers we operate ourselves at **[HOSTING PROVIDER AND COUNTRY]**, including your photos,
+On servers we operate ourselves at **Vultr, in Frankfurt, Germany**, including your photos,
 which are stored on the same servers rather than with a cloud photo service. Text messages
 pass through ClickSend, which may process them outside your country. The service does not use
 third-party analytics, advertising or tracking SDKs.

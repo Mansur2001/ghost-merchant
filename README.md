@@ -156,8 +156,9 @@ open. Caddy needs port 80 to get its certificate.
    `NODE_ENV=development`.
 4. **Sign in as `admin`** and change the password. Then add staff from the dashboard. Each
    person gets a setup code by text and chooses their own PIN or password.
-5. **Publish the privacy policy:** fill in the placeholders in `docs/PRIVACY.md`, then run
-   `node scripts/build-privacy.mjs`. It's served at `https://<domain>/privacy.html`.
+5. **Publish the privacy policy and terms:** fill in the placeholders in `docs/PRIVACY.md` and
+   `docs/TERMS.md`, then run `node scripts/build-privacy.mjs`. They're served at
+   `https://<domain>/privacy.html` and `/terms.html`, and linked from the sign-in screen.
 6. **Payments:** keep the merchant phone with whoever runs the desk. An operator confirms
    every order by checking that phone for the money, so the desk must be staffed while orders
    are coming in.

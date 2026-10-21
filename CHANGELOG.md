@@ -20,6 +20,9 @@ Additive; back up before deploying anyway.
   Only fully configured wallets appear; the customer's own network is first.
 - "I've paid" records which wallet was used, and the operator dashboard names it with its
   merchant number.
+- **Terms of Service** (`docs/TERMS.md` → `/terms.html`), built with the privacy policy by
+  `scripts/build-privacy.mjs`. The sign-in screen now shows the SMS consent line (rates,
+  STOP/HELP) and links to both pages, which a 10DLC campaign review checks for.
 
 ### Changed
 - `MERCHANT_MSISDN` / `USSD_TEMPLATE` are no longer read (a warning says so); use
