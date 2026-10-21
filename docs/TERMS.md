@@ -8,7 +8,7 @@
 > review the 10DLC campaign — keep it matching what the app actually sends. This is a starting
 > draft, not legal advice: have it read by someone qualified where you operate.
 
-These terms are an agreement between you and **[YOUR LEGAL NAME OR COMPANY]** ("we", "us"),
+These terms are an agreement between you and **OPENARMS ALLIANCE LLC** ("we", "us"),
 which runs GuriKaabe. By using the app or website you agree to them. Our
 [Privacy Policy](/privacy.html) explains what we collect and why.
 
@@ -35,7 +35,7 @@ merchant's mobile-money number.
 - Reply **STOP** to stop receiving texts, or **HELP** for help. If you reply STOP, we can't send
   you a login code, so you won't be able to sign in until you text **START** to the same number.
 - Mobile carriers are not liable for delayed or undelivered messages.
-- For help, contact **[YOUR CONTACT EMAIL]**.
+- For help, contact **gurikaabe@gmail.com**.
 
 ## Orders and payment
 
@@ -87,7 +87,7 @@ by law that can't be excluded.
 ## Closing your account
 
 You can stop using GuriKaabe at any time, and ask us to delete your account at
-**[YOUR CONTACT EMAIL]**. We may suspend or close an account that breaks these terms.
+**gurikaabe@gmail.com**. We may suspend or close an account that breaks these terms.
 
 ## Changes
 
@@ -96,10 +96,10 @@ the app. If you keep using GuriKaabe after a change, the new terms apply.
 
 ## Law
 
-These terms are governed by the laws of **[GOVERNING LAW, e.g. the State of Washington, USA]**.
+These terms are governed by the laws of **the State of Washington, USA**.
 
 ## Contact
 
-**[YOUR LEGAL NAME OR COMPANY]**
-**[POSTAL ADDRESS]**
-**[YOUR CONTACT EMAIL]**
+**OPENARMS ALLIANCE LLC**
+**245 SW 152nd St, Burien, WA 98166, USA**
+**gurikaabe@gmail.com**

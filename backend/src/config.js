@@ -112,7 +112,7 @@ export const config = {
   // to contact. Public by design — it is the owner's business contact.
   owner: {
     name: process.env.OWNER_NAME || 'GuriKaabe',
-    email: process.env.OWNER_EMAIL || 'tukale206@gmail.com',
+    email: process.env.OWNER_EMAIL || 'gurikaabe@gmail.com',
     phone: process.env.OWNER_PHONE || '+1 206 687 6538',
   },
 

@@ -1,6 +1,6 @@
 # GuriKaabe — Privacy Policy
 
-**Last updated: 15 October 2026**
+**Last updated: 20 October 2026**
 
 > **You must publish this at a public URL before submitting to Google Play** — the Play
 > Console requires a link, and the Data Safety form's answers must match what this says.
@@ -9,7 +9,7 @@
 > or Data Safety declaration is grounds for removal, so if you change what the app collects,
 > change this too.
 
-GuriKaabe is a delivery coordination service operated by **[YOUR LEGAL NAME OR COMPANY]**
+GuriKaabe is a delivery coordination service operated by **OPENARMS ALLIANCE LLC**
 ("we"). This policy explains what we collect, why, and what we do not do.
 
 ## The short version
@@ -80,7 +80,7 @@ not collect data we don't need, which is the most effective protection available
 
 - **Location and camera are optional** and asked for only at the moment they're used. You can
   decline and still order using a landmark; you can decline the camera and order without a photo.
-- **Access or deletion:** contact us at **[YOUR CONTACT EMAIL]** and we will provide a copy of
+- **Access or deletion:** contact us at **gurikaabe@gmail.com** and we will provide a copy of
   your data or delete your account. We may retain payment and delivery records where required
   for accounting, dispute resolution or legal compliance.
 - **Withdrawing consent:** stop using the app and request deletion.
@@ -88,8 +88,7 @@ not collect data we don't need, which is the most effective protection available
 ## Retention
 
 Order records, including chat and photos, are kept while your account is active and for a
-period afterwards for dispute resolution and accounting — **[STATE YOUR RETENTION PERIOD,
-e.g. 24 months]**. Login codes are deleted once used or after 5 minutes; staff setup codes once
+period afterwards for dispute resolution and accounting — **24 months**. Login codes are deleted once used or after 5 minutes; staff setup codes once
 used or after 24 hours.
 
 ## Children
@@ -103,6 +102,6 @@ in the app.
 
 ## Contact
 
-**[YOUR LEGAL NAME OR COMPANY]**
-**[POSTAL ADDRESS]**
-**[YOUR CONTACT EMAIL]**
+**OPENARMS ALLIANCE LLC**
+**245 SW 152nd St, Burien, WA 98166, USA**
+**gurikaabe@gmail.com**
