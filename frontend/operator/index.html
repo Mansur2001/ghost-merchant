@@ -43,7 +43,7 @@
            phone, and you choose your own password. Nobody else ever knows it. -->
       <section id="setupView" class="card hidden">
         <h3 style="margin:0 0 6px;">Set up your account</h3>
-        <p class="muted" style="margin:0 0 10px;">Enter the 8-digit code we texted you and choose a password.</p>
+        <p class="muted" style="margin:0 0 10px;">Enter the 8-digit code we sent you (by text or email) and choose a password.</p>
         <label for="sPhone">Your phone number</label>
         <input id="sPhone" type="tel" inputmode="tel" placeholder="61 234 5678" />
         <div class="phone-hint muted" id="sPhoneHint"></div>
@@ -111,10 +111,11 @@
 
         <div class="card admin-only hidden">
           <h3 style="margin:0 0 8px;">Add driver</h3>
-          <p class="muted" style="margin:0 0 8px;">They get a text with a setup code and choose their own PIN.</p>
+          <p class="muted" style="margin:0 0 8px;">They get a setup code and choose their own PIN. Add an email to send the code there instead of by text.</p>
           <div class="row"><input id="dName" placeholder="Name" /><input id="dMsisdn" placeholder="61 234 5678" /></div>
           <div class="phone-hint muted" id="phoneHint"></div>
-          <button id="addDriver" type="button">Create &amp; text setup code</button>
+          <input id="dEmail" type="email" placeholder="Email (optional — send the code by email)" style="margin-top:10px;" />
+          <button id="addDriver" type="button">Create &amp; send setup code</button>
         </div>
 
         <!-- Operator accounts (P0 #5). Named accounts are what makes order_events.actor
@@ -126,14 +127,15 @@
 
         <div class="card admin-only hidden">
           <h3 style="margin:0 0 8px;">Add operator</h3>
-          <p class="muted" style="margin:0 0 8px;">They get a text with a setup code and choose their own password.</p>
+          <p class="muted" style="margin:0 0 8px;">They get a setup code and choose their own password. Add an email to send the code there instead of by text.</p>
           <div class="row">
             <input id="oName" placeholder="Name" />
             <input id="oUsername" placeholder="username" autocapitalize="none" spellcheck="false" />
           </div>
           <input id="oPhone" type="tel" placeholder="Their phone, e.g. 61 234 5678" style="margin-top:10px;" />
           <div class="phone-hint muted" id="oPhoneHint"></div>
-          <button id="addOperator" type="button">Create &amp; text setup code</button>
+          <input id="oEmail" type="email" placeholder="Email (optional — send the code by email)" style="margin-top:10px;" />
+          <button id="addOperator" type="button">Create &amp; send setup code</button>
         </div>
 
         <div class="card">

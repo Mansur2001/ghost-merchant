@@ -1,6 +1,6 @@
 # GuriKaabe — Privacy Policy
 
-**Last updated: 20 October 2026**
+**Last updated: 21 October 2026**
 
 > **You must publish this at a public URL before submitting to Google Play** — the Play
 > Console requires a link, and the Data Safety form's answers must match what this says.
@@ -22,12 +22,13 @@ we do not share it with advertisers, and we never see or hold your money.
 
 | Data | Why | Kept |
 |---|---|---|
+| **Email address** (optional) | Only if you add one to receive sign-in codes by email. You confirm it with a code first, and you can remove it at any time. | Until you remove it or your account is deleted |
 | **Phone number** | It is your account. We send a one-time code to confirm you hold it, and the driver uses it to reach you at the door. | While your account exists |
 | **Delivery location** (GPS, optional) and **landmark** (required) | So a driver can find you. Addresses are unreliable in our service area; the landmark is the primary instruction and the GPS point is an aid. | With the order |
 | **Order contents and chat messages** | To fulfil the order and resolve disputes. | With the order |
 | **Photos you attach** | A reference photo helps the driver find the right item; a delivery-proof photo protects both you and the driver in a dispute. | With the order |
 | **Payment details** (amount, and the transaction number from your mobile-money message, and which wallet you used, if you or our operator enter it) | So our operator can confirm your payment arrived, and so one payment can't be counted for two orders. | With the order |
-| **Name and phone number** — *drivers and operators only* | To create your staff account. We text you a one-time setup code so you can choose your own PIN or password. | While your account exists |
+| **Name and phone number**, and an email if the admin uses one — *drivers and operators only* | To create your staff account. We send you a one-time setup code, by text or email, so you can choose your own PIN or password. | While your account exists |
 | **Photos of an ID, front and back** — *only if you apply to be a driver or operator* | Drivers carry other people's money and goods, so we confirm who they are before issuing an account. | **Both images are deleted the moment the application is decided.** Never collected from customers. |
 
 We do **not** collect: your contacts, your location in the background or when the app is
@@ -53,9 +54,10 @@ Your order is visible to:
   that aren't theirs;
 - **our operators**, who coordinate deliveries and resolve payment problems.
 
-**Text messages.** Login and setup codes are delivered by **ClickSend**, an SMS provider. It
-receives your phone number and the text of the message (which contains the code) only to
-deliver it, and nothing else about you or your orders.
+**Text messages and email.** Login and setup codes are delivered by **Twilio**, by SMS or,
+if you chose it, by email through Twilio SendGrid. It receives your phone number or email and
+the text of the message (which contains the code) only to deliver it, and nothing else about
+you or your orders.
 
 Apart from that, we share data with **no one else**. We do not sell or rent personal
 information, and we do not use it for advertising or profiling. We may disclose information if legally compelled, or
@@ -65,7 +67,7 @@ where necessary to prevent fraud or harm.
 
 On servers we operate ourselves at **Vultr, in Frankfurt, Germany**, including your photos,
 which are stored on the same servers rather than with a cloud photo service. Text messages
-pass through ClickSend, which may process them outside your country. The service does not use
+and emails pass through Twilio, which may process them outside your country. The service does not use
 third-party analytics, advertising or tracking SDKs.
 
 ## Security

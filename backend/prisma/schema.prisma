@@ -32,6 +32,8 @@ datasource db {
 model User {
   phone_number String   @id
   created_at   DateTime @default(now()) @db.Timestamptz(6)
+  /// Confirmed by the signed-in customer; only then can sign-in codes go here.
+  email        String?
   orders       Order[]
 
   @@map("users")
@@ -46,6 +48,8 @@ model Driver {
   created_at DateTime @default(now()) @db.Timestamptz(6)
   /// Null until an invited driver chooses their own PIN.
   pin_set_at DateTime? @db.Timestamptz(6)
+  /// Set when an admin sends setup codes by email instead of SMS.
+  email      String?
   orders     Order[]
 
   @@map("drivers")
@@ -67,6 +71,8 @@ model Operator {
   is_admin             Boolean   @default(false)
   /// Where a setup code is texted. Contact data only — operators sign in by username.
   phone                String?
+  /// Set when an admin sends setup codes by email instead of SMS.
+  email                String?
 
   @@map("operators")
 }
@@ -192,6 +198,20 @@ model OtpCode {
 
   @@index([expires_at], map: "idx_otp_expires")
   @@map("otp_codes")
+}
+
+/// A signed-in customer confirming an email. Never a login code (see the migration).
+model EmailChallenge {
+  phone        String   @id
+  email        String
+  code_hash    String
+  expires_at   DateTime @db.Timestamptz(6)
+  attempts     Int      @default(0)
+  last_sent_at DateTime @default(now()) @db.Timestamptz(6)
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([expires_at], map: "idx_email_challenges_expires")
+  @@map("email_challenges")
 }
 
 

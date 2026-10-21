@@ -89,9 +89,13 @@ housekeeping.unref();
 async function boot() {
   // The `log` transport prints login codes to the server log, so anyone with log access could
   // sign in as any customer. Fine in dev, fatal in production.
-  if (config.env === 'production' && !['clicksend', 'auto'].includes(config.otp.transport)) {
+  if (!['twilio', 'auto', 'log'].includes(config.otp.transport)) {
+    console.error(`FATAL: OTP_TRANSPORT must be twilio, auto or log (got "${config.otp.transport}").`);
+    process.exit(1);
+  }
+  if (config.env === 'production' && !['twilio', 'auto'].includes(config.otp.transport)) {
     console.error(
-      'FATAL: OTP_TRANSPORT must be clicksend (or auto) in production — ' +
+      'FATAL: OTP_TRANSPORT must be twilio (or auto) in production — ' +
         `"${config.otp.transport}" prints login codes to the server log.`
     );
     process.exit(1);

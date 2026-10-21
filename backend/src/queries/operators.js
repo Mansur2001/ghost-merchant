@@ -17,7 +17,7 @@ const PUBLIC_FIELDS = {
 export async function listOperators() {
   const [operators, invites] = await Promise.all([
     prisma.operator.findMany({
-      select: { ...PUBLIC_FIELDS, phone: true },
+      select: { ...PUBLIC_FIELDS, phone: true, email: true },
       orderBy: [{ active: 'desc' }, { username: 'asc' }],
     }),
     prisma.staffInvite.findMany({ where: { role: 'operator' }, select: { account_id: true, expires_at: true } }),
@@ -25,7 +25,10 @@ export async function listOperators() {
   // "Waiting for setup" = a code is out and hasn't been used. An expired one still counts:
   // the person hasn't set a password, and the admin needs to know to re-send.
   const pending = new Set(invites.map((i) => String(i.account_id)));
-  return operators.map((o) => ({ ...o, setup_pending: pending.has(String(o.id)) }));
+  // Only whether an email is on file (so "re-send" can say where it goes), not the address.
+  return operators.map(({ email, ...o }) => ({
+    ...o, has_email: Boolean(email), setup_pending: pending.has(String(o.id)),
+  }));
 }
 
 export async function getOperatorById(id) {

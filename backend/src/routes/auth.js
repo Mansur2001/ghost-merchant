@@ -7,7 +7,10 @@
 //   3. per-phone DB cooldown  - atomic, survives a restart, enforced in commands/auth.js
 //   4. per-challenge attempts - caps online guessing of the code itself
 import { Router } from 'express';
-import { requestOtp, verifyOtp, OtpCooldownError, OtpInvalidError } from '../commands/auth.js';
+import {
+  requestOtp, verifyOtp, OtpCooldownError, OtpInvalidError, AuthInputError, emailAvailable,
+  requestEmailLink, verifyEmailLink, removeEmail, getCustomerEmail,
+} from '../commands/auth.js';
 import { signToken, requireRole, CUSTOMER_TOKEN_TTL_SECONDS } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { isWellFormedCode } from '../domain/otp.js';
@@ -35,10 +38,16 @@ const verifyLimits = [
   rateLimit({ windowMs: 15 * 60 * 1000, max: 10, key: phoneKey, message: 'too many attempts' }),
 ];
 
-// POST /api/auth/otp/request { phone }
+// GET /api/auth/channels — whether the sign-in screen should offer "Email me a code".
+// Server-wide only: it says nothing about any particular number.
+authRouter.get('/auth/channels', (req, res) => {
+  res.json({ sms: true, email: emailAvailable() });
+});
+
+// POST /api/auth/otp/request { phone, channel? }  channel: 'sms' (default) | 'email'
 authRouter.post('/auth/otp/request', ...requestLimits, async (req, res) => {
   try {
-    const result = await requestOtp(req.body?.phone);
+    const result = await requestOtp(req.body?.phone, { channel: req.body?.channel || 'sms' });
     const body = {
       sent: true,
       phone: result.phone,
@@ -57,7 +66,8 @@ authRouter.post('/auth/otp/request', ...requestLimits, async (req, res) => {
       res.set('Retry-After', String(retryAfter));
       return res.status(429).json({ error: err.message, retryAfter });
     }
-    // Invalid number (from normalizeMsisdnOrThrow) or SMS delivery failure.
+    if (err instanceof AuthInputError) return res.status(400).json({ error: err.message });
+    // Invalid number (from normalizeMsisdnOrThrow) or SMS / email delivery failure.
     const status = /Invalid phone number/.test(err.message) ? 400 : 502;
     // The customer gets a generic message, but the REASON has to reach the log or a delivery
     // failure is indistinguishable from every other cause of "no code arrived" — which is the
@@ -89,6 +99,65 @@ authRouter.post('/auth/otp/verify', ...verifyLimits, async (req, res) => {
 });
 
 // GET /api/auth/me — lets a client confirm a stored token is still valid on boot.
-authRouter.get('/auth/me', requireRole('customer'), (req, res) => {
-  res.json({ phone: req.auth.phone, role: req.auth.role, exp: req.auth.exp });
+authRouter.get('/auth/me', requireRole('customer'), async (req, res, next) => {
+  try {
+    const email = await getCustomerEmail(req.auth.phone);
+    res.json({ phone: req.auth.phone, role: req.auth.role, exp: req.auth.exp, email });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Email for sign-in codes (signed-in customers only) ──
+// The session proves the phone; the code proves the email. The phone comes from the token,
+// never the body, so nobody can attach an email to someone else's number.
+const linkLimits = [
+  rateLimit({ windowMs: HOUR, max: 20, message: 'too many code requests' }),
+  rateLimit({ windowMs: HOUR, max: 5, key: (req) => req.auth.phone, message: 'too many code requests' }),
+];
+
+// POST /api/auth/email/request { email }
+authRouter.post('/auth/email/request', requireRole('customer'), ...linkLimits, async (req, res) => {
+  try {
+    const result = await requestEmailLink(req.auth.phone, req.body?.email);
+    const body = { sent: true, email: result.email, expiresInSeconds: result.expiresInSeconds };
+    if (result.transport === 'log' && config.env !== 'production') body.devCode = result.code;
+    res.json(body);
+  } catch (err) {
+    if (err instanceof OtpCooldownError) {
+      const retryAfter = Math.ceil(err.retryAfterMs / 1000);
+      res.set('Retry-After', String(retryAfter));
+      return res.status(429).json({ error: err.message, retryAfter });
+    }
+    if (err instanceof AuthInputError) return res.status(400).json({ error: err.message });
+    res.status(502).json({ error: 'could not send code' });
+  }
+});
+
+// POST /api/auth/email/verify { code } -> { email }
+authRouter.post(
+  '/auth/email/verify',
+  requireRole('customer'),
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 10, key: (req) => req.auth.phone, message: 'too many attempts' }),
+  async (req, res, next) => {
+    // 400, not 401: the session is fine — a 401 would make the app sign the customer out.
+    const code = String(req.body?.code ?? '');
+    if (!isWellFormedCode(code)) return res.status(400).json({ error: 'invalid or expired code' });
+    try {
+      res.json(await verifyEmailLink(req.auth.phone, code));
+    } catch (err) {
+      if (err instanceof OtpInvalidError) return res.status(400).json({ error: err.message });
+      next(err);
+    }
+  }
+);
+
+// DELETE /api/auth/email — stop sending codes to email; SMS only again.
+authRouter.delete('/auth/email', requireRole('customer'), async (req, res, next) => {
+  try {
+    await removeEmail(req.auth.phone);
+    res.json({ email: null });
+  } catch (err) {
+    next(err);
+  }
 });

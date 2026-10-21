@@ -112,6 +112,7 @@ function staffResult(r) {
     role: r.role,
     account: r.account,
     smsSent: Boolean(r.transport),
+    sentVia: r.sentVia,
     error: r.smsError || undefined,
   };
   if (r.transport === 'log' && config.env !== 'production') body.devCode = r.code;
@@ -145,14 +146,15 @@ operatorRouter.get('/operator/operators', adminOnly, async (req, res, next) => {
   }
 });
 
-// POST /api/operator/operators { username, displayName, phone }
-// Creates the account with NO usable password and texts a setup code to `phone`; the person
-// chooses their own password with it. Nobody types someone else's password anywhere.
+// POST /api/operator/operators { username, displayName, phone, email? }
+// Creates the account with NO usable password and texts a setup code to `phone` (or emails
+// it, if `email` is given); the person chooses their own password with it. Nobody types
+// someone else's password anywhere.
 operatorRouter.post('/operator/operators', adminOnly, async (req, res, next) => {
   try {
-    const { username, displayName, phone } = req.body || {};
+    const { username, displayName, phone, email } = req.body || {};
     const r = await createStaffAccount({
-      role: 'operator', name: displayName || username, phone, username,
+      role: 'operator', name: displayName || username, phone, username, email,
       createdBy: actorLabel(req.auth),
     });
     res.status(201).json(staffResult(r));
@@ -181,12 +183,14 @@ operatorRouter.post('/operator/operators/:id/admin', adminOnly, async (req, res,
   }
 });
 
-// POST /api/operator/staff/:role/:id/setup-code — text a fresh setup code. Also how a
-// forgotten PIN/password is reset: the old one keeps working until the new one is chosen.
+// POST /api/operator/staff/:role/:id/setup-code { email?, via? } — send a fresh setup code,
+// by email if one is given or on file, otherwise by text. Also how a forgotten PIN/password is
+// reset: the old one keeps working until the new one is chosen.
 operatorRouter.post('/operator/staff/:role/:id/setup-code', adminOnly, async (req, res, next) => {
   try {
     const r = await resendSetupCode({
       role: req.params.role, accountId: req.params.id, createdBy: actorLabel(req.auth),
+      email: req.body?.email, via: req.body?.via,
     });
     res.json(staffResult(r));
   } catch (err) {
@@ -338,7 +342,7 @@ operatorRouter.post('/operator/access-requests/:id/review', adminOnly, async (re
   }
 });
 
-// POST /api/operator/access-requests/:id/account { username? }
+// POST /api/operator/access-requests/:id/account { username?, email? }
 // Create the account an APPROVED request asked for, using the name/phone/role on the request,
 // and text them a setup code. `username` is required for an operator.
 operatorRouter.post('/operator/access-requests/:id/account', adminOnly, async (req, res, next) => {
@@ -346,6 +350,7 @@ operatorRouter.post('/operator/access-requests/:id/account', adminOnly, async (r
     const r = await createStaffAccount({
       requestId: req.params.id,
       username: req.body?.username,
+      email: req.body?.email,
       createdBy: actorLabel(req.auth),
     });
     res.status(201).json(staffResult(r));
@@ -438,14 +443,14 @@ operatorRouter.post('/operator/orders/:id/message', operatorOnly, async (req, re
   res.json({ message });
 });
 
-// POST /api/operator/drivers  { name, msisdn } — admin adds a driver directly (no request).
+// POST /api/operator/drivers  { name, msisdn, email? } — admin adds a driver directly (no request).
 // Same invite flow: the driver gets a setup code and chooses their own PIN. Never an upsert —
 // typing an existing driver's number must not replace their PIN.
 operatorRouter.post('/operator/drivers', adminOnly, async (req, res, next) => {
   try {
-    const { name, msisdn } = req.body || {};
+    const { name, msisdn, email } = req.body || {};
     const r = await createStaffAccount({
-      role: 'driver', name, phone: msisdn, createdBy: actorLabel(req.auth),
+      role: 'driver', name, phone: msisdn, email, createdBy: actorLabel(req.auth),
     });
     res.status(201).json(staffResult(r));
   } catch (err) {

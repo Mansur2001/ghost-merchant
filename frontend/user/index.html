@@ -114,6 +114,13 @@
         <label for="phone" data-i18n="auth.phone">Your phone number</label>
         <input id="phone" type="tel" inputmode="tel" placeholder="61 234 5678" autocomplete="tel" />
         <div class="phone-hint muted" id="phoneHint">Enter your mobile number</div>
+        <!-- Where the code goes. Email only reaches an email the customer confirmed while signed
+             in, so it can't be used to get into someone else's number. Shown when the server
+             offers email at all (GET /api/auth/channels). -->
+        <div id="channelPick" class="cc-switch hidden" role="group" style="display:inline-flex;margin-top:10px;">
+          <button type="button" data-channel="sms" aria-pressed="true" data-i18n="auth.viaSms" style="padding:8px 16px;">Text</button>
+          <button type="button" data-channel="email" aria-pressed="false" data-i18n="auth.viaEmail" style="padding:8px 16px;">Email</button>
+        </div>
         <button id="sendCodeBtn" type="button" data-i18n="auth.send">Text me a code</button>
         <!-- Consent shown where the number is collected: US carriers (10DLC) check for exactly
              this — what we text, rates, STOP/HELP, and links to the terms and privacy policy. -->
@@ -137,6 +144,24 @@
           <button class="linkbtn" id="signOutBtn" type="button" style="margin-left:auto;" data-i18n="start.signout">Sign out</button>
         </div>
         <button class="secondary" id="resumeBtn" type="button" data-i18n="start.resume">My orders</button>
+
+        <!-- Optional: an email that can also receive sign-in codes. Confirmed with a code while
+             signed in — the session proves the phone, the code proves the email. -->
+        <details id="emailBox" class="hidden" style="margin-top:12px;">
+          <summary data-i18n="email.title">Get sign-in codes by email</summary>
+          <p class="muted" id="emailCurrent" style="margin:8px 0;"></p>
+          <div id="emailAdd">
+            <input id="emailInput" type="email" autocomplete="email" placeholder="you@example.com" />
+            <button class="secondary" id="emailSend" type="button" data-i18n="email.send">Send me a code</button>
+            <div id="emailCodeStep" class="hidden">
+              <input id="emailCode" type="text" inputmode="numeric" autocomplete="one-time-code"
+                     maxlength="6" placeholder="123456" style="margin-top:10px;" />
+              <button id="emailVerify" type="button" data-i18n="email.verify">Confirm email</button>
+            </div>
+          </div>
+          <button class="secondary hidden" id="emailRemove" type="button" data-i18n="email.remove">Stop using this email</button>
+          <div class="muted" id="emailStatus" style="margin-top:8px;"></div>
+        </details>
 
         <label for="request" data-i18n="start.request">What do you need?</label>
         <textarea id="request" data-i18n-ph="start.request.ph" placeholder="e.g. 2kg rice, cooking oil, 6 eggs"></textarea>

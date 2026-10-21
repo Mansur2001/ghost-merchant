@@ -105,16 +105,20 @@ email address, no social media login.
 | **Other in-app messages** | Yes | No | App functionality | Optional |
 | **Purchase history** (order contents/amounts) | Yes | No | App functionality | Required |
 
-**Not collected:** name, email, address book, financial/payment info, health, browsing
+**Email address** (Personal info → Email address): collected, **optional**, purpose App
+functionality / Account management — only if a customer adds one for sign-in codes, or an admin
+enters one for a staff setup code. Not shared.
+
+**Not collected:** name, address book, financial/payment info, health, browsing
 history, app activity, device IDs, advertising ID, crash logs, diagnostics.
 
 **Staff only:** drivers and operators also give a **name** (Personal info → Name). Customers
 never do.
 
-**Shared? No, for every type.** ClickSend delivers login codes, so it receives the phone
-number and the message text. Google's definition doesn't count a service provider processing
-data on your behalf as "sharing". `PRIVACY.md` still names ClickSend, because the policy must
-be accurate even where the form doesn't ask.
+**Shared? No, for every type.** Twilio delivers login codes (SMS, and email through SendGrid),
+so it receives the phone number or email and the message text. Google's definition doesn't
+count a service provider processing data on your behalf as "sharing". `PRIVACY.md` still names
+Twilio, because the policy must be accurate even where the form doesn't ask.
 
 **Payment info deserves a note:** the answer is genuinely *not collected*. Money moves phone
 to phone over the telecom's own rails. The app records only that the payment arrived (amount,
@@ -191,7 +195,7 @@ or holds money. Customer, driver and operator sign-in are all reachable from the
 ## 8. Release checklist
 
 - [ ] Backend on a real domain, valid certificate, `NODE_ENV=production`
-- [ ] `OTP_TRANSPORT=clicksend`; a real code received on a US **and** a Somali handset
+- [ ] `OTP_TRANSPORT=twilio`; a real code received on a US **and** a Somali handset, and by email
 - [ ] `REVIEW_PHONE` / `REVIEW_CODE` set; review login tested with the +1 switch
 - [ ] Deployed with `docker-compose.prod.yml` (no `:8080` listener, no published DB port)
 - [ ] `CORS_ORIGINS` = your domain + `https://localhost`

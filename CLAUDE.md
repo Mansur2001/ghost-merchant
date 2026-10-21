@@ -128,21 +128,35 @@ Git history has it if it's ever wanted back.
   check — they must look at the merchant phone, not trust the customer's reference. If volume
   outgrows it, the fix is a telecom merchant API, not reviving the phone.
 
-### Outbound SMS: ClickSend
+### Outbound SMS and email: Twilio
 
-Every text the platform sends — customer login codes (`+252` and `+1`) and staff setup codes —
-goes through **ClickSend** (`notify/smsSender.js`), pay-as-you-go with no monthly fee. It is the
-one deliberate vendor exception, and it is bounded: it carries a code, never money.
+Every code the platform sends — customer login codes (`+252` and `+1`) and staff setup codes —
+goes through **Twilio**: SMS over the Messages API (`notify/smsSender.js`), email over Twilio
+SendGrid (`notify/emailSender.js`). Pay-as-you-go. It is the one deliberate vendor exception,
+and it is bounded: it carries a code, never money. No SDK — one HTTPS call each.
 
-- `OTP_TRANSPORT`: `clicksend` (production), `auto` (= clicksend, but a dev box without keys
-  shows the code on screen), `log` (dev only — **refuses to boot** in production).
-- **Dev never texts strangers.** Outside production, real SMS goes only to numbers on
-  `DEV_SMS_ALLOWLIST`; everything else gets the on-screen code. The seed's numbers are valid
-  Somali numbers that may belong to real people.
-- ClickSend answers HTTP 200 for a batch whose one message was refused — the sender checks the
-  per-message status, so a refused message is a failure, never "sent".
-- US delivery needs a **verified toll-free** sender (`CLICKSEND_FROM`); carriers filter
-  unregistered ones. Setup and troubleshooting: `docs/LIVE_SMS_SETUP.md`.
+- `OTP_TRANSPORT`: `twilio` (production, both channels), `auto` (= twilio, but a dev box
+  without keys shows the code on screen), `log` (dev only — **refuses to boot** in production).
+  Anything else refuses to boot.
+- **Dev never messages strangers.** Outside production, real SMS/email goes only to
+  `DEV_SMS_ALLOWLIST` / `DEV_EMAIL_ALLOWLIST`; everything else gets the on-screen code. Both
+  channels share one rule (`resolveTransport`). The seed's numbers are valid Somali numbers that
+  may belong to real people.
+- A Twilio message created as `failed`, or SendGrid answering anything but 202, is a failure,
+  never "sent". Twilio's error code is kept in the log line (21408 = country not enabled).
+- US delivery needs the **10DLC-registered Messaging Service** (`TWILIO_MESSAGING_SERVICE_SID`);
+  carriers filter unregistered senders. `+252` needs Somalia enabled in Geo permissions.
+  Setup and troubleshooting: `docs/LIVE_SMS_SETUP.md`.
+
+### Email codes: never an identity
+
+The phone number is still the customer (invariant 4). Email is only a second way to receive a
+code, and only for an email the customer **confirmed while signed in** (the session proves the
+phone, a code proves the email; `email_challenges`, kept apart from `otp_codes` so a code sent to
+an unconfirmed address can never log anyone in). Sign-in "Email me a code" sends to
+`users.email` or to nobody — and answers identically either way, cooldown included, so it can't
+be used to learn which numbers have accounts. Staff setup codes go by email when the admin gives
+one (`drivers.email` / `operators.email`); the claim still needs the phone and the code.
 
 ---
 
@@ -153,7 +167,7 @@ Three identities, one signing secret (`SESSION_SECRET`), all tokens HMAC-signed
 
 | Role | Authenticates with | Token TTL | Sees |
 |---|---|---|---|
-| `customer` | phone + 6-digit OTP over SMS | 30 days | only orders under their verified phone |
+| `customer` | phone + 6-digit OTP over SMS (or a confirmed email) | 30 days | only orders under their verified phone |
 | `driver` | msisdn + PIN (scrypt), chosen by the driver via a setup code | 12 hours | only orders the operator assigned to them |
 | `operator` | username + password (scrypt), chosen via a setup code | 12 hours | everything; **admins** also manage staff |
 
@@ -162,7 +176,7 @@ Three identities, one signing secret (`SESSION_SECRET`), all tokens HMAC-signed
   atomically in the DB (`otp_codes`, one live challenge per phone). Verification returns ONE
   generic error for every failure mode — distinguishing "no challenge" from "wrong code" would
   make the endpoint a phone-number oracle.
-- **Delivery** is ClickSend for every number (see *Outbound SMS* above). **Play review login**:
+- **Delivery** is Twilio for every number, or email if confirmed (see *Outbound SMS and email* above). **Play review login**:
   `REVIEW_PHONE` + `REVIEW_CODE` (6 digits) make one fixed number's code fixed, with no SMS —
   a reviewer can't receive texts at your number. It still runs the whole OTP path (cooldown,
   attempt cap, rate limits, single use), reaches only that account, and a half-set or malformed
@@ -436,10 +450,10 @@ Working and verified against the live stack: full order lifecycle over WebSocket
 operator-confirmed payments with "I've paid" claims, operator-driven dispatch, photos in MinIO
 AIStor, authentication and per-order authorization everywhere, the transactional outbox,
 refunds as a ledger, staff onboarding by invite (admin-only), the offline write queue,
-multi-instance operation behind Redis, ClickSend login codes delivered to a real US handset, and
+multi-instance operation behind Redis, login codes delivered to a real US handset (then over ClickSend, now Twilio), and
 the EN/SO interface. The Android app builds and installs.
 
-**Still to validate on a Somali network:** ClickSend delivery to `+252` and `tel:`/USSD `%23`
+**Still to validate:** Twilio SMS and SendGrid email end to end, Twilio delivery to `+252` and `tel:`/USSD `%23`
 dialing. A Play reviewer signs in with the review login (`REVIEW_PHONE`/`REVIEW_CODE`), not a
 real text. Production deploy: `docker-compose.prod.yml` (+ `Caddyfile.prod`). See
 `docs/PLAY_RELEASE.md`.

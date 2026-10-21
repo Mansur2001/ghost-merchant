@@ -63,8 +63,8 @@ single use. It can only ever reach that one account's own orders.
 
 Before submitting:
 
-- Set up ClickSend for real customers ([`LIVE_SMS_SETUP.md`](LIVE_SMS_SETUP.md)), with
-  `OTP_TRANSPORT=clicksend` and a **verified toll-free** sender for US numbers.
+- Set up Twilio for real customers ([`LIVE_SMS_SETUP.md`](LIVE_SMS_SETUP.md)), with
+  `OTP_TRANSPORT=twilio` and the **10DLC-registered Messaging Service** for US numbers.
 - **Send yourself a real code on a real handset**, from the deployed server. Not the log
   transport.
 - Sign in with the review number yourself, using the switch on 🇺🇸 +1 and the review code.

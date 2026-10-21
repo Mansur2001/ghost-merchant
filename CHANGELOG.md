@@ -9,6 +9,29 @@ first build served to a real paying customer.
 
 ---
 
+## [Unreleased] — Twilio, and codes by email
+
+Migration `20261021090000_email_codes` adds nullable `users.email`, `drivers.email`,
+`operators.email` and the `email_challenges` table. Additive; back up before deploying anyway.
+
+### Changed
+- **ClickSend is replaced by Twilio.** SMS goes through Twilio's Messages API (preferably the
+  10DLC Messaging Service); `CLICKSEND_*` is gone, replaced by `TWILIO_ACCOUNT_SID`,
+  `TWILIO_AUTH_TOKEN`, `TWILIO_MESSAGING_SERVICE_SID` / `TWILIO_FROM`. `OTP_TRANSPORT` is now
+  `twilio` / `auto` / `log`; any other value (including `clicksend`) refuses to boot.
+- The phone switch draws its flags instead of using flag emoji, which Windows and some Android
+  WebViews show as plain "SO" / "US".
+
+### Added
+- **Codes by email** through Twilio SendGrid (`SENDGRID_API_KEY`, `EMAIL_FROM`; optional).
+  Customers confirm an email while signed in, then can pick **Text / Email** at sign-in. An
+  email request answers the same whether or not the number has an email. Admins can give a
+  staff member an email, and their setup codes go there instead of by text.
+- `scripts/sms-preflight.mjs` checks Twilio and SendGrid, and can send a test of each.
+- `DEV_EMAIL_ALLOWLIST`, the email twin of `DEV_SMS_ALLOWLIST`.
+
+---
+
 ## [Unreleased] — wallet picker
 
 Migration `20261020120000_payment_claim_wallet` adds the nullable `orders.payment_claim_wallet`.

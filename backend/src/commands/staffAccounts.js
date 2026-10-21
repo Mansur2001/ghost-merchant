@@ -1,5 +1,6 @@
 // CQRS write side for staff onboarding: an ADMIN creates a driver or operator account, the
-// person gets a one-time setup code by SMS, and chooses their own PIN/password with it.
+// person gets a one-time setup code by SMS (or by email, if the admin gave one), and chooses
+// their own PIN/password with it.
 // Rules and reasoning: domain/staffInvite.js.
 //
 // Creating the account is a deliberate, separate act from approving a request — approving
@@ -16,7 +17,9 @@ import {
   SETUP_MAX_ATTEMPTS,
 } from '../domain/staffInvite.js';
 import { maskPhone } from '../domain/redact.js';
+import { normalizeEmail, maskEmail } from '../domain/email.js';
 import { sendSetupSms } from '../notify/smsSender.js';
+import { sendSetupEmail } from '../notify/emailSender.js';
 
 export class StaffError extends Error {
   constructor(message, status = 400) {
@@ -35,6 +38,14 @@ export class SetupInvalidError extends Error {
 }
 
 const ROLES = new Set(['driver', 'operator']);
+
+// An admin-supplied email means "send the setup code by email instead of text". Absent = SMS.
+function emailOrNull(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return null;
+  const email = normalizeEmail(raw);
+  if (!email) throw new StaffError('that does not look like an email address');
+  return email;
+}
 
 function phoneOrThrow(raw) {
   try {
@@ -64,23 +75,31 @@ async function issueCode(tx, { role, accountId, phone, createdBy }) {
   return code;
 }
 
-// Text the code AFTER the transaction commits: an SMS can't be rolled back, so it must never
-// go out for an account that then fails to exist. If it fails, the account and code still
-// exist and "Send setup code" retries — reported, never swallowed.
-async function textCode(phone, role, code) {
+// Send the code AFTER the transaction commits: a text or email can't be rolled back, so it
+// must never go out for an account that then fails to exist. If it fails, the account and code
+// still exist and "Send setup code" retries — reported, never swallowed.
+async function sendCode({ phone, email }, role, code) {
   try {
-    const { transport } = await sendSetupSms(phone, role, code);
-    return { transport, smsError: null };
+    const { transport } = email
+      ? await sendSetupEmail(email, role, code)
+      : await sendSetupSms(phone, role, code);
+    return { transport, sentVia: email ? 'email' : 'sms', smsError: null };
   } catch (err) {
-    console.error(`[staff] setup SMS to ${maskPhone(phone)} failed: ${err.message}`);
-    return { transport: null, smsError: 'the setup code could not be texted — use "Send setup code" to retry' };
+    const to = email ? maskEmail(email) : maskPhone(phone);
+    console.error(`[staff] setup code to ${to} failed: ${err.message}`);
+    return {
+      transport: null,
+      sentVia: email ? 'email' : 'sms',
+      smsError: `the setup code could not be ${email ? 'emailed' : 'texted'} — use "Send setup code" to retry`,
+    };
   }
 }
 
 // Create a driver or operator account and text them a setup code.
 //   requestId — optional: create it FROM an approved access request (name/phone/role come
 //               from the request, and the request is marked as having produced an account).
-export async function createStaffAccount({ role, name, phone, username, createdBy, requestId }) {
+export async function createStaffAccount({ role, name, phone, username, email: rawEmail, createdBy, requestId }) {
+  const email = emailOrNull(rawEmail);
   const result = await withTransaction(async (tx) => {
     let r = { role, name, phone };
 
@@ -112,7 +131,7 @@ export async function createStaffAccount({ role, name, phone, username, createdB
         throw new StaffError('a driver with this number already exists — use "Send setup code" on them instead', 409);
       }
       account = await tx.driver.create({
-        data: { name: cleanName, msisdn: e164, pin_hash: hashSecret(unclaimableSecret()), pin_set_at: null },
+        data: { name: cleanName, msisdn: e164, email, pin_hash: hashSecret(unclaimableSecret()), pin_set_at: null },
         select: { id: true, name: true, msisdn: true },
       });
     } else {
@@ -125,6 +144,7 @@ export async function createStaffAccount({ role, name, phone, username, createdB
             display_name: cleanName,
             password_hash: hashSecret(unclaimableSecret()),
             phone: e164,
+            email,
             created_by: createdBy || null,
           },
           select: { id: true, username: true, display_name: true },
@@ -146,32 +166,40 @@ export async function createStaffAccount({ role, name, phone, username, createdB
     return { role: r.role, account, phone: e164, code };
   });
 
-  const sms = await textCode(result.phone, result.role, result.code);
-  return { ...result, ...sms };
+  const sent = await sendCode({ phone: result.phone, email }, result.role, result.code);
+  return { ...result, ...sent };
 }
 
 // Send a fresh setup code to an existing account. Covers both "the first text never came /
 // expired" and "I forgot my PIN": the current secret keeps working until a new one is chosen,
 // so a reset can't be used to lock someone out.
-export async function resendSetupCode({ role, accountId, createdBy }) {
+// `email`: send this time by email (and remember it); absent = wherever it went before.
+// `via: 'sms'` sends by text even if an email is on file.
+export async function resendSetupCode({ role, accountId, createdBy, email: rawEmail, via }) {
   if (!ROLES.has(role)) throw new StaffError('role must be driver or operator');
+  const newEmail = emailOrNull(rawEmail);
   let id;
   try { id = BigInt(accountId); } catch { throw new StaffError('account not found', 404); }
 
   const result = await withTransaction(async (tx) => {
     const account = role === 'driver'
-      ? await tx.driver.findUnique({ where: { id }, select: { id: true, msisdn: true, active: true } })
-      : await tx.operator.findUnique({ where: { id }, select: { id: true, phone: true, active: true } });
+      ? await tx.driver.findUnique({ where: { id }, select: { id: true, msisdn: true, email: true, active: true } })
+      : await tx.operator.findUnique({ where: { id }, select: { id: true, phone: true, email: true, active: true } });
     if (!account) throw new StaffError('account not found', 404);
     if (!account.active) throw new StaffError('reactivate this account first', 409);
     const phone = role === 'driver' ? account.msisdn : account.phone;
     if (!phone) throw new StaffError('no phone number on file for this operator', 409);
+    if (newEmail) {
+      const model = role === 'driver' ? tx.driver : tx.operator;
+      await model.update({ where: { id }, data: { email: newEmail } });
+    }
+    const email = via === 'sms' ? null : newEmail || account.email || null;
     const code = await issueCode(tx, { role, accountId: id, phone, createdBy });
-    return { role, phone, code };
+    return { role, phone, email, code };
   });
 
-  const sms = await textCode(result.phone, role, result.code);
-  return { ...result, ...sms };
+  const sent = await sendCode({ phone: result.phone, email: result.email }, role, result.code);
+  return { role: result.role, phone: result.phone, code: result.code, ...sent };
 }
 
 // The public step: prove you hold the phone (the code) and choose your own secret.

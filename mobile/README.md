@@ -157,7 +157,7 @@ duplicate.
 
 ### 3. Before you submit
 - [ ] Backend deployed on a real domain with a valid certificate (see the root `README.md`)
-- [ ] `OTP_TRANSPORT=clicksend` with a real code received on a handset
+- [ ] `OTP_TRANSPORT=twilio` with a real code received on a handset
       (`../docs/LIVE_SMS_SETUP.md`). The backend refuses to boot in production on the dev
       transport, which prints login codes into the server log.
 - [ ] `REVIEW_PHONE` / `REVIEW_CODE` set for the Play reviewer (`../docs/PLAY_RELEASE.md` §3)

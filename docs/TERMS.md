@@ -1,6 +1,6 @@
 # GuriKaabe — Terms of Service
 
-**Last updated: 20 October 2026**
+**Last updated: 21 October 2026**
 
 > **Published at `https://<your domain>/terms.html`**, built from this file by
 > `node scripts/build-privacy.mjs` (which builds both legal pages and refuses to publish while
@@ -29,7 +29,7 @@ merchant's mobile-money number.
 ## Text messages (SMS)
 
 - We text you a **one-time login code only when you ask to sign in**. We do not send marketing
-  or promotional messages.
+  or promotional messages. If you add an email, you can choose to get the code there instead.
 - How often you get a text depends on how often you sign in.
 - **Message and data rates may apply.**
 - Reply **STOP** to stop receiving texts, or **HELP** for help. If you reply STOP, we can't send

@@ -46,7 +46,7 @@ In dev, the customer's code appears on screen and in `docker compose logs -f bac
 `[OTP][dev-transport]` line. That only happens outside production: the backend refuses to
 boot in production on the log transport.
 
-With ClickSend keys in `.env`, dev sends real texts **only** to numbers on
+With Twilio keys in `.env`, dev sends real texts **only** to numbers on
 `DEV_SMS_ALLOWLIST`, so a login as a seeded number never texts a stranger.
 
 Every phone field has a **🇸🇴 +252 / 🇺🇸 +1** switch: pick the country, then type the number
@@ -98,7 +98,7 @@ Where things live:
 | `backend/src/domain/` | Pure logic — state machine, phone parsing, USSD, payment references. No I/O, fully unit-tested. |
 | `backend/src/commands/` · `queries/` | The CQRS write and read sides. |
 | `backend/src/events/` | Event bus + transactional outbox. |
-| `backend/src/notify/` | Outbound SMS (ClickSend). |
+| `backend/src/notify/` | Outbound SMS and email (Twilio, Twilio SendGrid). |
 | `frontend/{user,driver,operator}/` | Three vanilla-JS PWAs; `frontend/shared/` is common code. |
 | `mobile/` | Capacitor wrapper that ships the PWAs as an Android app. |
 | `scripts/verify/` | End-to-end suites that run against the live stack. |
@@ -139,7 +139,8 @@ open. Caddy needs port 80 to get its certificate.
    - `OPERATOR_PASSWORD`: a **new** password of at least 12 characters. It creates the first
      admin account, `admin`, which must change it at first sign-in. Never reuse a value from
      `CREDENTIALS.md`: the backend refuses to boot while any seeded password still works.
-   - `OTP_TRANSPORT=clicksend` plus the `CLICKSEND_*` keys ([`docs/LIVE_SMS_SETUP.md`](docs/LIVE_SMS_SETUP.md))
+   - `OTP_TRANSPORT=twilio` plus the `TWILIO_*` keys, and `SENDGRID_API_KEY` / `EMAIL_FROM` for
+     email codes ([`docs/LIVE_SMS_SETUP.md`](docs/LIVE_SMS_SETUP.md))
    - `REVIEW_PHONE` / `REVIEW_CODE` for the Play reviewer ([`docs/PLAY_RELEASE.md`](docs/PLAY_RELEASE.md) §3)
    - `<WALLET>_MERCHANT` / `<WALLET>_USSD` for each wallet you accept (EVC Plus, eDahab, Zaad,
      Sahal). Only wallets with both lines set are shown; see `.env.example`. Dial each code by
@@ -192,8 +193,8 @@ photos in MinIO, authentication and per-order authorization on every route and s
 transactional outbox, refunds as a ledger, staff access requests with ID review, the offline
 write queue, and multi-instance operation behind Redis.
 
-Login and staff setup codes go out through ClickSend, which has been verified delivering to a
-real US handset. **Still unvalidated on a Somali network:** USSD `tel:` dialing and ClickSend
+Login and staff setup codes go out through Twilio (SMS) and Twilio SendGrid (email). **Still
+unvalidated:** both end to end, and on a Somali network USSD `tel:` dialing and Twilio
 delivery to `+252`.
 
 Known gaps: push notifications aren't started, and refunds are settled off-platform by design.
@@ -206,6 +207,6 @@ Known gaps: push notifications aren't started, and refunds are settled off-platf
 | `CHANGELOG.md` | Release history and version policy. |
 | `mobile/README.md` | Building the Android app. |
 | `docs/PLAY_RELEASE.md` | Getting the app into the Play Store. |
-| `docs/LIVE_SMS_SETUP.md` | Real SMS delivery (ClickSend) and the dev allowlist. |
+| `docs/LIVE_SMS_SETUP.md` | Real SMS and email delivery (Twilio) and the dev allowlists. |
 | `docs/PRIVACY.md` · `docs/PLAY_LISTING.md` | Play submission pack. |
 | `scripts/brandsheet-icons.py` | Cuts every app icon out of `GuriKaabe-brandsheet.png`. |

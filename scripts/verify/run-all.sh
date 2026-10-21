@@ -43,7 +43,7 @@ reset_stack() {
 
 # The suites read the passcode back out of the request response, so they need the dev-log
 # transport regardless of what .env is set to for real device testing. Exported here rather
-# than assumed, so `OTP_TRANSPORT=clicksend` in .env doesn't silently break suite 01.
+# than assumed, so `OTP_TRANSPORT=twilio` in .env doesn't silently break suite 01.
 export OTP_TRANSPORT=log
 
 export OPERATOR_USERNAME=${OPERATOR_USERNAME:-hodan}

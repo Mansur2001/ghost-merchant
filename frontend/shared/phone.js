@@ -158,6 +158,35 @@
     try { return localStorage.getItem(COUNTRY_KEY) === 'US' ? 'US' : 'SO'; } catch (e) { return 'SO'; }
   }
 
+  // Drawn flags rather than 🇸🇴/🇺🇸 emoji: flag emoji don't exist on Windows or in some
+  // Android WebViews, which show the bare letters "SO" / "US" instead.
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+  function svgEl(tag, attrs) {
+    var e = document.createElementNS(SVG_NS, tag);
+    Object.keys(attrs).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    return e;
+  }
+  function flag(cc) {
+    var svg = svgEl('svg', {
+      viewBox: '0 0 30 20', width: '20', height: '14', 'aria-hidden': 'true',
+      style: 'vertical-align:-2px;margin-right:5px;border-radius:2px;',
+    });
+    if (cc === 'SO') {
+      svg.appendChild(svgEl('rect', { width: '30', height: '20', fill: '#4189DD' }));
+      svg.appendChild(svgEl('polygon', {
+        fill: '#fff',
+        points: '15,4.8 16.23,8.3 19.95,8.39 17,10.65 18.06,14.21 15,12.1 11.94,14.21 13,10.65 10.05,8.39 13.77,8.3',
+      }));
+    } else {
+      svg.appendChild(svgEl('rect', { width: '30', height: '20', fill: '#fff' }));
+      for (var i = 0; i < 13; i += 2) {
+        svg.appendChild(svgEl('rect', { y: String(i * 20 / 13), width: '30', height: String(20 / 13), fill: '#B22234' }));
+      }
+      svg.appendChild(svgEl('rect', { width: '12', height: String(7 * 20 / 13), fill: '#3C3B6E' }));
+    }
+    return svg;
+  }
+
   // The +252 / +1 switch, placed in front of the input. The input is wrapped so the pair
   // behaves as one field inside existing layouts (rows, cards).
   function buildSwitch(input, country, onPick) {
@@ -168,10 +197,11 @@
     sw.setAttribute('role', 'group');
     sw.setAttribute('aria-label', tr('phone.country', 'Country'));
     var buttons = {};
-    [['SO', '🇸🇴 +252'], ['US', '🇺🇸 +1']].forEach(function (c) {
+    [['SO', '+252'], ['US', '+1']].forEach(function (c) {
       var b = document.createElement('button');
       b.type = 'button';
-      b.textContent = c[1];
+      b.appendChild(flag(c[0]));
+      b.appendChild(document.createTextNode(c[1]));
       b.addEventListener('click', function () { onPick(c[0]); input.focus(); });
       buttons[c[0]] = b;
       sw.appendChild(b);

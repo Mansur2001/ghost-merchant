@@ -1,45 +1,48 @@
 // Outbound SMS: customer login codes and staff setup codes.
 //
-// ClickSend carries EVERY text, Somali and international alike: one account, no hardware to
-// keep alive, pay-as-you-go. It is the one deliberate vendor exception (CLAUDE.md), and it is
-// bounded: it carries a code, never money.
+// Twilio carries EVERY text, Somali and international alike: one account, no hardware to keep
+// alive, pay-as-you-go. It is the one deliberate vendor exception (CLAUDE.md), and it is
+// bounded: it carries a code, never money. Email codes go through Twilio SendGrid
+// (notify/emailSender.js) under the same transport setting.
 //
-//   clicksend — the production transport, for every number. `auto` means this.
-//   log       — dev only. Prints the code. The backend REFUSES TO BOOT with this under
-//               NODE_ENV=production, because anyone with log access could log in as any customer.
+//   twilio — the production transport, for every number. `auto` means this.
+//   log    — dev only. Prints the code. The backend REFUSES TO BOOT with this under
+//            NODE_ENV=production, because anyone with log access could log in as any customer.
 import { config } from '../config.js';
 import { parsePhone } from '../domain/phone.js';
 import { setupMessage } from '../domain/staffInvite.js';
 
 export class SmsDeliveryError extends Error {}
 
-// ClickSend's REST API over plain HTTPS + basic auth (username : API key). No SDK on purpose:
-// it would be a large dependency for one JSON POST, and this keeps the supply chain short.
-async function sendViaClickSend(phone, text) {
-  const { username, apiKey, from } = config.otp.clicksend;
-  if (!username || !apiKey) {
+// Twilio's Messages API over plain HTTPS + basic auth (Account SID : Auth Token). No SDK on
+// purpose: it would be a large dependency for one form POST, and this keeps the supply chain short.
+async function sendViaTwilio(phone, text) {
+  const { accountSid, authToken, messagingServiceSid, from } = config.otp.twilio;
+  if (!twilioConfigured()) {
     throw new SmsDeliveryError(
-      'clicksend transport selected but CLICKSEND_USERNAME / CLICKSEND_API_KEY are not set'
+      'twilio transport selected but TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / ' +
+        'TWILIO_MESSAGING_SERVICE_SID (or TWILIO_FROM) are not set'
     );
   }
 
-  const message = { source: 'gurikaabe', to: phone, body: text };
-  // Unset = ClickSend's shared sender. US carriers only accept registered senders now, so a
-  // +1 destination needs a verified toll-free number here (docs/LIVE_SMS_SETUP.md).
-  if (from) message.from = from;
+  const form = new URLSearchParams({ To: phone, Body: text });
+  // The Messaging Service is what the 10DLC campaign is registered on; a bare number is the
+  // fallback. US carriers filter texts from unregistered senders (docs/LIVE_SMS_SETUP.md).
+  if (messagingServiceSid) form.set('MessagingServiceSid', messagingServiceSid);
+  else form.set('From', from);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.otp.sendTimeoutMs);
   let res;
   let body = null;
   try {
-    res = await fetch('https://rest.clicksend.com/v3/sms/send', {
+    res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Messages.json`, {
       method: 'POST',
       headers: {
-        Authorization: `Basic ${Buffer.from(`${username}:${apiKey}`).toString('base64')}`,
-        'Content-Type': 'application/json',
+        Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: JSON.stringify({ messages: [message] }),
+      body: form.toString(),
       signal: controller.signal,
     });
     try {
@@ -48,41 +51,32 @@ async function sendViaClickSend(phone, text) {
       /* keep the status-only detail */
     }
   } catch (err) {
-    throw new SmsDeliveryError(`clicksend send failed: ${err.message}`);
+    throw new SmsDeliveryError(`twilio send failed: ${err.message}`);
   } finally {
     clearTimeout(timer);
   }
 
   if (!res.ok) {
-    const detail = body?.response_code
-      ? `${body.response_code}: ${body.response_msg || ''}`.trim()
-      : `HTTP ${res.status}`;
-    throw new SmsDeliveryError(`clicksend send failed: ${detail}`);
+    // Twilio's own error code (e.g. 21408 "permission to send to this region", 21610
+    // "recipient replied STOP") is the fastest route to the cause — keep it in the message.
+    const detail = body?.code ? `${body.code}: ${body.message || ''}`.trim() : `HTTP ${res.status}`;
+    throw new SmsDeliveryError(`twilio send failed: ${detail}`);
   }
-
-  // ClickSend answers HTTP 200 for the BATCH even when the one message in it was refused
-  // (INVALID_RECIPIENT, INSUFFICIENT_CREDIT, COUNTRY_NOT_ENABLED...). The per-message status is
-  // the real answer; treating the 200 as success would report a code sent that never left.
-  const status = body?.data?.messages?.[0]?.status;
-  if (status !== 'SUCCESS') {
-    throw new SmsDeliveryError(`clicksend send failed: ${status || 'no message status returned'}`);
+  // Accepted for delivery ('queued' / 'accepted'). A message created already failed is a
+  // failure, never "sent".
+  if (!body?.sid || body.status === 'failed' || body.status === 'undelivered') {
+    throw new SmsDeliveryError(`twilio send failed: ${body?.error_code || body?.status || 'no message returned'}`);
   }
 }
 
-function clickSendConfigured() {
-  const c = config.otp.clicksend;
-  return Boolean(c.username && c.apiKey);
+function twilioConfigured() {
+  const t = config.otp.twilio;
+  return Boolean(t.accountSid && t.authToken && (t.messagingServiceSid || t.from));
 }
 
-// Which transport to use. `auto` is ClickSend; an explicit `log` keeps a dev box offline.
+// Which transport to use. `auto` is Twilio; an explicit `log` keeps a dev box offline.
 export function transportFor() {
-  return config.otp.transport === 'auto' ? 'clicksend' : config.otp.transport;
-}
-
-// Is the transport actually usable, or is it selected but unconfigured?
-function isConfigured(transport) {
-  if (transport === 'clicksend') return clickSendConfigured();
-  return true; // 'log' needs nothing
+  return config.otp.transport === 'auto' ? 'twilio' : config.otp.transport;
 }
 
 function devAllowlisted(phone) {
@@ -103,21 +97,23 @@ export async function sendSetupSms(phone, role, code) {
   return deliverCode(phone, code, setupMessage(role, code));
 }
 
-async function deliverCode(phone, code, text) {
+// Decide whether a code really goes out, or only to the dev log. Shared with email
+// (notify/emailSender.js) so both channels obey exactly the same rules.
+//
+// The dev-log fallback exists so that OTP_TRANSPORT=auto — the correct setting for a mixed
+// deployment — doesn't break every local sign-in before credentials exist. It is a
+// convenience for a dev box, and it is deliberately narrow:
+//
+//   * never in production (printing a customer's login code to a server log is worse than
+//     an error an operator can see), and
+//   * never when a transport was named EXPLICITLY. Asking for `twilio` and silently getting
+//     the log is the worst outcome: you believe you are testing real delivery, the code
+//     appears in the response, and you never learn the credentials are wrong. If you named
+//     it, you meant it, so it fails loudly instead.
+export function resolveTransport({ configured, allowlisted, target, allowlistName }) {
   let transport = transportFor();
-
-  // The dev-log fallback exists so that OTP_TRANSPORT=auto — the correct setting for a mixed
-  // deployment — doesn't break every local sign-in before credentials exist. It is a
-  // convenience for a dev box, and it is deliberately narrow:
-  //
-  //   * never in production (printing a customer's login code to a server log is worse than
-  //     an error an operator can see), and
-  //   * never when a transport was named EXPLICITLY. Asking for `clicksend` and silently
-  //     getting the log is the worst outcome: you believe you are testing real delivery, the
-  //     code appears in the response, and you never learn the credentials are wrong. If you
-  //     named it, you meant it, so it fails loudly instead.
   const explicit = config.otp.transport !== 'auto';
-  if (!isConfigured(transport) && config.env !== 'production' && !explicit) {
+  if (transport !== 'log' && !configured && config.env !== 'production' && !explicit) {
     console.warn(
       `[OTP] transport "${transport}" is not configured — falling back to the dev log ` +
         'transport. Set the credentials to send real messages.'
@@ -125,18 +121,27 @@ async function deliverCode(phone, code, text) {
     transport = 'log';
   }
 
-  // Dev never texts a number nobody vouched for — see config.otp.devSmsAllowlist.
-  if (config.env !== 'production' && transport !== 'log' && !devAllowlisted(phone)) {
-    console.warn(
-      `[OTP] ${phone} is not on DEV_SMS_ALLOWLIST — showing the code instead of texting it.`
-    );
+  // Dev never messages someone nobody vouched for — see config.otp.dev*Allowlist.
+  if (config.env !== 'production' && transport !== 'log' && !allowlisted) {
+    console.warn(`[OTP] ${target} is not on ${allowlistName} — showing the code instead of sending it.`);
     transport = 'log';
   }
+  return transport;
+}
 
-  if (transport === 'clicksend') {
-    await sendViaClickSend(phone, text);
-    return { transport: 'clicksend' };
+async function deliverCode(phone, code, text) {
+  const transport = resolveTransport({
+    configured: twilioConfigured(),
+    allowlisted: devAllowlisted(phone),
+    target: phone,
+    allowlistName: 'DEV_SMS_ALLOWLIST',
+  });
+
+  if (transport === 'twilio') {
+    await sendViaTwilio(phone, text);
+    return { transport: 'twilio' };
   }
+  if (transport !== 'log') throw new SmsDeliveryError(`unknown OTP_TRANSPORT "${transport}"`);
 
   // `log` transport. Tagged so it is trivially greppable in a log audit.
   console.warn(`[OTP][dev-transport] ${phone} -> ${code}`);

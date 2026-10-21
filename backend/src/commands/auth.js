@@ -16,7 +16,9 @@ import {
   reviewCodeFor,
 } from '../domain/otp.js';
 import { maskPhone } from '../domain/redact.js';
+import { normalizeEmail, maskEmail } from '../domain/email.js';
 import { sendOtpSms } from '../notify/smsSender.js';
+import { sendOtpEmail, sendEmailLinkCode, emailConfigured } from '../notify/emailSender.js';
 import { config } from '../config.js';
 
 export class OtpCooldownError extends Error {
@@ -36,12 +38,26 @@ export class OtpInvalidError extends Error {
   }
 }
 
-// Issue (or re-issue) a passcode for a phone number.
-// The UPSERT is conditional on the cooldown having elapsed, which makes "one live challenge
-// per number" and the resend throttle a single atomic decision — two concurrent requests
-// cannot both win, and the loser learns nothing except "wait".
-export async function requestOtp(rawPhone) {
+export class AuthInputError extends Error {
+  constructor(message) {
+    super(message);
+    this.status = 400;
+  }
+}
+
+// Email codes are offered only when SendGrid is set up; a dev box without it uses the log.
+export function emailAvailable() {
+  return emailConfigured() || config.env !== 'production';
+}
+
+// Issue (or re-issue) a passcode for a phone number, by SMS or to the account's confirmed
+// email. The UPSERT is conditional on the cooldown having elapsed, which makes "one live
+// challenge per number" and the resend throttle a single atomic decision — two concurrent
+// requests cannot both win, and the loser learns nothing except "wait".
+export async function requestOtp(rawPhone, { channel = 'sms' } = {}) {
   const phone = normalizeMsisdnOrThrow(rawPhone);
+  if (channel !== 'sms' && channel !== 'email') throw new AuthInputError('channel must be sms or email');
+  if (channel === 'email' && !emailAvailable()) throw new AuthInputError('email codes are not available');
   const reviewCode = reviewCodeFor(phone, config.otp.review);
   const code = reviewCode ?? generateCode();
   const cooldownSeconds = Math.ceil(RESEND_COOLDOWN_MS / 1000);
@@ -81,6 +97,15 @@ export async function requestOtp(rawPhone) {
   }
 
   try {
+    if (channel === 'email') {
+      // Only a confirmed email ever receives a login code. With none on file nothing is sent,
+      // but the answer, and the cooldown row above, are the same as a real send — otherwise
+      // this endpoint would tell anyone which numbers have an account with an email.
+      const user = await prisma.user.findUnique({ where: { phone_number: phone }, select: { email: true } });
+      if (!user?.email) return { phone, transport: 'none', expiresInSeconds: ttlSeconds, code };
+      const { transport } = await sendOtpEmail(user.email, code);
+      return { phone, transport, expiresInSeconds: ttlSeconds, code };
+    }
     const { transport } = await sendOtpSms(phone, code);
     return { phone, transport, expiresInSeconds: ttlSeconds, code };
   } catch (err) {
@@ -142,8 +167,94 @@ export async function verifyOtp(rawPhone, submittedCode) {
   return { phone };
 }
 
+// ── Linking an email (signed-in customers only) ──
+// The phone was already proven by the session; this proves the email. Only after both does an
+// email become a place sign-in codes may go.
+
+// Send a confirmation code to the email the customer typed. Same atomic cooldown as login codes.
+export async function requestEmailLink(phone, rawEmail) {
+  const email = normalizeEmail(rawEmail);
+  if (!email) throw new AuthInputError('that does not look like an email address');
+  if (!emailAvailable()) throw new AuthInputError('email codes are not available');
+  const code = generateCode();
+  const cooldownSeconds = Math.ceil(RESEND_COOLDOWN_MS / 1000);
+  const ttlSeconds = Math.ceil(OTP_TTL_MS / 1000);
+
+  // RAW for the same reason as requestOtp: a conditional upsert is the only atomic cooldown.
+  const rows = await prisma.$queryRaw`
+    INSERT INTO email_challenges(phone, email, code_hash, expires_at, attempts, last_sent_at)
+    VALUES (${phone}, ${email}, ${hashCode(code)}, now() + (${String(ttlSeconds)} || ' seconds')::interval, 0, now())
+    ON CONFLICT (phone) DO UPDATE
+      SET email        = EXCLUDED.email,
+          code_hash    = EXCLUDED.code_hash,
+          expires_at   = EXCLUDED.expires_at,
+          attempts     = 0,
+          last_sent_at = now()
+      WHERE email_challenges.last_sent_at <= now() - (${String(cooldownSeconds)} || ' seconds')::interval
+    RETURNING phone
+  `;
+  if (rows.length === 0) {
+    const existing = await prisma.emailChallenge.findUnique({ where: { phone }, select: { last_sent_at: true } });
+    throw new OtpCooldownError(cooldownRemainingMs(existing?.last_sent_at));
+  }
+
+  try {
+    const { transport } = await sendEmailLinkCode(email, code);
+    return { email, transport, expiresInSeconds: ttlSeconds, code };
+  } catch (err) {
+    await prisma.emailChallenge.deleteMany({ where: { phone } });
+    console.error(`[OTP] email link to ${maskEmail(email)} failed: ${err.message}`);
+    throw err;
+  }
+}
+
+// Confirm the code and store the email. Failures return from the transaction and throw after,
+// so the attempt count commits (see verifyOtp).
+export async function verifyEmailLink(phone, submittedCode) {
+  const outcome = await withTransaction(async (tx) => {
+    // RAW: FOR UPDATE, so parallel guesses can't each get the "last" attempt.
+    const rows = await tx.$queryRaw`
+      SELECT phone, email, code_hash, expires_at, attempts FROM email_challenges
+       WHERE phone = ${phone} FOR UPDATE
+    `;
+    const challenge = rows[0];
+    if (!challenge) return { ok: false };
+    if (new Date(challenge.expires_at).getTime() <= Date.now() || challenge.attempts >= MAX_ATTEMPTS) {
+      await tx.emailChallenge.deleteMany({ where: { phone } });
+      return { ok: false };
+    }
+    if (!verifyCode(String(submittedCode ?? ''), challenge.code_hash)) {
+      const attempts = challenge.attempts + 1;
+      if (attempts >= MAX_ATTEMPTS) await tx.emailChallenge.deleteMany({ where: { phone } });
+      else await tx.emailChallenge.update({ where: { phone }, data: { attempts } });
+      return { ok: false };
+    }
+    await tx.emailChallenge.deleteMany({ where: { phone } });
+    await tx.user.update({ where: { phone_number: phone }, data: { email: challenge.email } });
+    return { ok: true, email: challenge.email };
+  });
+  if (!outcome.ok) throw new OtpInvalidError();
+  return { email: outcome.email };
+}
+
+export async function removeEmail(phone) {
+  await withTransaction(async (tx) => {
+    await tx.emailChallenge.deleteMany({ where: { phone } });
+    await tx.user.update({ where: { phone_number: phone }, data: { email: null } });
+  });
+}
+
+export async function getCustomerEmail(phone) {
+  const user = await prisma.user.findUnique({ where: { phone_number: phone }, select: { email: true } });
+  return user?.email ?? null;
+}
+
 // Housekeeping: expired challenges are dead weight (and PII-adjacent). Cheap indexed delete.
 export async function sweepExpiredOtps() {
-  const { count } = await prisma.otpCode.deleteMany({ where: { expires_at: { lt: new Date() } } });
-  return count;
+  const now = new Date();
+  const [codes, links] = await Promise.all([
+    prisma.otpCode.deleteMany({ where: { expires_at: { lt: now } } }),
+    prisma.emailChallenge.deleteMany({ where: { expires_at: { lt: now } } }),
+  ]);
+  return codes.count + links.count;
 }

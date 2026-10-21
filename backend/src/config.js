@@ -81,14 +81,23 @@ export const config = {
 
   otp: {
     // 'log'    — dev only, prints the code. Refused under NODE_ENV=production.
-    // 'clicksend' — real SMS via ClickSend, every number. The production setting.
-    // 'auto'      — same as clicksend, but a dev box without credentials falls back to 'log'.
+    // 'twilio' — real delivery: SMS via Twilio, email via Twilio SendGrid. The production setting.
+    // 'auto'   — same as twilio, but a dev box without credentials falls back to 'log'.
     transport: process.env.OTP_TRANSPORT || 'log',
     sendTimeoutMs: parseInt(process.env.OTP_SEND_TIMEOUT_MS || '10000', 10),
-    clicksend: {
-      username: process.env.CLICKSEND_USERNAME || '',
-      apiKey: process.env.CLICKSEND_API_KEY || '',
-      from: process.env.CLICKSEND_FROM || '',
+    twilio: {
+      accountSid: process.env.TWILIO_ACCOUNT_SID || '',
+      authToken: process.env.TWILIO_AUTH_TOKEN || '',
+      // A Messaging Service is what a 10DLC campaign is attached to, so it is preferred;
+      // TWILIO_FROM (a single number) is the fallback when no service is set.
+      messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID || '',
+      from: process.env.TWILIO_FROM || '',
+    },
+    // Email codes (customers with a linked email, and staff setup codes sent by email).
+    // Unset = email is simply not offered; SMS keeps working.
+    sendgrid: {
+      apiKey: process.env.SENDGRID_API_KEY || '',
+      from: process.env.EMAIL_FROM || '',
     },
     // Play review login: ONE fixed phone whose code is this value instead of an SMS. A
     // reviewer can't receive a text at a number you control, and an app they can't sign in to
@@ -99,10 +108,15 @@ export const config = {
     },
     // Outside production, real SMS goes ONLY to these numbers (comma-separated); everything
     // else gets the dev log transport. The seed's numbers are valid Somali numbers that may
-    // belong to strangers, and a dev box with live ClickSend keys must never text them.
+    // belong to strangers, and a dev box with live Twilio keys must never text them.
     devSmsAllowlist: (process.env.DEV_SMS_ALLOWLIST || '')
       .split(',')
       .map((s) => s.trim())
+      .filter(Boolean),
+    // Same rule for email: outside production, only these addresses get a real email.
+    devEmailAllowlist: (process.env.DEV_EMAIL_ALLOWLIST || '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
       .filter(Boolean),
   },
 

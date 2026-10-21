@@ -87,12 +87,31 @@ SomPhone.attach({
 // straight to the order form if this handset is already verified.
 $('asCustomer').addEventListener('click', () => {
   showView(token ? 'startView' : 'authView');
-  if (token) $('signedInAs').textContent = myPhone || '';
+  if (token) { $('signedInAs').textContent = myPhone || ''; loadEmailBox(); }
 });
 $('homeBtn').addEventListener('click', () => showView('landingView'));
 $('authHome').addEventListener('click', () => showView('landingView'));
 
 // ── Sign-in: request a code, then verify it ──
+// By text, or to the email this account confirmed (only offered when the server sends email).
+let otpChannel = 'sms';
+let emailOffered = false;
+function renderChannel() {
+  $('channelPick').querySelectorAll('[data-channel]').forEach((b) =>
+    b.setAttribute('aria-pressed', b.dataset.channel === otpChannel ? 'true' : 'false'));
+  // Swap the key, not just the text, so a language switch re-renders the right label.
+  $('sendCodeBtn').dataset.i18n = otpChannel === 'email' ? 'auth.sendEmail' : 'auth.send';
+  $('sendCodeBtn').textContent = t($('sendCodeBtn').dataset.i18n);
+}
+$('channelPick').querySelectorAll('[data-channel]').forEach((b) =>
+  b.addEventListener('click', () => { otpChannel = b.dataset.channel; renderChannel(); }));
+(async function loadChannels() {
+  const res = await api('/auth/channels');
+  emailOffered = Boolean(res.email);
+  $('channelPick').classList.toggle('hidden', !emailOffered);
+  if (!emailOffered) { otpChannel = 'sms'; renderChannel(); }
+})();
+
 async function requestCode() {
   if (!phoneValid) return toast(t('err.phone'));
   $('sendCodeBtn').disabled = true;
@@ -101,7 +120,7 @@ async function requestCode() {
   const res = await api('/auth/otp/request', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone: phoneE164 }),
+    body: JSON.stringify({ phone: phoneE164, channel: otpChannel }),
   });
   $('sendCodeBtn').disabled = false;
   if (res.error) {
@@ -113,9 +132,12 @@ async function requestCode() {
   $('codeStep').classList.remove('hidden');
   $('codeInput').focus();
   // devCode is only ever present with the log transport in a non-production backend.
+  // Email: the server answers the same whether or not this number has an email (so it can't
+  // be used to look people up), so the message has to say "if".
+  const m = Math.round(res.expiresInSeconds / 60);
   $('otpStatus').textContent = res.devCode
     ? t('auth.dev', { code: res.devCode })
-    : t('auth.sent', { phone: res.phone, m: Math.round(res.expiresInSeconds / 60) });
+    : otpChannel === 'email' ? t('auth.sentEmail', { m }) : t('auth.sent', { phone: res.phone, m });
   startResendCountdown();
 }
 
@@ -158,8 +180,65 @@ async function verifyCode() {
   $('codeStep').classList.add('hidden');
   $('signedInAs').textContent = res.phone;
   showView('startView');
+  loadEmailBox();
   toast(t('auth.ok'));
 }
+
+// ── Email for sign-in codes (signed in) ──
+let myEmail = null;
+function renderEmailBox() {
+  $('emailCurrent').textContent = myEmail ? t('email.current', { email: myEmail }) : t('email.none');
+  $('emailAdd').classList.toggle('hidden', Boolean(myEmail));
+  $('emailRemove').classList.toggle('hidden', !myEmail);
+}
+async function loadEmailBox() {
+  if (!emailOffered || !token) return $('emailBox').classList.add('hidden');
+  const res = await api('/auth/me');
+  if (res.error) return;
+  myEmail = res.email || null;
+  $('emailBox').classList.remove('hidden');
+  renderEmailBox();
+}
+$('emailSend').addEventListener('click', async () => {
+  const email = $('emailInput').value.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return toast(t('email.bad'));
+  $('emailSend').disabled = true;
+  const res = await api('/auth/email/request', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  $('emailSend').disabled = false;
+  if (res.error) { $('emailStatus').textContent = errText(res); return; }
+  $('emailCodeStep').classList.remove('hidden');
+  $('emailCode').focus();
+  $('emailStatus').textContent = res.devCode ? t('auth.dev', { code: res.devCode }) : t('email.sent', { email: res.email });
+});
+$('emailVerify').addEventListener('click', async () => {
+  const code = $('emailCode').value.trim();
+  if (!/^\d{6}$/.test(code)) return toast(t('err.code'));
+  $('emailVerify').disabled = true;
+  const res = await api('/auth/email/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  $('emailVerify').disabled = false;
+  if (res.error) { $('emailStatus').textContent = GMI18n.err(res.error); return; }
+  myEmail = res.email;
+  $('emailInput').value = $('emailCode').value = '';
+  $('emailCodeStep').classList.add('hidden');
+  $('emailStatus').textContent = '';
+  renderEmailBox();
+  toast(t('email.ok'));
+});
+$('emailRemove').addEventListener('click', async () => {
+  const res = await api('/auth/email', { method: 'DELETE' });
+  if (res.error) return toast(GMI18n.err(res.error));
+  myEmail = null;
+  renderEmailBox();
+  toast(t('email.removed'));
+});
 
 $('sendCodeBtn').addEventListener('click', requestCode);
 $('resendBtn').addEventListener('click', requestCode);
@@ -714,6 +793,7 @@ $('joinIdBack').addEventListener('change', updateIdHint);
 // ── Language switch ──
 // Static text is redone by GMI18n.apply(); this redraws what the script rendered itself.
 document.addEventListener('gm:lang', () => {
+  if (!$('emailBox').classList.contains('hidden')) renderEmailBox();
   if (order) {
     renderPayment(lastPayment);
     renderTimeline(order.status);

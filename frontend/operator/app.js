@@ -30,8 +30,8 @@ function setupCodeToast(res, fallbackName) {
   if (res.error && !res.account && !res.role) return toast(res.error);
   const who = res.account?.name || res.account?.display_name || fallbackName;
   if (res.devCode) return toast(`Dev mode — setup code for ${who}: ${res.devCode}`);
-  if (res.error) return toast(res.error); // account exists, but the text failed: re-send
-  toast(`Setup code texted to ${who} ✓`);
+  if (res.error) return toast(res.error); // account exists, but the send failed: re-send
+  toast(`Setup code ${res.sentVia === 'email' ? 'emailed' : 'texted'} to ${who} ✓`);
 }
 
 const api = (path, opts = {}) =>
@@ -211,7 +211,7 @@ async function loadOperators() {
             ${o.active ? `<button class="secondary" data-opadmin="${o.id}" data-admin="${o.is_admin ? 'false' : 'true'}">
                ${o.is_admin ? 'Remove admin' : 'Make admin'}</button>` : ''}
             ${o.active && o.phone && !self ? `<button class="secondary" data-opcode="${o.id}">
-               ${o.setup_pending ? 'Re-send setup code' : 'Reset password by text'}</button>` : ''}
+               ${o.setup_pending ? 'Re-send setup code' : 'Reset password'} by ${o.has_email ? 'email' : 'text'}</button>` : ''}
           </div>
         </div>`;
       }).join('')
@@ -253,13 +253,14 @@ $('addOperator').addEventListener('click', async () => {
   const displayName = $('oName').value.trim();
   const username = $('oUsername').value.trim();
   const phone = SomPhone.e164Of($('oPhone')) || $('oPhone').value.trim();
+  const email = $('oEmail').value.trim();
   if (!displayName || !username || !phone) return toast('Name, username and phone are required.');
   const res = await api('/operator/operators', {
     method: 'POST',
-    body: JSON.stringify({ username, displayName, phone }),
+    body: JSON.stringify({ username, displayName, phone, ...(email ? { email } : {}) }),
   });
   if (res.error && !res.account) return toast(res.error);
-  $('oUsername').value = ''; $('oName').value = ''; $('oPhone').value = '';
+  $('oUsername').value = ''; $('oName').value = ''; $('oPhone').value = ''; $('oEmail').value = '';
   setupCodeToast(res, displayName);
   loadOperators();
 });
@@ -406,7 +407,8 @@ async function loadAccessRequests() {
           <div style="margin-top:8px;">
             ${r.role === 'operator' ? `<input data-requser="${r.id}" placeholder="username"
                value="${escapeHtml(suggestUsername(r.name))}" autocapitalize="none" spellcheck="false" />` : ''}
-            <button data-reqacct="${r.id}" style="margin-top:6px;">Create account &amp; text setup code</button>
+            <input data-reqemail="${r.id}" type="email" placeholder="Email (optional — send the code by email)" style="margin-top:6px;" />
+            <button data-reqacct="${r.id}" style="margin-top:6px;">Create account &amp; send setup code</button>
           </div>` : `
           <div class="row" style="margin-top:8px;">
             <button class="secondary" data-req="${r.id}" data-status="contacted">Called them</button>
@@ -466,10 +468,14 @@ async function loadAccessRequests() {
     b.addEventListener('click', async () => {
       const id = b.dataset.reqacct;
       const userInput = $('accessRequests').querySelector(`[data-requser="${id}"]`);
+      const email = $('accessRequests').querySelector(`[data-reqemail="${id}"]`).value.trim();
       b.disabled = true;
       const out = await api(`/operator/access-requests/${id}/account`, {
         method: 'POST',
-        body: JSON.stringify(userInput ? { username: userInput.value.trim() } : {}),
+        body: JSON.stringify({
+          ...(userInput ? { username: userInput.value.trim() } : {}),
+          ...(email ? { email } : {}),
+        }),
       });
       b.disabled = false;
       if (out.error && !out.account) return toast(out.error);
@@ -503,7 +509,7 @@ async function loadDrivers() {
         ${me?.is_admin ? `
         <div class="row" style="margin-top:8px;">
           ${d.active ? `<button class="secondary" data-drvcode="${d.id}">
-             ${d.setup_pending ? 'Re-send setup code' : 'Reset PIN by text'}</button>` : ''}
+             ${d.setup_pending ? 'Re-send setup code' : 'Reset PIN'} by ${d.has_email ? 'email' : 'text'}</button>` : ''}
           <button class="${d.active ? 'danger' : ''}" data-drvactive="${d.id}" data-active="${d.active ? 'false' : 'true'}">
              ${d.active ? 'Deactivate' : 'Reactivate'}</button>
         </div>` : ''}
@@ -662,10 +668,14 @@ function bindOrderButtons() {
 $('addDriver').addEventListener('click', async () => {
   const name = $('dName').value.trim();
   const msisdn = SomPhone.e164Of($('dMsisdn')) || $('dMsisdn').value.trim();
+  const email = $('dEmail').value.trim();
   if (!name || !msisdn) return toast('Name and phone number are required.');
-  const res = await api('/operator/drivers', { method: 'POST', body: JSON.stringify({ name, msisdn }) });
+  const res = await api('/operator/drivers', {
+    method: 'POST',
+    body: JSON.stringify({ name, msisdn, ...(email ? { email } : {}) }),
+  });
   if (res.error && !res.account) return toast(res.error);
-  $('dName').value = $('dMsisdn').value = '';
+  $('dName').value = $('dMsisdn').value = $('dEmail').value = '';
   setupCodeToast(res, name);
   loadDrivers();
 });
