@@ -56,7 +56,7 @@ SOMALI OR ENGLISH
 Switch between Af-Soomaali and English with one tap.
 
 WHAT YOU NEED
-A phone number. That is your account — we text you a code to sign in, so there is no password to remember. Once signed in you can add an email and get your codes there instead. No bank account and no social media login.
+A phone number or an email. We send you a code to sign in, so there is no password to remember. No bank account and no social media login.
 ```
 
 **Category:** Shopping (alternative: Food & Drink)
@@ -102,7 +102,7 @@ chat, delivered with proof photo, sign-in (Phone | Email), and the Somali home s
 | **Purchase history** (order contents/amounts) | Yes | No | App functionality | Required |
 
 **Email address** (Personal info → Email address): collected, **optional**, purpose App
-functionality / Account management — only if a customer adds one for sign-in codes, or an admin
+functionality / Account management — only if a customer signs in with one or adds one for sign-in codes, or an admin
 enters one for a staff setup code. Not shared.
 
 **Not collected:** name, address book, financial/payment info, health, browsing

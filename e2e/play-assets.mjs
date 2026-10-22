@@ -87,6 +87,7 @@ async function proofIllustration(browser) {
 // A fresh unpaid order (the seeded one already says "I've paid"), placed the way the app does.
 const pending = (await call('POST', '/orders', {
   id: crypto.randomUUID(),
+  phone: custA.phone,
   items: [{ text: '2kg rice, 1L cooking oil, 6 eggs, bananas' }],
   totalAmount: 8.5,
   lat: null,

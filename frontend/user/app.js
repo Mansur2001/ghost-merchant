@@ -1,24 +1,26 @@
 // User PWA logic. Vanilla JS, no framework (keeps the bundle tiny per the data budget).
-// Flow: verify phone by SMS code -> describe need -> geolocate + landmark -> create order ->
+// Flow: sign in with a code (SMS or email) -> describe need -> geolocate + landmark -> create order ->
 // tel: USSD pay -> subscribe over WebSocket -> live timeline + chat until DELIVERED.
 
 const $ = (id) => document.getElementById(id);
 const t = GMI18n.t;
 
 // ── Session ──
-// The token is the proof that this handset holds the phone number every order is authorized
+// The token is the proof that this handset signed in to the account every order is authorized
 // against. localStorage (not sessionStorage) on purpose: re-verifying costs a real SMS, and
 // the customer is on one personal device. Cleared on sign-out or on any 401.
+// gm_phone holds what they signed in with (phone or email), for "Signed in as".
 const TOKEN_KEY = 'gm_token';
 const PHONE_KEY = 'gm_phone';
+const CONTACT_KEY = 'gm_contact'; // the last number given for the driver, to fill in next time
 let token = localStorage.getItem(TOKEN_KEY);
 let myPhone = localStorage.getItem(PHONE_KEY);
 
-function setSession(newToken, phone) {
+function setSession(newToken, login) {
   token = newToken;
-  myPhone = phone;
+  myPhone = login;
   localStorage.setItem(TOKEN_KEY, newToken);
-  localStorage.setItem(PHONE_KEY, phone);
+  localStorage.setItem(PHONE_KEY, login);
 }
 function clearSession() {
   // The queue holds this customer's unsent writes; carrying them into another session would
@@ -28,6 +30,7 @@ function clearSession() {
   myPhone = null;
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(PHONE_KEY);
+  localStorage.removeItem(CONTACT_KEY);
   localStorage.removeItem('gm_last');
 }
 
@@ -82,6 +85,21 @@ SomPhone.attach({
   onChange: (r) => { phoneValid = r.valid; phoneE164 = r.e164 || null; },
 });
 
+// The number the driver calls, asked at checkout: an email account has none, and a phone
+// account may want a different one. Filled with the last one used.
+let orderPhoneE164 = null;
+$('orderPhone').value = localStorage.getItem(CONTACT_KEY) || '';
+const refreshOrderPhone = SomPhone.attach({
+  input: $('orderPhone'),
+  hint: $('orderPhoneHint'),
+  onChange: (r) => { orderPhoneE164 = r.valid ? r.e164 : null; },
+});
+function prefillOrderPhone(phone) {
+  if (!phone || $('orderPhone').value.trim()) return;
+  $('orderPhone').value = phone;
+  refreshOrderPhone();
+}
+
 // ── Home / role selection ──
 // The landing is the default first screen; "I'm a customer" reveals sign-in, or jumps
 // straight to the order form if this handset is already verified.
@@ -93,8 +111,8 @@ $('homeBtn').addEventListener('click', () => showView('landingView'));
 $('authHome').addEventListener('click', () => showView('landingView'));
 
 // ── Sign-in: request a code, then verify it ──
-// With a phone (a text), or with the email the account confirmed (only offered when the server
-// sends email). The switch swaps which box is shown; a new customer always starts with a phone.
+// With a phone (a text) or an email (only offered when the server sends email). Either alone
+// is a full sign-in, and a first sign-in creates the account. The switch swaps the box.
 let otpChannel = 'sms';
 let emailOffered = false;
 let codeFor = null; // what the code was sent for — { phone } or { email } — so verify matches it
@@ -159,8 +177,6 @@ async function requestCode() {
   $('codeStep').classList.remove('hidden');
   $('codeInput').focus();
   // devCode is only ever present with the log transport in a non-production backend.
-  // Email: the server answers the same whether or not an account has this email (so it can't
-  // be used to look people up), so the message has to say "if".
   const m = Math.round(res.expiresInSeconds / 60);
   $('otpStatus').textContent = res.devCode
     ? t('auth.dev', { code: res.devCode })
@@ -201,18 +217,20 @@ async function verifyCode() {
     $('otpStatus').textContent = res.error ? GMI18n.err(res.error) : t('err.badCode');
     return;
   }
-  setSession(res.token, res.phone);
+  setSession(res.token, res.phone || res.email);
+  prefillOrderPhone(res.phone);
   $('codeInput').value = '';
   $('otpStatus').textContent = '';
   $('codeStep').classList.add('hidden');
   codeFor = null;
-  $('signedInAs').textContent = res.phone;
+  $('signedInAs').textContent = res.phone || res.email;
   showView('startView');
   loadEmailBox();
   toast(t('auth.ok'));
 }
 
-// ── Email for sign-in codes (signed in) ──
+// ── Adding an email to a phone account (signed in) ──
+// An account that signs in BY email has nothing to add here, and removing it would lock it out.
 let myEmail = null;
 function renderEmailBox() {
   $('emailCurrent').textContent = myEmail ? t('email.current', { email: myEmail }) : t('email.none');
@@ -223,6 +241,8 @@ async function loadEmailBox() {
   if (!emailOffered || !token) return $('emailBox').classList.add('hidden');
   const res = await api('/auth/me');
   if (res.error) return;
+  prefillOrderPhone(res.phone);
+  if (!res.phone) return $('emailBox').classList.add('hidden');
   myEmail = res.email || null;
   $('emailBox').classList.remove('hidden');
   renderEmailBox();
@@ -313,8 +333,8 @@ $('locBtn').addEventListener('click', () => {
 });
 
 // ── Create order ──
-// The owning phone is no longer sent: the server takes it from the verified session, so an
-// order can only ever be created under the number this handset proved it holds.
+// The owner is never sent: the server takes the account from the verified session. `phone` is
+// only the number the driver calls.
 $('submitBtn').addEventListener('click', async () => {
   const request = $('request').value.trim();
   const totalAmount = parseFloat($('amount').value);
@@ -323,6 +343,7 @@ $('submitBtn').addEventListener('click', async () => {
   if (!token) return showView('authView');
   if (!request) return toast(t('start.err.request'));
   if (!(totalAmount >= 0)) return toast(t('start.err.amount'));
+  if (!orderPhoneE164) return toast(t('err.phone'));
   if (!landmark) return toast(t('start.err.landmark'));
 
   $('submitBtn').disabled = true;
@@ -335,6 +356,7 @@ $('submitBtn').addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         id: pendingOrderId,
+        phone: orderPhoneE164,
         items: [{ text: request }],
         totalAmount,
         lat: coords?.lat ?? null,
@@ -345,6 +367,7 @@ $('submitBtn').addEventListener('click', async () => {
     if (res.error) throw new Error(res.error);
     order = res.order;
     pendingOrderId = null; // consumed
+    localStorage.setItem(CONTACT_KEY, orderPhoneE164);
     localStorage.setItem('gm_last', JSON.stringify({ orderId: order.id }));
     enterOrderView(res);
     // Seed the thread with the user's request.
@@ -654,7 +677,7 @@ $('faqBtn').addEventListener('click', () => showView('faqView'));
 $('faqBack').addEventListener('click', () => showView(order ? 'orderView' : 'landingView'));
 
 // ── Resume an order ──
-// Scoped to the verified session: the server answers with THIS number's orders. There is no
+// Scoped to the verified session: the server answers with THIS account's orders. There is no
 // longer any way to list orders for a number you merely typed.
 $('resumeBtn').addEventListener('click', async () => {
   if (!token) return showView('authView');

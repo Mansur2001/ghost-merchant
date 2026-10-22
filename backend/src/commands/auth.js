@@ -1,8 +1,8 @@
-// CQRS write side for customer authentication (phone number + one-time passcode).
+// CQRS write side for customer authentication (one-time passcode by SMS or by email).
 //
-// The customer's phone number IS their identity (invariant 4), so this is the gate that turns
-// "a number someone typed" into "a number someone can prove they hold". Every customer-facing
-// read is authorized against the phone claim minted here.
+// A customer is an account (users.id), reached by proving they hold a phone OR read an inbox.
+// This is the gate that turns "something someone typed" into "something they can prove is
+// theirs". Every customer-facing read is authorized against the account id minted here.
 import { createHash } from 'node:crypto';
 import { prisma, withTransaction } from '../db/prisma.js';
 import { normalizeMsisdnOrThrow } from '../domain/phone.js';
@@ -107,56 +107,54 @@ async function issueChallenge(key, code, { cooldown = true } = {}) {
   }
 }
 
-// The cooldown for email sign-in is keyed by the EMAIL, never by the account it belongs to, so
-// the answer (cooldown included) depends only on what was typed. Keying it by the account's
-// phone would let someone who knows a number text it a code, then try emails until one is
-// "wait 60s" — learning whose email that is. The row holds an unusable random code.
-const emailCooldownKey = (email) => `email:${createHash('sha256').update(email).digest('hex')}`;
+// Email sign-in challenges live in otp_codes beside the phone ones, keyed by a hash of the
+// email: the key can never collide with an E.164 phone, and no address sits in the table.
+const emailKey = (email) => `email:${createHash('sha256').update(email).digest('hex')}`;
 
-// Sign in by email: the customer types the email they confirmed while signed in, and the code
-// for THEIR phone goes there. The phone is still the identity (invariant 4); the email only
-// finds it. With no account behind the email nothing is sent, and the answer is the same.
+// Sign in (or sign up) by email: the code goes to the email typed, and proving you read that
+// inbox is enough — exactly as proving you hold a phone is. The account is created on verify,
+// so the answer is the same whether or not one exists yet.
 export async function requestOtpByEmail(rawEmail) {
   const email = normalizeEmail(rawEmail);
   if (!email) throw new AuthInputError('that does not look like an email address');
   if (!emailAvailable()) throw new AuthInputError('email codes are not available');
+  const key = emailKey(email);
+  const code = generateCode();
   const ttlSeconds = Math.ceil(OTP_TTL_MS / 1000);
 
-  await issueChallenge(emailCooldownKey(email), generateCode());
-
-  const user = await prisma.user.findUnique({ where: { email }, select: { phone_number: true } });
-  if (!user) return { transport: 'none', expiresInSeconds: ttlSeconds };
-
-  // The email's own cooldown above already throttles this, so the phone's challenge is
-  // replaced outright — the newest code wins, exactly as a resend does.
-  const phone = user.phone_number;
-  const code = generateCode();
-  await issueChallenge(phone, code, { cooldown: false });
+  await issueChallenge(key, code);
   try {
     const { transport } = await sendOtpEmail(email, code);
     return { transport, expiresInSeconds: ttlSeconds, code };
   } catch (err) {
-    await prisma.otpCode.deleteMany({ where: { phone } });
+    // As with SMS: a code that never went out must not exist.
+    await prisma.otpCode.deleteMany({ where: { phone: key } });
     console.error(`[OTP] sign-in email to ${maskEmail(email)} failed: ${err.message}`);
     throw err;
   }
 }
 
-// Verify a code that was sent by email. The email resolves to its phone, and from there it is
-// the ordinary phone verification — same attempt cap, same single use, same one generic error
-// (an unknown email fails exactly like a wrong code).
-export async function verifyOtpByEmail(rawEmail, submittedCode) {
-  const email = normalizeEmail(rawEmail);
-  const user = email && await prisma.user.findUnique({ where: { email }, select: { phone_number: true } });
-  if (!user) throw new OtpInvalidError();
-  return verifyOtp(user.phone_number, submittedCode);
-}
+const ACCOUNT = { id: true, phone_number: true, email: true };
 
-// Verify a submitted code. On success the challenge is consumed (single-use) and the customer
-// row is created if this is their first order — the phone becomes a real identity here.
+// Verify a code sent by SMS. On success the account behind the phone is found or created.
 export async function verifyOtp(rawPhone, submittedCode) {
   const phone = normalizeMsisdnOrThrow(rawPhone);
+  return consumeChallenge(phone, submittedCode, (tx) =>
+    tx.user.upsert({ where: { phone_number: phone }, update: {}, create: { phone_number: phone }, select: ACCOUNT }));
+}
 
+// Verify a code sent by email. On success the account behind the email is found or created.
+// Same attempt cap, single use and one generic error as the phone.
+export async function verifyOtpByEmail(rawEmail, submittedCode) {
+  const email = normalizeEmail(rawEmail);
+  if (!email) throw new OtpInvalidError();
+  return consumeChallenge(emailKey(email), submittedCode, (tx) =>
+    tx.user.upsert({ where: { email }, update: {}, create: { email }, select: ACCOUNT }));
+}
+
+// Check a submitted code against the challenge under `key`. On success the challenge is
+// consumed (single-use) and `account(tx)` finds or creates the account, in the same transaction.
+async function consumeChallenge(key, submittedCode, account) {
   // Failures RETURN from the transaction instead of throwing inside it. A throw rolls the
   // transaction back — including the attempts++ and the burn below — which silently turned
   // the 5-attempt cap into no cap at all. The error is raised only after the count commits.
@@ -166,14 +164,14 @@ export async function verifyOtp(rawPhone, submittedCode) {
     // tries as the attacker can run in parallel.
     const rows = await tx.$queryRaw`
       SELECT phone, code_hash, expires_at, attempts FROM otp_codes
-       WHERE phone = ${phone} FOR UPDATE
+       WHERE phone = ${key} FOR UPDATE
     `;
     const challenge = rows[0];
     if (!challenge) return { ok: false };
 
     const expired = new Date(challenge.expires_at).getTime() <= Date.now();
     if (expired || challenge.attempts >= MAX_ATTEMPTS) {
-      await tx.otpCode.deleteMany({ where: { phone } });
+      await tx.otpCode.deleteMany({ where: { phone: key } });
       return { ok: false };
     }
 
@@ -181,33 +179,35 @@ export async function verifyOtp(rawPhone, submittedCode) {
       const attempts = challenge.attempts + 1;
       if (attempts >= MAX_ATTEMPTS) {
         // Burn the challenge — a fresh code (and a fresh cooldown) is now required.
-        await tx.otpCode.deleteMany({ where: { phone } });
+        await tx.otpCode.deleteMany({ where: { phone: key } });
       } else {
-        await tx.otpCode.update({ where: { phone }, data: { attempts } });
+        await tx.otpCode.update({ where: { phone: key }, data: { attempts } });
       }
       return { ok: false };
     }
 
     // Success: single-use, so the code dies with this transaction.
-    await tx.otpCode.deleteMany({ where: { phone } });
-    await tx.user.upsert({
-      where: { phone_number: phone },
-      update: {},
-      create: { phone_number: phone },
-    });
-    return { ok: true };
+    await tx.otpCode.deleteMany({ where: { phone: key } });
+    return { ok: true, user: await account(tx) };
   });
 
   if (!outcome.ok) throw new OtpInvalidError();
-  return { phone };
+  return outcome.user;
 }
 
-// ── Linking an email (signed-in customers only) ──
-// The phone was already proven by the session; this proves the email. Only after both does an
-// email become a place sign-in codes may go.
+// ── Adding an email to a phone account (signed-in customers only) ──
+// The session proves the account; this proves the email. After both, signing in with that
+// email reaches this account.
+
+export class EmailTakenError extends Error {
+  constructor() {
+    super('this email already has its own account');
+    this.status = 409;
+  }
+}
 
 // Send a confirmation code to the email the customer typed. Same atomic cooldown as login codes.
-export async function requestEmailLink(phone, rawEmail) {
+export async function requestEmailLink(userId, rawEmail) {
   const email = normalizeEmail(rawEmail);
   if (!email) throw new AuthInputError('that does not look like an email address');
   if (!emailAvailable()) throw new AuthInputError('email codes are not available');
@@ -217,19 +217,19 @@ export async function requestEmailLink(phone, rawEmail) {
 
   // RAW for the same reason as requestOtp: a conditional upsert is the only atomic cooldown.
   const rows = await prisma.$queryRaw`
-    INSERT INTO email_challenges(phone, email, code_hash, expires_at, attempts, last_sent_at)
-    VALUES (${phone}, ${email}, ${hashCode(code)}, now() + (${String(ttlSeconds)} || ' seconds')::interval, 0, now())
-    ON CONFLICT (phone) DO UPDATE
+    INSERT INTO email_challenges(user_id, email, code_hash, expires_at, attempts, last_sent_at)
+    VALUES (${userId}, ${email}, ${hashCode(code)}, now() + (${String(ttlSeconds)} || ' seconds')::interval, 0, now())
+    ON CONFLICT (user_id) DO UPDATE
       SET email        = EXCLUDED.email,
           code_hash    = EXCLUDED.code_hash,
           expires_at   = EXCLUDED.expires_at,
           attempts     = 0,
           last_sent_at = now()
       WHERE email_challenges.last_sent_at <= now() - (${String(cooldownSeconds)} || ' seconds')::interval
-    RETURNING phone
+    RETURNING user_id
   `;
   if (rows.length === 0) {
-    const existing = await prisma.emailChallenge.findUnique({ where: { phone }, select: { last_sent_at: true } });
+    const existing = await prisma.emailChallenge.findUnique({ where: { user_id: userId }, select: { last_sent_at: true } });
     throw new OtpCooldownError(cooldownRemainingMs(existing?.last_sent_at));
   }
 
@@ -237,54 +237,63 @@ export async function requestEmailLink(phone, rawEmail) {
     const { transport } = await sendEmailLinkCode(email, code);
     return { email, transport, expiresInSeconds: ttlSeconds, code };
   } catch (err) {
-    await prisma.emailChallenge.deleteMany({ where: { phone } });
+    await prisma.emailChallenge.deleteMany({ where: { user_id: userId } });
     console.error(`[OTP] email link to ${maskEmail(email)} failed: ${err.message}`);
     throw err;
   }
 }
 
 // Confirm the code and store the email. Failures return from the transaction and throw after,
-// so the attempt count commits (see verifyOtp).
-export async function verifyEmailLink(phone, submittedCode) {
+// so the attempt count commits (see consumeChallenge).
+export async function verifyEmailLink(userId, submittedCode) {
   const outcome = await withTransaction(async (tx) => {
     // RAW: FOR UPDATE, so parallel guesses can't each get the "last" attempt.
     const rows = await tx.$queryRaw`
-      SELECT phone, email, code_hash, expires_at, attempts FROM email_challenges
-       WHERE phone = ${phone} FOR UPDATE
+      SELECT user_id, email, code_hash, expires_at, attempts FROM email_challenges
+       WHERE user_id = ${userId} FOR UPDATE
     `;
     const challenge = rows[0];
     if (!challenge) return { ok: false };
     if (new Date(challenge.expires_at).getTime() <= Date.now() || challenge.attempts >= MAX_ATTEMPTS) {
-      await tx.emailChallenge.deleteMany({ where: { phone } });
+      await tx.emailChallenge.deleteMany({ where: { user_id: userId } });
       return { ok: false };
     }
     if (!verifyCode(String(submittedCode ?? ''), challenge.code_hash)) {
       const attempts = challenge.attempts + 1;
-      if (attempts >= MAX_ATTEMPTS) await tx.emailChallenge.deleteMany({ where: { phone } });
-      else await tx.emailChallenge.update({ where: { phone }, data: { attempts } });
+      if (attempts >= MAX_ATTEMPTS) await tx.emailChallenge.deleteMany({ where: { user_id: userId } });
+      else await tx.emailChallenge.update({ where: { user_id: userId }, data: { attempts } });
       return { ok: false };
     }
-    await tx.emailChallenge.deleteMany({ where: { phone } });
-    // One email, one account (users.email is UNIQUE): whoever just proved they read this inbox
-    // takes it, and an older account that had it stops getting codes there.
-    await tx.user.updateMany({ where: { email: challenge.email, NOT: { phone_number: phone } }, data: { email: null } });
-    await tx.user.update({ where: { phone_number: phone }, data: { email: challenge.email } });
+    await tx.emailChallenge.deleteMany({ where: { user_id: userId } });
+    // One email, one account (users.email is UNIQUE). An older account with a phone gives it
+    // up — it can still sign in by SMS. An account that signs in ONLY with this email keeps
+    // it: taking it would lock that account, and its orders, away from everyone.
+    const owner = await tx.user.findUnique({ where: { email: challenge.email }, select: ACCOUNT });
+    if (owner && owner.id !== userId) {
+      if (!owner.phone_number) return { ok: false, taken: true };
+      await tx.user.update({ where: { id: owner.id }, data: { email: null } });
+    }
+    await tx.user.update({ where: { id: userId }, data: { email: challenge.email } });
     return { ok: true, email: challenge.email };
   });
+  // Said only AFTER the code proved this person reads that inbox, so it reveals nothing.
+  if (outcome.taken) throw new EmailTakenError();
   if (!outcome.ok) throw new OtpInvalidError();
   return { email: outcome.email };
 }
 
-export async function removeEmail(phone) {
+// Stop signing in with the email. Refused when it's the account's only way in.
+export async function removeEmail(userId) {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: ACCOUNT });
+  if (!user?.phone_number) throw new AuthInputError('this email is how you sign in');
   await withTransaction(async (tx) => {
-    await tx.emailChallenge.deleteMany({ where: { phone } });
-    await tx.user.update({ where: { phone_number: phone }, data: { email: null } });
+    await tx.emailChallenge.deleteMany({ where: { user_id: userId } });
+    await tx.user.update({ where: { id: userId }, data: { email: null } });
   });
 }
 
-export async function getCustomerEmail(phone) {
-  const user = await prisma.user.findUnique({ where: { phone_number: phone }, select: { email: true } });
-  return user?.email ?? null;
+export async function getCustomer(userId) {
+  return prisma.user.findUnique({ where: { id: userId }, select: ACCOUNT });
 }
 
 // Housekeeping: expired challenges are dead weight (and PII-adjacent). Cheap indexed delete.

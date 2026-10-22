@@ -40,8 +40,10 @@ git add -A && git commit -m "What changed" && git push origin main
 
 ## Deploy (server)
 
+⚠️ **No server right now** (deleted 2026-10-22 to save cost). On a new one, put its IP where `SERVER_IP` is, and copy `.env` and `minio.license` across first.
+
 ```bash
-ssh root@80.240.29.219
+ssh root@SERVER_IP
 cd /root/gurikaabe
 
 # 1. Back up the database
@@ -75,7 +77,7 @@ gunzip -c /root/backups/<file>.sql.gz | docker compose exec -T postgres sh -c 'p
 
 **Copy backups to your Mac** (run this on the Mac):
 ```bash
-scp root@80.240.29.219:/root/backups/* ~/gurikaabe-backups/
+scp root@SERVER_IP:/root/backups/* ~/gurikaabe-backups/
 ```
 
 ## After changing a screen

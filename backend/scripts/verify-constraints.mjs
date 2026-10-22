@@ -24,6 +24,7 @@ const REQUIRED_CHECKS = {
   order_photos_kind_check: 'photo kind is one of the two known values',
   refunds_amount_check: 'a refund can never be negative',
   refunds_status_check: 'refund status is one of owed/settled/waived',
+  users_has_login: 'every customer account can be signed in to (phone or email)',
 };
 
 const indexes = await prisma.$queryRaw`

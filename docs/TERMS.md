@@ -29,7 +29,7 @@ merchant's mobile-money number.
 ## Text messages (SMS)
 
 - We text you a **one-time login code only when you ask to sign in**. We do not send marketing
-  or promotional messages. If you add an email, you can choose to get the code there instead.
+  or promotional messages. You can also sign in with an email and get the code there instead.
 - How often you get a text depends on how often you sign in.
 - **Message and data rates may apply.**
 - Reply **STOP** to stop receiving texts, or **HELP** for help. If you reply STOP, we can't send

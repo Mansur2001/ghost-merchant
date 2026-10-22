@@ -1,6 +1,6 @@
-// Email codes: confirm an email while signed in, then sign in with "Email me a code".
+// Email codes: a sign-in of its own (new customers too), or an extra way into a phone account.
 import { test, expect } from '@playwright/test';
-import { openApp, signInCustomer, codeIn, usNumber } from './helpers.js';
+import { openApp, signInCustomer, codeIn, usNumber, somaliNumber } from './helpers.js';
 
 test('link an email, then sign in by email', async ({ browser }, testInfo) => {
   // Signing in consumes the code (and with it the 60s resend cooldown), so the email request
@@ -68,14 +68,27 @@ test('the Phone | Email switch swaps the box, both ways', async ({ browser }, te
   await expect(page.locator('#sendCodeBtn')).toHaveText('Text me a code');
 });
 
-test('"Email me a code" for an email with no account looks exactly like a send', async ({ browser }, testInfo) => {
+test('a new customer signs up with only an email, then orders with a phone for the driver', async ({ browser }, testInfo) => {
   const page = await openApp(browser, testInfo);
   await page.goto('/');
   await page.getByRole('button', { name: /I'm a customer/ }).click();
   await page.locator('#channelPick [data-channel="email"]').click();
-  await page.fill('#signinEmail', `nobody-${Date.now()}@example.com`);
+  const email = `new-${Date.now()}@example.com`;
+  await page.fill('#signinEmail', email);
   await page.click('#sendCodeBtn');
-  // The "if" wording, and no code: nothing was sent, and nothing says so.
-  await expect(page.locator('#otpStatus')).toContainText('If this email is on an account');
-  await expect(page.locator('#otpStatus')).not.toHaveText(/\d{6}/);
+  await page.fill('#codeInput', await codeIn(page.locator('#otpStatus')));
+  await page.click('#verifyBtn');
+  await expect(page.locator('#signedInAs')).toHaveText(email);
+  // Its only way in is this email: nothing to add or remove.
+  await expect(page.locator('#emailBox')).toBeHidden();
+
+  // No phone on the account, so the order asks for one.
+  await page.fill('#request', 'Email-only staging order');
+  await page.fill('#amount', '2');
+  await page.fill('#landmark', 'Staging landmark');
+  await page.click('#submitBtn');
+  await expect(page.locator('#orderView')).toBeHidden();
+  await page.fill('#orderPhone', somaliNumber());
+  await page.click('#submitBtn');
+  await expect(page.locator('#orderView')).toBeVisible();
 });

@@ -73,7 +73,7 @@ customer's page flips to paid live.`
 2. **Writes touching sensitive data are idempotent — enforced in the DB, not just code.**
    Payments: `transactions.telecom_receipt_id UNIQUE` — the EVC/eDahab transaction reference,
    normalized (`domain/paymentRef.js`), so one real payment can never confirm two orders.
-   Customers: `users.phone_number` PK + `ON CONFLICT DO NOTHING`. Drivers: `msisdn UNIQUE`,
+   Customers: `users.phone_number` and `users.email` UNIQUE, upserted on sign-in. Drivers: `msisdn UNIQUE`,
    never upserted (an upsert silently replaced an existing driver's PIN). Photos: `order_photos.object_key UNIQUE` with a deterministic key per (order, kind),
    so a re-upload overwrites one object/row instead of leaking duplicate copies of an image.
 3. **Only an operator's confirmation makes an order paid** (`commands/payments.js`
@@ -81,7 +81,13 @@ customer's page flips to paid live.`
    never changes status — anyone can tap a button. Confirming records the payment row in the
    SAME transaction as the transition, because the refund ledger sums those rows: a paid order
    with no payment row would fail owing nothing.
-4. **Phone numbers are the customer identity.** Validate/normalize at every trust boundary with
+4. **A customer is an account (`users.id`), not a phone.** They sign in with a verified phone
+   (SMS code) OR a verified email (email code); either alone is enough, and the first sign-in
+   creates the account. Customer tokens carry `uid` only, and ownership is `orders.user_id`.
+   `orders.user_phone` is the number the driver calls, typed at checkout and **never proven** —
+   it must never decide who sees an order. A customer token without an integer `uid` is refused
+   (`hasIdentity`): Prisma reads an undefined filter as "no filter", i.e. everyone's orders.
+   Phone numbers: validate/normalize at every trust boundary with
    `domain/phone.js` → canonical E.164 (`+252XXXXXXXXX`). Rule: 2-digit operator prefix +
    7 digits = 9-digit national number. `frontend/shared/phone.js` mirrors this for live input
    feedback; the backend copy is the enforced source of truth. Keep the prefix maps in sync.
@@ -148,18 +154,25 @@ and it is bounded: it carries a code, never money. No SDK — one HTTPS call eac
   carriers filter unregistered senders. `+252` needs Somalia enabled in Geo permissions.
   Setup and troubleshooting: `docs/LIVE_SMS_SETUP.md`.
 
-### Email codes: never an identity
+### Email codes: a sign-in of their own
 
-The phone number is still the customer (invariant 4). Email is only a second way to receive a
-code, and only for an email the customer **confirmed while signed in** (the session proves the
-phone, a code proves the email; `email_challenges`, kept apart from `otp_codes` so a code sent to
-an unconfirmed address can never log anyone in). At sign-in the **Phone | Email** switch swaps
-the phone box for an email box: the typed email finds its account (`users.email` is UNIQUE;
-confirming an email moves it off any older account) and the code for THAT phone goes there.
-No account behind the email = nothing sent, with an identical answer, and the cooldown is keyed
-by the email (never the account's phone), so neither can reveal who owns an address. The reply
-never includes the phone. New customers still start with their phone. Staff setup codes go by email when the admin gives
-one (`drivers.email` / `operators.email`); the claim still needs the phone and the code.
+Email is the **alternative** to SMS, not a supplement: where a text can't arrive (no 10DLC yet,
+a carrier block), a customer signs in — or up — with only an email (invariant 4). At sign-in
+the **Phone | Email** switch swaps the box. The email code lives in `otp_codes` under
+`email:<sha256(email)>` (no address stored, can't collide with an E.164 key) with the same
+cooldown, 5 attempts, single use and one generic error as SMS; the account is created on
+verify, so the answer never depends on whether one exists.
+
+- A **phone account may add an email** while signed in (`email_challenges`, keyed by `user_id`):
+  after that, either way in reaches it. If the email belongs to an older account that has a
+  phone, it moves (that account still has SMS); if it is an **email-only account, it never
+  moves** (409 "this email already has its own account") — taking it would strand that account
+  and its orders. An email-only account can't remove its email (its only way in) and sees no
+  "add an email" box.
+- An email account and a phone account are separate accounts even if the same person owns
+  both; there is no merge.
+- Staff setup codes go by email when the admin gives one (`drivers.email` /
+  `operators.email`); the claim still needs the phone and the code.
 
 ---
 
@@ -170,7 +183,7 @@ Three identities, one signing secret (`SESSION_SECRET`), all tokens HMAC-signed
 
 | Role | Authenticates with | Token TTL | Sees |
 |---|---|---|---|
-| `customer` | phone + 6-digit OTP over SMS (or a confirmed email) | 30 days | only orders under their verified phone |
+| `customer` | 6-digit code by SMS to a phone, or by email | 30 days | only orders placed from their account (`user_id`) |
 | `driver` | msisdn + PIN (scrypt), chosen by the driver via a setup code | 12 hours | only orders the operator assigned to them |
 | `operator` | username + password (scrypt), chosen via a setup code | 12 hours | everything; **admins** also manage staff |
 
@@ -190,8 +203,8 @@ Three identities, one signing secret (`SESSION_SECRET`), all tokens HMAC-signed
   failure outcome, commit the count, and raise after.
 - **Deny = 404, never 403.** A 403 confirms "this order exists, it just isn't yours" — exactly
   what an enumeration script wants. Same for WebSocket `subscribe`.
-- **The client never chooses its own identity.** Order creation takes the phone from the token
-  (not the body); chat `sender` is derived from the role; `subscribe_driver` uses the driver id
+- **The client never chooses its own identity.** Order creation takes the account from the
+  token (the body's `phone` is only the driver's contact number); chat `sender` is derived from the role; `subscribe_driver` uses the driver id
   in the token. None of these are expressible as client input.
 - **WebSocket**: token in the first frame (browsers can't set handshake headers, and a token in
   the query string lands in every access log). Sockets that don't authenticate within 10s are
@@ -357,8 +370,9 @@ delivery). Rules (`commands/photos.js`):
 framework-free to respect the SRS data budget (initial load < 1.5MB). Each PWA has a Service
 Worker that cache-first serves its shell.
 
-- **User**: identity = phone, verified by OTP. Session token in `localStorage`
-  (`gm_token`/`gm_phone`) — not `sessionStorage`, because re-verifying costs a real SMS and the
+- **User**: signs in by SMS or email code; checkout asks for the phone the driver calls
+  (filled with the last one used, `gm_contact`). Session token in `localStorage`
+  (`gm_token`/`gm_phone`, which holds the phone or email signed in with) — not `sessionStorage`, because re-verifying costs a real SMS and the
   customer is on one personal handset. Any 401 clears the session. Resume via
   `GET /api/orders/mine` (token-scoped). Opens on a home/landing role picker; header has Home,
   FAQ and the theme toggle. Checkout takes an optional reference photo.
@@ -414,7 +428,7 @@ Guards (`db/seedSafety.js`), because the seed truncates everything and its passw
 ## Testing
 
 ```bash
-cd backend && npm install && npm test   # 370 Jest unit tests, ESM via --experimental-vm-modules
+cd backend && npm install && npm test   # 378 Jest unit tests, ESM via --experimental-vm-modules
 ./scripts/verify/run-all.sh             # live suites over real HTTP + WebSocket
 ```
 
@@ -470,9 +484,10 @@ operator-confirmed payments with "I've paid" claims, operator-driven dispatch, p
 AIStor, authentication and per-order authorization everywhere, the transactional outbox,
 refunds as a ledger, staff onboarding by invite (admin-only), the offline write queue,
 multi-instance operation behind Redis, login codes delivered to a real US handset (then over ClickSend, now Twilio),
-sign-in by email (Phone | Email switch), reportable error messages (reason + `ref`), and the
-EN/SO interface. The Android app builds and installs. Production runs on one Vultr VPS
-(Frankfurt) at `app.gurikaabe.com`; deploy, backup and rollback are in `COMMANDS.md`.
+sign-in or sign-up by email alone (Phone | Email switch), reportable error messages (reason + `ref`), and the
+EN/SO interface. The Android app builds and installs. **There is no production server right
+now:** the Vultr VPS was deleted on 2026-10-22 to stop the cost until the app is ready. Work
+and test on local staging; `COMMANDS.md` has the deploy, backup and rollback steps for a new box.
 
 **Still to validate:** Twilio SMS and SendGrid email end to end, Twilio delivery to `+252` and `tel:`/USSD `%23`
 dialing. A Play reviewer signs in with the review login (`REVIEW_PHONE`/`REVIEW_CODE`), not a

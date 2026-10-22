@@ -17,7 +17,7 @@ import { seedRefusal } from './seedSafety.js';
 // lives here. Checked BEFORE the truncate, outside its transaction.
 async function countNonSeedRows() {
   const [users, operators, drivers, accessRequests] = await Promise.all([
-    prisma.user.count({ where: { phone_number: { notIn: SEED_CUSTOMERS } } }),
+    prisma.user.count({ where: { OR: [{ phone_number: null }, { phone_number: { notIn: SEED_CUSTOMERS } }] } }),
     prisma.operator.count({ where: { username: { notIn: SEED_OPERATORS.map((o) => o.username) } } }),
     prisma.driver.count({ where: { msisdn: { notIn: SEED_DRIVERS.map((d) => d.msisdn) } } }),
     prisma.accessRequest.count(),
@@ -96,7 +96,11 @@ async function seed() {
       RESTART IDENTITY CASCADE
     `);
 
-    await tx.user.createMany({ data: USERS.map((phone_number) => ({ phone_number })) });
+    const userIds = {};
+    for (const phone_number of USERS) {
+      // eslint-disable-next-line no-await-in-loop
+      userIds[phone_number] = (await tx.user.create({ data: { phone_number }, select: { id: true } })).id;
+    }
 
     await tx.operator.createMany({
       data: OPERATORS.map((o) => ({
@@ -125,6 +129,7 @@ async function seed() {
       const order = await tx.order.create({
         data: {
           user_phone: o.phone,
+          user_id: userIds[o.phone],
           status: o.status,
           total_amount: o.amount,
           items: o.items,

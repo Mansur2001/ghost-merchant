@@ -12,6 +12,7 @@ import {
 import {
   signToken,
   verifyToken,
+  hasIdentity,
   CUSTOMER_TOKEN_TTL_SECONDS,
 } from '../src/middleware/auth.js';
 
@@ -105,6 +106,13 @@ describe('session tokens', () => {
       JSON.stringify({ role: 'operator', phone: '+252619999999', exp: 9e9 })
     ).toString('base64url');
     expect(verifyToken(`${forged}.${sig}`)).toBeNull();
+  });
+
+  test('a customer token without an account id is refused (an undefined id filters nothing)', () => {
+    expect(hasIdentity({ role: 'customer', phone: '+252612345678' })).toBe(false);
+    expect(hasIdentity({ role: 'customer', uid: '12' })).toBe(false);
+    expect(hasIdentity({ role: 'customer', uid: 12 })).toBe(true);
+    expect(hasIdentity({ role: 'driver', id: 3 })).toBe(true);
   });
 
   test('rejects an expired token', () => {

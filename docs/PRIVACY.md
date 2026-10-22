@@ -22,8 +22,8 @@ we do not share it with advertisers, and we never see or hold your money.
 
 | Data | Why | Kept |
 |---|---|---|
-| **Email address** (optional) | Only if you add one to receive sign-in codes by email. You confirm it with a code first, and you can remove it at any time. | Until you remove it or your account is deleted |
-| **Phone number** | It is your account. We send a one-time code to confirm you hold it, and the driver uses it to reach you at the door. | While your account exists |
+| **Email address** (optional) | Only if you sign in with email, or add one to get your codes there. We send a one-time code to confirm it is yours. | Until you remove it or your account is deleted |
+| **Phone number** | To sign in by text (we send a one-time code to confirm you hold it), and on each order so the driver can reach you at the door. | While your account exists |
 | **Delivery location** (GPS, optional) and **landmark** (required) | So a driver can find you. Addresses are unreliable in our service area; the landmark is the primary instruction and the GPS point is an aid. | With the order |
 | **Order contents and chat messages** | To fulfil the order and resolve disputes. | With the order |
 | **Photos you attach** | A reference photo helps the driver find the right item; a delivery-proof photo protects both you and the driver in a dispute. | With the order |

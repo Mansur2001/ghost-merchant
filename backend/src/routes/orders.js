@@ -8,7 +8,7 @@
 import { Router, raw } from 'express';
 import { createOrder, postMessage } from '../commands/orders.js';
 import { claimPayment, PaymentError } from '../commands/payments.js';
-import { getOrderTimeline, getMessages, getOrdersByPhone } from '../queries/orders.js';
+import { getOrderTimeline, getMessages, getOrdersByUser } from '../queries/orders.js';
 import { savePhoto } from '../commands/photos.js';
 import { listPhotos, getPhoto } from '../queries/photos.js';
 import { getObject } from '../storage/objectStore.js';
@@ -42,26 +42,27 @@ ordersRouter.get(
 
 // GET /api/orders/mine — the authenticated customer's own orders (resume view).
 // Replaces the old /orders/by-phone/:phone, which let anyone list any number's orders by
-// typing it. The phone now comes from the verified token and can't be chosen by the caller.
+// typing it. The account now comes from the verified token and can't be chosen by the caller.
 ordersRouter.get('/orders/mine', customerOnly, async (req, res) => {
-  const orders = await getOrdersByPhone(req.auth.phone);
+  const orders = await getOrdersByUser(req.auth.uid);
   res.json({
-    phone: req.auth.phone,
     orders: orders.map((o) => ({ ...o, ...buildPaymentInstruction(o) })),
   });
 });
 
 // Create an order from the PWA checkout. Payload MUST stay sub-10KB.
-// The owning phone is taken from the session, NOT the body — otherwise a verified customer
-// could create orders (and chat threads) under someone else's number.
+// The owning account is taken from the session, NOT the body — otherwise a verified customer
+// could create orders (and chat threads) in someone else's account. `phone` in the body is
+// only the number the driver calls.
 ordersRouter.post('/orders', customerOnly, async (req, res) => {
   try {
-    const { id, items, totalAmount, lat, lng, landmark } = req.body || {};
+    const { id, phone, items, totalAmount, lat, lng, landmark } = req.body || {};
     // `id` is the client's own UUID when it has one. Retrying a create whose response was
     // lost returns the SAME order (201 -> 200) instead of billing the customer twice.
     const { order, created } = await createOrder({
       id,
-      userPhone: req.auth.phone,
+      userId: req.auth.uid,
+      contactPhone: phone,
       items,
       totalAmount,
       lat,

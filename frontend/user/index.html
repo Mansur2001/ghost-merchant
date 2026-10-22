@@ -111,9 +111,9 @@
            chat thread and photo is authorized against, so it has to be verified once. -->
       <section id="authView" class="card hidden">
         <button class="secondary" id="authHome" type="button" style="max-width:130px;margin:0 0 12px;" data-i18n="nav.back">← Back</button>
-        <!-- Phone or email: the switch swaps which box you fill in. Email only finds an account
-             whose owner confirmed that email while signed in, so new customers start with their
-             phone. Shown when the server offers email at all (GET /api/auth/channels). -->
+        <!-- Phone or email: the switch swaps which box you fill in. Either one alone signs you in,
+             or up the first time — email is for when a text can't reach you. Shown when the
+             server offers email at all (GET /api/auth/channels). -->
         <div id="channelPick" class="cc-switch channel-pick hidden" role="group" aria-label="Sign in with">
           <button type="button" data-channel="sms" aria-pressed="true" data-i18n="auth.viaSms">Phone</button>
           <button type="button" data-channel="email" aria-pressed="false" data-i18n="auth.viaEmail">Email</button>
@@ -126,7 +126,7 @@
         <div id="emailSignin" class="hidden">
           <label for="signinEmail" data-i18n="auth.email">Your email</label>
           <input id="signinEmail" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" />
-          <div class="phone-hint muted" data-i18n="auth.emailNote">Use the email you added to your account. New here? Use your phone.</div>
+          <div class="phone-hint muted" data-i18n="auth.emailNote">We email you a code. New here? This works too.</div>
         </div>
         <button id="sendCodeBtn" type="button" data-i18n="auth.send">Text me a code</button>
         <!-- Consent shown where the number is collected: US carriers (10DLC) check for exactly
@@ -152,8 +152,8 @@
         </div>
         <button class="secondary" id="resumeBtn" type="button" data-i18n="start.resume">My orders</button>
 
-        <!-- Optional: an email that can also receive sign-in codes. Confirmed with a code while
-             signed in — the session proves the phone, the code proves the email. -->
+        <!-- Phone accounts only: an email that can also sign in to this account. Confirmed with a
+             code while signed in — the session proves the account, the code proves the email. -->
         <details id="emailBox" class="hidden" style="margin-top:12px;">
           <summary data-i18n="email.title">Get sign-in codes by email</summary>
           <p class="muted" id="emailCurrent" style="margin:8px 0;"></p>
@@ -178,6 +178,11 @@
 
         <div id="locStatus" class="muted" data-i18n="loc.none">Location not set.</div>
         <button class="secondary" id="locBtn" type="button" data-i18n="loc.btn">Use my location</button>
+
+        <!-- Not who you are (that's the account): the number the driver calls for this order. -->
+        <label for="orderPhone" data-i18n="start.phone">Phone for the driver</label>
+        <input id="orderPhone" type="tel" inputmode="tel" placeholder="61 234 5678" autocomplete="tel" />
+        <div class="phone-hint muted" id="orderPhoneHint"></div>
 
         <label for="landmark" data-i18n="start.landmark">Nearest landmark (required)</label>
         <input id="landmark" type="text" data-i18n-ph="start.landmark.ph" placeholder="Green house next to the yellow pharmacy" />

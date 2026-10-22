@@ -9,6 +9,23 @@ first build served to a real paying customer.
 
 ---
 
+## [Unreleased] — sign in (or up) with only an email
+
+### Changed
+- **Email is now an alternative to SMS, not an add-on.** A new customer can sign up with only
+  an email; the code goes there and the account is created on verify. For when texts can't
+  arrive (US 10DLC pending, carrier blocks).
+- **A customer is an account** (`users.id`), signed in to by phone or email. Tokens carry `uid`;
+  orders are owned by `orders.user_id`. Old phone-only sessions are refused, so the app asks to
+  sign in again once.
+- **Checkout asks for the phone the driver calls** (filled with the last one used, or the
+  sign-in phone). It's contact data, never proof of who owns the order.
+- Adding an email to a phone account still works. It never takes an email away from an
+  account that signs in only with it (409), and an email-only account can't remove its email.
+- Migration `20261022090000_customer_accounts`: `users.id` primary key, `phone_number` nullable
+  and UNIQUE, CHECK `users_has_login`, `orders.user_id`, `email_challenges` keyed by account.
+- Privacy policy, Terms and Play listing text say you can sign in with an email.
+
 ## [Unreleased] — errors people can report, logo in every header
 
 ### Added

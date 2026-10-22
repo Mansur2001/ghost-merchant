@@ -19,35 +19,31 @@ import { isUuid, newOrderId } from '../domain/ids.js';
 import { enqueue, wakeOutbox } from '../events/outbox.js';
 import { openRefundIfOwed } from './refunds.js';
 
-// Create an order (and the user, if new). Returns { order, created }.
+// Create an order in the signed-in account. Returns { order, created }.
 //
 // `id` may be supplied by the client (a UUID it minted itself). That makes creation
 // IDEMPOTENT: a flaky mobile connection that retries a request whose response was lost gets
 // the original order back instead of silently creating a second one the customer then pays
 // for twice. It is also what the offline write queue relies on.
 //
-// The client chooses the id, never the owner: the phone still comes from the verified session.
-export async function createOrder({ id, userPhone, items, totalAmount, lat, lng, landmark }) {
-  if (!userPhone) throw new Error('userPhone required');
+// The client chooses the id, never the owner: the account comes from the verified session.
+// `contactPhone` is whatever number the customer wants the driver to call.
+export async function createOrder({ id, userId, contactPhone, items, totalAmount, lat, lng, landmark }) {
+  if (!Number.isInteger(userId)) throw new Error('userId required');
+  if (!contactPhone) throw new Error('phone required');
   if (!landmark || !landmark.trim()) throw new Error('landmark is mandatory');
   if (id != null && !isUuid(id)) throw new Error('id must be a UUID');
-  const phone = normalizeMsisdnOrThrow(userPhone);
+  const phone = normalizeMsisdnOrThrow(contactPhone);
   const orderId = id || newOrderId();
 
   // CP path: an order is what every other write hangs off, so it must be durable before the
   // customer is told it exists and asked to pay for it.
   const result = await withCriticalTransaction(async (tx) => {
-    await tx.user.upsert({
-      where: { phone_number: phone },
-      update: {},
-      create: { phone_number: phone },
-    });
-
     const existing = await tx.order.findUnique({ where: { id: orderId } });
     if (existing) {
       // A retry. Return the original — but only to its owner, or supplying someone else's
       // order id would leak their order.
-      if (existing.user_phone !== phone) throw new Error('id already in use');
+      if (existing.user_id !== userId) throw new Error('id already in use');
       return { order: existing, created: false };
     }
 
@@ -55,6 +51,7 @@ export async function createOrder({ id, userPhone, items, totalAmount, lat, lng,
       data: {
         id: orderId,
         user_phone: phone,
+        user_id: userId,
         items: items || [],
         total_amount: totalAmount,
         lat: lat ?? null,

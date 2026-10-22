@@ -1,4 +1,4 @@
-// Customer authentication routes: prove you hold the phone number, get a session token.
+// Customer authentication routes: prove you hold a phone or read an inbox, get a session token.
 //
 // Layered defence on these two endpoints, because they are the front door and the only
 // endpoints that spend money (each request can send a real SMS):
@@ -9,7 +9,7 @@
 import { Router } from 'express';
 import {
   requestOtp, verifyOtp, requestOtpByEmail, verifyOtpByEmail, OtpCooldownError, OtpInvalidError, AuthInputError, emailAvailable,
-  requestEmailLink, verifyEmailLink, removeEmail, getCustomerEmail,
+  requestEmailLink, verifyEmailLink, removeEmail, getCustomer, EmailTakenError,
 } from '../commands/auth.js';
 import { signToken, requireRole, CUSTOMER_TOKEN_TTL_SECONDS } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
@@ -49,7 +49,6 @@ authRouter.get('/auth/channels', (req, res) => {
 });
 
 // POST /api/auth/otp/request { phone }  or  { channel: 'email', email }
-// By email the answer never includes the phone: it would tell anyone whose number an email is.
 authRouter.post('/auth/otp/request', ...requestLimits, async (req, res) => {
   try {
     const channel = req.body?.channel || 'sms';
@@ -85,6 +84,7 @@ authRouter.post('/auth/otp/request', ...requestLimits, async (req, res) => {
 });
 
 // POST /api/auth/otp/verify { phone, code } or { email, code } -> { token }
+// The token names the account (`uid`), never a phone or email: those are ways in, not who.
 authRouter.post('/auth/otp/verify', ...verifyLimits, async (req, res) => {
   const { phone, email, code } = req.body || {};
   // Shape-check before touching the DB — but answer with the SAME generic error the real
@@ -93,11 +93,11 @@ authRouter.post('/auth/otp/verify', ...verifyLimits, async (req, res) => {
     return res.status(401).json({ error: 'invalid or expired code' });
   }
   try {
-    const { phone: verified } = email && !phone
+    const user = email && !phone
       ? await verifyOtpByEmail(email, code)
       : await verifyOtp(phone, code);
-    const token = signToken({ role: 'customer', phone: verified }, CUSTOMER_TOKEN_TTL_SECONDS);
-    res.json({ token, phone: verified, expiresInSeconds: CUSTOMER_TOKEN_TTL_SECONDS });
+    const token = signToken({ role: 'customer', uid: user.id }, CUSTOMER_TOKEN_TTL_SECONDS);
+    res.json({ token, phone: user.phone_number, email: user.email, expiresInSeconds: CUSTOMER_TOKEN_TTL_SECONDS });
   } catch (err) {
     if (err instanceof OtpInvalidError) return res.status(401).json({ error: err.message });
     if (/Invalid phone number/.test(err.message)) {
@@ -110,25 +110,27 @@ authRouter.post('/auth/otp/verify', ...verifyLimits, async (req, res) => {
 // GET /api/auth/me — lets a client confirm a stored token is still valid on boot.
 authRouter.get('/auth/me', requireRole('customer'), async (req, res, next) => {
   try {
-    const email = await getCustomerEmail(req.auth.phone);
-    res.json({ phone: req.auth.phone, role: req.auth.role, exp: req.auth.exp, email });
+    const user = await getCustomer(req.auth.uid);
+    if (!user) return res.status(401).json({ error: 'unauthorized' });
+    res.json({ phone: user.phone_number, email: user.email, role: req.auth.role, exp: req.auth.exp });
   } catch (err) {
     next(err);
   }
 });
 
-// ── Email for sign-in codes (signed-in customers only) ──
-// The session proves the phone; the code proves the email. The phone comes from the token,
-// never the body, so nobody can attach an email to someone else's number.
+// ── Adding an email to an account (signed-in customers only) ──
+// The session proves the account; the code proves the email. The account comes from the
+// token, never the body, so nobody can attach an email to someone else's account.
+const accountKey = (req) => `customer:${req.auth.uid}`;
 const linkLimits = [
   rateLimit({ windowMs: HOUR, max: 20, message: 'too many code requests' }),
-  rateLimit({ windowMs: HOUR, max: 5, key: (req) => req.auth.phone, message: 'too many code requests' }),
+  rateLimit({ windowMs: HOUR, max: 5, key: accountKey, message: 'too many code requests' }),
 ];
 
 // POST /api/auth/email/request { email }
 authRouter.post('/auth/email/request', requireRole('customer'), ...linkLimits, async (req, res) => {
   try {
-    const result = await requestEmailLink(req.auth.phone, req.body?.email);
+    const result = await requestEmailLink(req.auth.uid, req.body?.email);
     const body = { sent: true, email: result.email, expiresInSeconds: result.expiresInSeconds };
     if (result.transport === 'log' && config.env !== 'production') body.devCode = result.code;
     res.json(body);
@@ -147,26 +149,28 @@ authRouter.post('/auth/email/request', requireRole('customer'), ...linkLimits, a
 authRouter.post(
   '/auth/email/verify',
   requireRole('customer'),
-  rateLimit({ windowMs: 15 * 60 * 1000, max: 10, key: (req) => req.auth.phone, message: 'too many attempts' }),
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 10, key: accountKey, message: 'too many attempts' }),
   async (req, res, next) => {
     // 400, not 401: the session is fine — a 401 would make the app sign the customer out.
     const code = String(req.body?.code ?? '');
     if (!isWellFormedCode(code)) return res.status(400).json({ error: 'invalid or expired code' });
     try {
-      res.json(await verifyEmailLink(req.auth.phone, code));
+      res.json(await verifyEmailLink(req.auth.uid, code));
     } catch (err) {
       if (err instanceof OtpInvalidError) return res.status(400).json({ error: err.message });
+      if (err instanceof EmailTakenError) return res.status(409).json({ error: err.message });
       next(err);
     }
   }
 );
 
-// DELETE /api/auth/email — stop sending codes to email; SMS only again.
+// DELETE /api/auth/email — stop signing in with email; SMS only again.
 authRouter.delete('/auth/email', requireRole('customer'), async (req, res, next) => {
   try {
-    await removeEmail(req.auth.phone);
+    await removeEmail(req.auth.uid);
     res.json({ email: null });
   } catch (err) {
+    if (err instanceof AuthInputError) return res.status(400).json({ error: err.message });
     next(err);
   }
 });

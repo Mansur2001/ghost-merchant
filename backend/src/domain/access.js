@@ -4,12 +4,13 @@
 //
 // Rules:
 //   operator -> every order (the dispatch desk is the manual-override surface).
-//   customer -> only orders created under their own verified phone number.
+//   customer -> only orders placed from their own account (user_id). Never by the order's
+//               phone: that's the number the driver calls, typed at checkout, not proven.
 //   driver   -> only orders the operator has explicitly ASSIGNED to them. Dispatch is
 //               operator-driven, so an unassigned order is invisible to every driver.
 //
 // Defensive by construction: every branch requires BOTH sides of the comparison to be
-// present. A null phone must never match a null phone — that is how "undefined === undefined"
+// present. A null id must never match a null id — that is how "undefined === undefined"
 // turns into a data breach.
 export function canAccessOrder(auth, order) {
   if (!auth || !order) return false;
@@ -19,7 +20,7 @@ export function canAccessOrder(auth, order) {
       return true;
 
     case 'customer':
-      return Boolean(auth.phone) && Boolean(order.user_phone) && auth.phone === order.user_phone;
+      return Number.isInteger(auth.uid) && Number.isInteger(order.user_id) && auth.uid === order.user_id;
 
     case 'driver':
       return (

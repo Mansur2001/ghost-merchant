@@ -23,7 +23,7 @@ export function actorLabel(auth) {
   if (!auth || !auth.role) return 'anon';
   switch (auth.role) {
     case 'customer':
-      return `customer:${maskPhone(auth.phone)}`;
+      return `customer:${auth.uid}`;
     case 'driver':
       return `driver:${auth.id}`;
     case 'operator':

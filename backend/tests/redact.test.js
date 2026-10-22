@@ -42,10 +42,8 @@ describe('actorLabel', () => {
     expect(actorLabel({ role: 'operator', id: 2 })).toBe('operator:2');
   });
 
-  test('masks the customer phone it is built from', () => {
-    const label = actorLabel({ role: 'customer', phone: '+252612345678' });
-    expect(label.startsWith('customer:+252')).toBe(true);
-    expect(label).not.toContain('612345678');
+  test('names the customer by account id, never a phone or email', () => {
+    expect(actorLabel({ role: 'customer', uid: 12 })).toBe('customer:12');
   });
 
   test('degrades safely', () => {

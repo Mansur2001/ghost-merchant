@@ -64,11 +64,18 @@ export function tokenFromRequest(req) {
   return (req.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim();
 }
 
+// A customer token must name its account. One from before accounts (a bare `phone`) is turned
+// away so the app signs in again — never left to reach a query with an undefined id, which
+// Prisma reads as "no filter at all".
+export function hasIdentity(payload) {
+  return payload.role !== 'customer' || Number.isInteger(payload.uid);
+}
+
 // Express guard: require a valid token with one of the allowed roles.
 export function requireRole(...roles) {
   return (req, res, next) => {
     const payload = verifyToken(tokenFromRequest(req));
-    if (!payload || !roles.includes(payload.role)) {
+    if (!payload || !roles.includes(payload.role) || !hasIdentity(payload)) {
       return res.status(401).json({ error: 'unauthorized' });
     }
     req.auth = payload;

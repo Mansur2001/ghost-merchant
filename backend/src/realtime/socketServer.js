@@ -11,7 +11,7 @@
 // payment, and message in the system.
 import { WebSocketServer } from 'ws';
 import { EVENTS, subscribe } from '../events/bus.js';
-import { verifyToken } from '../middleware/auth.js';
+import { verifyToken, hasIdentity } from '../middleware/auth.js';
 import { canAccessOrder } from '../domain/access.js';
 import { getOrder } from '../queries/orders.js';
 import { consumeAsync } from '../middleware/rateLimit.js';
@@ -163,7 +163,7 @@ export function attachSocketServer(httpServer) {
       // ── Pre-auth: `auth` is the only thing that does anything ──
       if (msg.type === 'auth') {
         const payload = verifyToken(String(msg.token || ''));
-        if (!payload) {
+        if (!payload || !hasIdentity(payload)) {
           send(ws, { type: 'auth_error', error: 'invalid or expired token' });
           return ws.close(CLOSE_AUTH_FAILED, 'authentication failed');
         }

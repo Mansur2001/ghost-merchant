@@ -34,23 +34,25 @@ export async function getShoppingList(orderId) {
   });
 }
 
-// Resume view: a customer's orders keyed on phone, most recent first. Active (non-terminal)
+// Resume view: a customer's orders, by account, most recent first. Active (non-terminal)
 // orders come first so "resume" lands on the live one.
 //
 // Prisma can't express "ORDER BY (status IN (...)) ASC", so the two groups are fetched
 // separately. Two indexed queries beat a raw string the schema can't see through, and a
 // customer has a handful of orders, not thousands.
-export async function getOrdersByPhone(phone, limit = 10) {
+export async function getOrdersByUser(userId, limit = 10) {
+  // Prisma reads an undefined filter as no filter: that would be every customer's orders.
+  if (!Number.isInteger(userId)) throw new Error('userId required');
   const TERMINAL = ['DELIVERED', 'FAILED_REFUND'];
   const active = await prisma.order.findMany({
-    where: { user_phone: phone, status: { notIn: TERMINAL } },
+    where: { user_id: userId, status: { notIn: TERMINAL } },
     orderBy: { created_at: 'desc' },
     take: limit,
   });
   if (active.length >= limit) return active;
 
   const done = await prisma.order.findMany({
-    where: { user_phone: phone, status: { in: TERMINAL } },
+    where: { user_id: userId, status: { in: TERMINAL } },
     orderBy: { created_at: 'desc' },
     take: limit - active.length,
   });

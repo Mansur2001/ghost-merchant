@@ -3,7 +3,7 @@
 // null-vs-null cases that are how "undefined === undefined" becomes a data breach.
 import { canAccessOrder, senderForRole } from '../src/domain/access.js';
 
-const ORDER = { id: 7, user_phone: '+252612345678', driver_id: 3 };
+const ORDER = { id: 7, user_id: 12, user_phone: '+252612345678', driver_id: 3 };
 
 describe('canAccessOrder', () => {
   test('operator sees every order', () => {
@@ -12,8 +12,13 @@ describe('canAccessOrder', () => {
   });
 
   test('customer sees only their own order', () => {
-    expect(canAccessOrder({ role: 'customer', phone: '+252612345678' }, ORDER)).toBe(true);
-    expect(canAccessOrder({ role: 'customer', phone: '+252619999999' }, ORDER)).toBe(false);
+    expect(canAccessOrder({ role: 'customer', uid: 12 }, ORDER)).toBe(true);
+    expect(canAccessOrder({ role: 'customer', uid: 13 }, ORDER)).toBe(false);
+  });
+
+  test("the order's phone never grants a customer access: it's only the number the driver calls", () => {
+    expect(canAccessOrder({ role: 'customer', uid: 13, phone: '+252612345678' }, ORDER)).toBe(false);
+    expect(canAccessOrder({ role: 'customer', phone: '+252612345678' }, ORDER)).toBe(false);
   });
 
   test('driver sees only orders assigned to them', () => {
@@ -34,8 +39,8 @@ describe('canAccessOrder', () => {
   });
 
   test('null claims never match null order fields', () => {
-    expect(canAccessOrder({ role: 'customer', phone: null }, { user_phone: null })).toBe(false);
-    expect(canAccessOrder({ role: 'customer' }, { user_phone: undefined })).toBe(false);
+    expect(canAccessOrder({ role: 'customer', uid: null }, { user_id: null })).toBe(false);
+    expect(canAccessOrder({ role: 'customer' }, { user_id: undefined })).toBe(false);
     expect(canAccessOrder({ role: 'driver', id: null }, { driver_id: null })).toBe(false);
     expect(canAccessOrder({ role: 'driver' }, { driver_id: undefined })).toBe(false);
   });
@@ -44,7 +49,7 @@ describe('canAccessOrder', () => {
     expect(canAccessOrder({ role: 'admin' }, ORDER)).toBe(false);
     expect(canAccessOrder({}, ORDER)).toBe(false);
     expect(canAccessOrder(null, ORDER)).toBe(false);
-    expect(canAccessOrder({ role: 'customer', phone: '+252612345678' }, null)).toBe(false);
+    expect(canAccessOrder({ role: 'customer', uid: 12 }, null)).toBe(false);
   });
 
   test('a driver id of 0 is not treated as absent', () => {
