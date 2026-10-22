@@ -3,7 +3,7 @@
 // re-uploading a customer's reference photo overwrites the single stored object and upserts
 // the single row — no duplicate copies of sensitive images accumulate (per the data rules).
 import { prisma } from '../db/prisma.js';
-import { putObject } from '../storage/objectStore.js';
+import { putObject, deleteObject } from '../storage/objectStore.js';
 import { postMessage } from './orders.js';
 
 const EXT = {
@@ -45,6 +45,24 @@ export async function savePhoto({ orderId, kind, bytes, contentType, uploadedBy 
       uploaded_by: uploadedBy || 'user',
     },
   });
+
+  // The key carries the extension, so a re-upload in another format (a JPEG replacing a PNG)
+  // lands on a NEW key and the upsert can't see the old one. Remove those copies here, or the
+  // order shows two photos and a stale image of someone's doorstep stays in storage. A row is
+  // dropped only once its object is gone, so a failed delete stays on record and is retried
+  // by the next upload instead of leaking an untracked object.
+  const stale = await prisma.orderPhoto.findMany({
+    where: { order_id: orderId, kind, NOT: { object_key: objectKey } },
+    select: { id: true, object_key: true },
+  });
+  for (const old of stale) {
+    try {
+      await deleteObject(old.object_key);
+      await prisma.orderPhoto.delete({ where: { id: old.id } });
+    } catch (err) {
+      console.error(`[photos] could not remove replaced ${kind} for order ${orderId}: ${err.message}`);
+    }
+  }
 
   // Drop a system line into the thread so every connected client sees the photo arrive live.
   await postMessage({ orderId, sender: 'system', body: NOTE[kind] });

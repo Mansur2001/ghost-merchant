@@ -251,14 +251,10 @@ async function featureGraphic(browser, shot) {
 const browser = await chromium.launch({ args: ['--ignore-certificate-errors'] });
 try {
   const bashir = await call('POST', '/driver/login', { msisdn: '+252651112223', pin: '5678' });
-  // Sent as SVG (a PNG inside one) so it lands on the seed's key, orders/<id>/delivery_proof.svg,
-  // and replaces the placeholder: the stored key carries the extension, so a PNG would sit
-  // beside it as a second proof photo.
-  const png = (await proofIllustration(browser)).toString('base64');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="720"><image width="720" height="720" href="data:image/png;base64,${png}"/></svg>`;
+  // Replaces the seed's SVG placeholder: one proof photo per order, whatever the format.
   const up = await api.post(`/api/driver/orders/${done.id}/delivery-proof`, {
-    data: Buffer.from(svg),
-    headers: { Authorization: `Bearer ${bashir.token}`, 'Content-Type': 'image/svg+xml' },
+    data: await proofIllustration(browser),
+    headers: { Authorization: `Bearer ${bashir.token}`, 'Content-Type': 'image/png' },
   });
   if (!up.ok()) throw new Error(`proof upload -> ${up.status()} ${await up.text()}`);
 

@@ -19,6 +19,9 @@ first build served to a real paying customer.
   `/auth/otp/verify {email, code}`; the reply never includes the phone, and the cooldown is
   keyed by the email so it can't reveal who owns an address.
 - Terms and Privacy links were the browser's default blue, unreadable on the dark theme.
+- **A photo re-uploaded in another format didn't replace the old one.** The storage key carries
+  the extension, so a PNG after a JPEG made a second object and row, and the order showed two
+  photos. `savePhoto` now removes the other copies of that (order, kind), file first, then row.
 
 ### Changed
 - `users.email` is UNIQUE (migration `20261021150000_users_email_unique`): an email finds one
