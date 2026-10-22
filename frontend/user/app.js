@@ -51,7 +51,7 @@ async function api(path, opts = {}) {
     toast(t('session.expired'));
     return { error: 'session expired' };
   }
-  return res.json().catch(() => ({ error: 'unexpected server response' }));
+  return GMConfig.readJson(res);
 }
 
 const STATES = [
@@ -842,7 +842,8 @@ function toast(msg) {
   if (!t) { t = document.createElement('div'); t.className = 'toast'; document.body.appendChild(t); }
   t.textContent = msg;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.remove(), 3200);
+  // A failure to report stays up long enough to read the reference out.
+  toastTimer = setTimeout(() => t.remove(), /ref [0-9a-f]{8}|\[\d{3}/.test(msg) ? 10000 : 3200);
 }
 
 // ── Service worker ──

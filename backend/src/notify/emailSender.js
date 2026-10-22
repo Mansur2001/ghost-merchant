@@ -8,7 +8,13 @@ import { config } from '../config.js';
 import { resolveTransport } from './smsSender.js';
 import { setupMessage } from '../domain/staffInvite.js';
 
-export class EmailDeliveryError extends Error {}
+// `failure`: a short code safe to show a user ("EMAIL-HTTP403"), like SmsDeliveryError's.
+export class EmailDeliveryError extends Error {
+  constructor(message, failure = 'EMAIL') {
+    super(message);
+    this.failure = failure;
+  }
+}
 
 export function emailConfigured() {
   const g = config.otp.sendgrid;
@@ -20,7 +26,7 @@ export function emailConfigured() {
 async function sendViaSendGrid(to, subject, text) {
   const { apiKey, from } = config.otp.sendgrid;
   if (!emailConfigured()) {
-    throw new EmailDeliveryError('email selected but SENDGRID_API_KEY / EMAIL_FROM are not set');
+    throw new EmailDeliveryError('email selected but SENDGRID_API_KEY / EMAIL_FROM are not set', 'EMAIL-NOCONFIG');
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.otp.sendTimeoutMs);
@@ -44,7 +50,7 @@ async function sendViaSendGrid(to, subject, text) {
       try { body = await res.json(); } catch { /* status only */ }
     }
   } catch (err) {
-    throw new EmailDeliveryError(`sendgrid send failed: ${err.message}`);
+    throw new EmailDeliveryError(`sendgrid send failed: ${err.message}`, err.name === 'AbortError' ? 'EMAIL-TIMEOUT' : 'EMAIL-NETWORK');
   } finally {
     clearTimeout(timer);
   }
@@ -52,7 +58,7 @@ async function sendViaSendGrid(to, subject, text) {
   // (unverified sender, key without Mail Send permission).
   if (res.status !== 202) {
     const detail = body?.errors?.[0]?.message || `HTTP ${res.status}`;
-    throw new EmailDeliveryError(`sendgrid send failed: ${detail}`);
+    throw new EmailDeliveryError(`sendgrid send failed: ${detail}`, `EMAIL-HTTP${res.status}`);
   }
 }
 

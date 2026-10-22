@@ -79,7 +79,8 @@ authRouter.post('/auth/otp/request', ...requestLimits, async (req, res) => {
     // failure is indistinguishable from every other cause of "no code arrived" — which is the
     // single most expensive thing to debug in this system. Never the code itself, only why.
     if (status === 502) console.error(`[OTP] delivery failed: ${err.message}`);
-    res.status(status).json({ error: status === 400 ? err.message : 'could not send code' });
+    if (status === 400) return res.status(400).json({ error: err.message });
+    res.status(502).json({ error: 'could not send code', cause: err.failure || 'SEND' });
   }
 });
 
@@ -138,7 +139,7 @@ authRouter.post('/auth/email/request', requireRole('customer'), ...linkLimits, a
       return res.status(429).json({ error: err.message, retryAfter });
     }
     if (err instanceof AuthInputError) return res.status(400).json({ error: err.message });
-    res.status(502).json({ error: 'could not send code' });
+    res.status(502).json({ error: 'could not send code', cause: err.failure || 'SEND' });
   }
 });
 

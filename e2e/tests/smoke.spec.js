@@ -39,3 +39,13 @@ test('privacy policy and terms are real pages, not the app shell', async ({ brow
   await page.goto('/terms.html');
   await expect(page).toHaveTitle('GuriKaabe — Terms of Service');
 });
+
+test('every app shows the logo in the header', async ({ browser }, testInfo) => {
+  const page = await openApp(browser, testInfo);
+  for (const path of ['/', '/driver/', '/operator/']) {
+    await page.goto(path);
+    const logo = page.locator('header img[src="/icon-192.png"]');
+    await expect(logo).toBeVisible();
+    expect(await logo.evaluate((img) => img.naturalWidth)).toBeGreaterThan(0);
+  }
+});

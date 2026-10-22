@@ -90,7 +90,7 @@ async function sendCode({ phone, email }, role, code) {
     return {
       transport: null,
       sentVia: email ? 'email' : 'sms',
-      smsError: `the setup code could not be ${email ? 'emailed' : 'texted'} — use "Send setup code" to retry`,
+      smsError: `the setup code could not be ${email ? 'emailed' : 'texted'} (${err.failure || 'SEND'}) — use "Send setup code" to retry`,
     };
   }
 }

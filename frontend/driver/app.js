@@ -33,7 +33,7 @@ const api = (path, opts = {}) =>
       ...(opts.headers || {}),
     },
   })
-    .then((r) => r.json())
+    .then(GMConfig.readJson)
     .catch(() => ({ error: 'No connection.', offline: true }));
 
 // ── Login ──
@@ -343,8 +343,8 @@ function connectSocket() {
   // The token goes in the first frame (a browser can't set handshake headers, and a token in
   // the query string lands in every access log). Subscribing happens only once the server
   // has confirmed the session.
-  ws.onopen = () => { $('liveDot').classList.add('on'); ws.send(JSON.stringify({ type: 'auth', token })); };
-  ws.onclose = () => { $('liveDot').classList.remove('on'); ws = null; if (token) setTimeout(connectSocket, 2500); };
+  ws.onopen = () => { ws.send(JSON.stringify({ type: 'auth', token })); };
+  ws.onclose = () => { ws = null; if (token) setTimeout(connectSocket, 2500); };
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if (m.type === 'authenticated') {
@@ -385,7 +385,9 @@ let toastTimer;
 function toast(msg) {
   let t = document.querySelector('.toast');
   if (!t) { t = document.createElement('div'); t.className = 'toast'; document.body.appendChild(t); }
-  t.textContent = msg; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.remove(), 3000);
+  t.textContent = msg; clearTimeout(toastTimer);
+  // A failure to report stays up long enough to read the reference out.
+  toastTimer = setTimeout(() => t.remove(), /ref [0-9a-f]{8}|\[\d{3}/.test(msg) ? 10000 : 3000);
 }
 
 // Auto-resume session.

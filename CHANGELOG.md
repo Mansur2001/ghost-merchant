@@ -9,6 +9,20 @@ first build served to a real paying customer.
 
 ---
 
+## [Unreleased] — errors people can report, logo in every header
+
+### Added
+- **Every failure is reportable.** Server errors carry a short `ref` (the start of the request
+  id) and, when known, a safe cause: `database unavailable [503 · DB-P1001 · ref 1a2b3c4d]`,
+  `could not send code [502 · SMS-21408 · ref …]`. All three apps show the reason in the
+  person's language with the code kept as is, and a dead backend (Caddy's empty 502) now says
+  "server unavailable" instead of doing nothing. Error toasts stay up 10s so the ref can be read.
+
+### Changed
+- The driver and operator headers show the logo instead of the grey dot, like the customer app.
+
+---
+
 ## [Unreleased] — sign in by email, Play Store graphics
 
 ### Fixed

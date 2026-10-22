@@ -284,8 +284,14 @@ Over Somali mobile networks **P is not optional**, so the design picks C or A *p
   `+252••••••678` — including inside the URL, since `/phone/validate/:phone` puts PII in the
   request line — and token/password/pin/code keys are dropped entirely. Never
   `console.log(req.body)`; use `redact()`.
-- **Errors** (`middleware/errorHandler.js`): the client gets a generic message plus the request
-  id; the stack goes to the log. Express's default handler renders stack traces into the
+- **Errors** (`middleware/errorHandler.js`): every error answer carries `ref` (the first 8
+  characters of the request id, added by `errorRef`), and known failures name themselves
+  safely: `database unavailable` (`DB-P1001`), `photo storage unavailable`, `could not send
+  code` with the Twilio/SendGrid code (`SMS-21408`, `EMAIL-HTTP403`). Never a stack, query or
+  host. The PWAs read every reply through `GMConfig.readJson`, which turns any 5xx — including
+  Caddy's empty 502 when the backend is down — into "reason [status · cause · ref]", and
+  `GMI18n.err` translates the reason but keeps that tail word for word: it's what a person
+  reports, and `grep <ref>` in the backend log finds it. The stack goes to the log. Express's default handler renders stack traces into the
   response body outside production. Malformed JSON is 400, oversized bodies 413, unknown `/api`
   routes a JSON 404.
 - **Graceful shutdown**: SIGTERM stops new work, closes sockets with 1001, drains in-flight

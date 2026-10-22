@@ -44,5 +44,29 @@
                    global.Capacitor.isNativePlatform());
   }
 
-  global.GMConfig = { base: base, api: api, wsUrl: wsUrl, isNative: isNative };
+  // Read a fetch Response as JSON, making any SERVER failure reportable: the error gets a
+  // "[status · cause · ref]" tail, e.g. "database unavailable [503 · DB-P1001 · ref 1a2b3c4d]",
+  // so the person can tell us exactly what happened and we can find it in the log (the ref is
+  // the start of the request id). A dead backend answers through Caddy with an empty or HTML
+  // 502, which used to fail JSON parsing and look like nothing happened at all.
+  // 4xx answers ("wrong code", "already paid") are left as they are: those are for the person
+  // to act on, not to report.
+  function readJson(r) {
+    return r.json().catch(function () { return null; }).then(function (body) {
+      if (r.ok) return body || {};
+      if (!body || typeof body !== 'object') {
+        body = { error: r.status >= 500 ? 'server unavailable' : 'unexpected server response' };
+      }
+      body.status = r.status;
+      if (r.status >= 500) {
+        var parts = [String(r.status)];
+        if (body.cause) parts.push(body.cause);
+        if (body.ref) parts.push('ref ' + body.ref);
+        body.error = String(body.error || 'server error') + ' [' + parts.join(' · ') + ']';
+      }
+      return body;
+    });
+  }
+
+  global.GMConfig = { base: base, api: api, wsUrl: wsUrl, isNative: isNative, readJson: readJson };
 })(window);

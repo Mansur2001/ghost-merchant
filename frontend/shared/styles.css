@@ -45,8 +45,6 @@ header {
   display: flex; align-items: center; gap: 10px; position: sticky; top: 0; background: var(--bg); z-index: 5;
 }
 header h1 { font-size: 16px; margin: 0; font-weight: 600; }
-header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
-header .dot.on { background: var(--accent); }
 main { flex: 1; padding: clamp(16px, 4vw, 24px); }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
 label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }

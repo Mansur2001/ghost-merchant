@@ -18,7 +18,7 @@ import { startOutboxRelay, stopOutboxRelay, sweepOutbox } from './events/outbox.
 import { ensureBootstrapOperator } from './commands/operators.js';
 import { securityHeaders } from './middleware/securityHeaders.js';
 import { requestLog } from './middleware/requestLog.js';
-import { apiNotFound, errorHandler } from './middleware/errorHandler.js';
+import { apiNotFound, errorHandler, errorRef } from './middleware/errorHandler.js';
 import { prisma, disconnect as disconnectDb } from './db/prisma.js';
 import { SEED_OPERATORS, SEED_DRIVERS } from './db/seedFixtures.js';
 import { liveSeedCredentials } from './db/seedSafety.js';
@@ -37,6 +37,7 @@ app.disable('x-powered-by'); // don't advertise the stack
 // Order matters: log/headers first so they apply to EVERY response including 404s and
 // rejections from the body parser.
 app.use(requestLog);
+app.use(errorRef);
 app.use(securityHeaders);
 
 // Minimal CORS (frontend is same-origin behind Caddy; this eases local dev tooling).

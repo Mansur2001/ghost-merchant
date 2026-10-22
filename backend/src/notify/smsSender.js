@@ -12,7 +12,14 @@ import { config } from '../config.js';
 import { parsePhone } from '../domain/phone.js';
 import { setupMessage } from '../domain/staffInvite.js';
 
-export class SmsDeliveryError extends Error {}
+// `failure` is a short code that is safe to show a user and quote back to us ("SMS-21408"): the
+// provider's error number or what kind of failure it was, never the message text or a key.
+export class SmsDeliveryError extends Error {
+  constructor(message, failure = 'SMS') {
+    super(message);
+    this.failure = failure;
+  }
+}
 
 // Twilio's Messages API over plain HTTPS + basic auth (Account SID : Auth Token). No SDK on
 // purpose: it would be a large dependency for one form POST, and this keeps the supply chain short.
@@ -21,7 +28,8 @@ async function sendViaTwilio(phone, text) {
   if (!twilioConfigured()) {
     throw new SmsDeliveryError(
       'twilio transport selected but TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / ' +
-        'TWILIO_MESSAGING_SERVICE_SID (or TWILIO_FROM) are not set'
+        'TWILIO_MESSAGING_SERVICE_SID (or TWILIO_FROM) are not set',
+      'SMS-NOCONFIG'
     );
   }
 
@@ -51,7 +59,7 @@ async function sendViaTwilio(phone, text) {
       /* keep the status-only detail */
     }
   } catch (err) {
-    throw new SmsDeliveryError(`twilio send failed: ${err.message}`);
+    throw new SmsDeliveryError(`twilio send failed: ${err.message}`, err.name === 'AbortError' ? 'SMS-TIMEOUT' : 'SMS-NETWORK');
   } finally {
     clearTimeout(timer);
   }
@@ -60,12 +68,12 @@ async function sendViaTwilio(phone, text) {
     // Twilio's own error code (e.g. 21408 "permission to send to this region", 21610
     // "recipient replied STOP") is the fastest route to the cause — keep it in the message.
     const detail = body?.code ? `${body.code}: ${body.message || ''}`.trim() : `HTTP ${res.status}`;
-    throw new SmsDeliveryError(`twilio send failed: ${detail}`);
+    throw new SmsDeliveryError(`twilio send failed: ${detail}`, `SMS-${body?.code || `HTTP${res.status}`}`);
   }
   // Accepted for delivery ('queued' / 'accepted'). A message created already failed is a
   // failure, never "sent".
   if (!body?.sid || body.status === 'failed' || body.status === 'undelivered') {
-    throw new SmsDeliveryError(`twilio send failed: ${body?.error_code || body?.status || 'no message returned'}`);
+    throw new SmsDeliveryError(`twilio send failed: ${body?.error_code || body?.status || 'no message returned'}`, `SMS-${body?.error_code || 'FAILED'}`);
   }
 }
 

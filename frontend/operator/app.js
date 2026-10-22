@@ -42,7 +42,9 @@ const api = (path, opts = {}) =>
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(opts.headers || {}),
     },
-  }).then((r) => r.json());
+  })
+    .then(GMConfig.readJson)
+    .catch(() => ({ error: 'No connection — check the internet and try again', offline: true }));
 
 let me = null; // the signed-in operator (id, username, display_name, must_change_password)
 
@@ -51,12 +53,12 @@ async function login() {
   const password = $('password').value;
   if (!username || !password) return toast('Enter your username and password.');
   $('loginBtn').disabled = true;
-  // A backend that is down answers through Caddy with a non-JSON 502, which api() can't parse.
-  // Say so — a button that silently does nothing looks exactly like a wrong password.
+  // A backend that is down answers through Caddy with a non-JSON 502; api() turns that into
+  // "server unavailable [502]" — a button that silently does nothing looks like a wrong password.
   const res = await api('/operator/login', {
     method: 'POST',
     body: JSON.stringify({ username, password }),
-  }).catch(() => ({ error: 'Can’t reach the server right now. Try again in a minute' }));
+  });
   $('loginBtn').disabled = false;
   if (res.error) {
     // 429 carries retryAfter — say how long rather than just failing.
@@ -715,8 +717,8 @@ function connectSocket() {
   ws = new WebSocket(GMConfig.wsUrl());
   // Authenticate in the first frame, then subscribe. subscribe_operator is now role-gated —
   // before this, any client could send it and receive every order in the system.
-  ws.onopen = () => { $('liveDot').classList.add('on'); ws.send(JSON.stringify({ type: 'auth', token })); };
-  ws.onclose = () => { $('liveDot').classList.remove('on'); if (token) setTimeout(connectSocket, 2500); };
+  ws.onopen = () => { ws.send(JSON.stringify({ type: 'auth', token })); };
+  ws.onclose = () => { if (token) setTimeout(connectSocket, 2500); };
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if (m.type === 'authenticated') {
@@ -752,7 +754,9 @@ let toastTimer;
 function toast(msg) {
   let t = document.querySelector('.toast');
   if (!t) { t = document.createElement('div'); t.className = 'toast'; document.body.appendChild(t); }
-  t.textContent = msg; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.remove(), 3000);
+  t.textContent = msg; clearTimeout(toastTimer);
+  // A failure to report stays up long enough to read the reference out.
+  toastTimer = setTimeout(() => t.remove(), /ref [0-9a-f]{8}|\[\d{3}/.test(msg) ? 10000 : 3000);
 }
 
 if (token) showDash();

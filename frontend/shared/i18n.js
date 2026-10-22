@@ -101,6 +101,12 @@
       'err.login': 'Wrong phone number or PIN.',
       'err.generic': 'Something went wrong. Try again.',
       'net.offline': 'No connection.',
+      'err.server': 'The server is not answering. Try again in a minute.',
+      'err.db': 'Our system is down for a moment. Try again soon.',
+      'err.save': 'We could not save that right now. Try again.',
+      'err.storage': 'Photos can’t be saved right now. Try again soon.',
+      'err.internal': 'Something went wrong on our side.',
+      'err.report': 'If it keeps happening, tell us:',
       'session.expired': 'Session expired. Please sign in again.',
       'signedOut': 'Signed out.',
 
@@ -323,6 +329,12 @@
       'err.login': 'Lambarka ama PIN-ka waa khalad.',
       'err.generic': 'Wax baa khaldamay. Mar kale isku day.',
       'net.offline': 'Internet ma jiro.',
+      'err.server': 'Server-ku ma jawaabayo. Daqiiqad kadib isku day.',
+      'err.db': 'Nidaamkeennu wuu istaagay wax yar. Dib u isku day.',
+      'err.save': 'Hadda lama kaydin karo. Mar kale isku day.',
+      'err.storage': 'Sawirada hadda lama kaydin karo. Dib u isku day.',
+      'err.internal': 'Khalad ayaa dhinaceena ka dhacay.',
+      'err.report': 'Haddii ay sii socoto, noo sheeg:',
       'session.expired': 'Waqtigaagii wuu dhamaaday. Mar kale gal.',
       'signedOut': 'Waad baxday.',
 
@@ -476,6 +488,11 @@
     [/^that does not look like a transaction reference/, 'err.badRef'],
     [/^that does not look like an email address/, 'err.email'],
     [/^No connection/, 'net.offline'],
+    [/^server unavailable/, 'err.server'],
+    [/^database (unavailable|busy)/, 'err.db'],
+    [/^could not save right now/, 'err.save'],
+    [/^photo storage unavailable/, 'err.storage'],
+    [/^(internal error|verification failed|server error|unexpected server response)/, 'err.internal'],
   ];
 
   function saved() {
@@ -496,12 +513,18 @@
     return s;
   }
 
+  // A server failure carries a "[503 · DB-P1001 · ref 1a2b3c4d]" tail (GMConfig.readJson).
+  // Translate the reason, but keep the tail word for word: it's what the person reports.
   function err(message) {
     var m = String(message || '');
+    var tail = m.match(/\s*\[([^\]]+)\]$/);
+    if (tail) m = m.slice(0, tail.index);
+    var text = null;
     for (var i = 0; i < SERVER_ERRORS.length; i++) {
-      if (SERVER_ERRORS[i][0].test(m)) return t(SERVER_ERRORS[i][1]);
+      if (SERVER_ERRORS[i][0].test(m)) { text = t(SERVER_ERRORS[i][1]); break; }
     }
-    return lang === 'en' && m ? m : t('err.generic');
+    if (text == null) text = lang === 'en' && m ? m : t('err.generic');
+    return tail ? text + ' ' + t('err.report') + ' ' + tail[1] : text;
   }
 
   function apply(root) {
