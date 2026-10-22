@@ -553,6 +553,11 @@ async function loadOrders() {
     if (ca && cb) return new Date(a.payment_claimed_at) - new Date(b.payment_claimed_at);
     return ca ? -1 : cb ? 1 : 0;
   });
+  // Every live event redraws the list. Carry over what the operator was in the middle of — a
+  // driver picked but not yet assigned, a transaction number being typed — or another order's
+  // update silently wipes it.
+  const inProgress = [...$('orders').querySelectorAll('[data-assign], [data-payref]')]
+    .map((el) => [el.dataset.assign ? `assign:${el.dataset.assign}` : `payref:${el.dataset.payref}`, el.value]);
   $('orders').innerHTML = orders.length
     ? orders.map((o) => {
         const claimed = o.status === 'PENDING_PAYMENT' && o.payment_claimed_at;
@@ -585,6 +590,11 @@ async function loadOrders() {
       }).join('')
     : '<p class="muted">No active orders. Orders appear here the moment a customer places one — '
       + 'you don\'t need to refresh.</p>';
+  for (const [key, value] of inProgress) {
+    const [kind, id] = key.split(':');
+    const el = $('orders').querySelector(kind === 'assign' ? `[data-assign="${id}"]` : `[data-payref="${id}"]`);
+    if (el && value) el.value = value;
+  }
   bindOrderButtons();
   orders.forEach((o) => loadCardPhotos(o.id));
   return orders.length;

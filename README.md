@@ -110,6 +110,10 @@ one is there because the alternative loses money or leaks customer data.
 
 ## Testing
 
+**Staging** — your working tree at https://localhost:8444 with throwaway data, plus Playwright
+workflows across all three apps: `./scripts/staging.sh up`, then `./scripts/staging.sh test`.
+Every command you'll reuse is in **[`COMMANDS.md`](COMMANDS.md)**.
+
 ```bash
 cd backend && npm test          # 343 Jest unit tests, no database required
 ./scripts/verify/run-all.sh     # live end-to-end suites against the running stack
@@ -204,6 +208,7 @@ Known gaps: push notifications aren't started, and refunds are settled off-platf
 | Document | Covers |
 |---|---|
 | `CLAUDE.md` | Architecture, invariants, and the reasoning behind them. The important one. |
+| `COMMANDS.md` | Every command you'll reuse: staging, tests, deploy, backups, Android. |
 | `CHANGELOG.md` | Release history and version policy. |
 | `mobile/README.md` | Building the Android app. |
 | `docs/PLAY_RELEASE.md` | Getting the app into the Play Store. |

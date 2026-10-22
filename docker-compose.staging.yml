@@ -1,0 +1,22 @@
+# Local STAGING: the same images, Caddy config and security headers as the real stack, built
+# from your working tree, with its own throwaway data. Never touches the dev stack or the VPS.
+# Run it through the wrapper, which pins the project name and env file:
+#
+#   ./scripts/staging.sh up        -> https://localhost:8444
+#
+# Separate Compose project (gurikaabe-staging), so separate containers, network and volumes.
+# Ports are bound to 127.0.0.1: staging carries a test wallet, and nothing on the LAN should
+# be able to reach it.
+services:
+  postgres:
+    # No host port: the wrapper reaches the database with `docker compose exec`.
+    ports: !reset []
+
+  backend:
+    env_file: !override
+      - .env.staging
+
+  caddy:
+    ports: !override
+      - "127.0.0.1:8444:443"
+      - "127.0.0.1:8081:8080"

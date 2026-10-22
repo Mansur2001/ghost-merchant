@@ -9,6 +9,24 @@ first build served to a real paying customer.
 
 ---
 
+## [Unreleased] — local staging + Playwright
+
+### Added
+- **Staging** (`./scripts/staging.sh up`): the working tree as a separate Compose project at
+  https://localhost:8444 with throwaway data, so changes can be seen and clicked through
+  without deploying. `.env.staging` is generated on first run.
+- **Playwright workflows** (`e2e/`, `./scripts/staging.sh test`): the full order lifecycle across
+  the three apps, email codes, staff invite by email, and smoke checks (CSP/console, flags,
+  Somali, legal pages).
+- `COMMANDS.md`: every command reused in this project.
+
+### Fixed
+- The operator dashboard redraws on every live event, which reset a driver picked but not yet
+  assigned and a transaction number being typed. They now survive the redraw. Found by the
+  lifecycle test.
+
+---
+
 ## [Unreleased] — Twilio, and codes by email
 
 Migration `20261021090000_email_codes` adds nullable `users.email`, `drivers.email`,

@@ -411,6 +411,12 @@ Pure-domain suites need no DB; `payments` and `outbox` mock the pg transaction a
 (`jest.unstable_mockModule`). `tests/setup/env.js` seeds the env vars `config.js` requires at
 import. Jest is a devDependency — the Docker image (`npm install --omit=dev`) doesn't ship it.
 
+**Staging + Playwright** (`./scripts/staging.sh`, `e2e/`): a second Compose project
+(`gurikaabe-staging`, `docker-compose.staging.yml`, `.env.staging`) on 127.0.0.1:8444 with its
+own volumes, the real Caddy/CSP, the log transport and a test EVC wallet. `staging.sh test`
+clears the rate limiter and runs the browser workflows (order lifecycle across all three apps,
+email codes, staff invite, smoke). Run it before every deploy; `COMMANDS.md` has the rest.
+
 The live suites are shell/Node rather than supertest, deliberately: they test the stack **as
 deployed** — through Caddy, with the real DB and MinIO — which is where the authorization rules
 actually have to hold. `scripts/verify/lib.sh` resolves Postgres credentials from `.env`, so a
