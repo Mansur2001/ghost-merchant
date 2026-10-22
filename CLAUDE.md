@@ -341,7 +341,9 @@ delivery). Rules (`commands/photos.js`):
   sub-10KB order-JSON budget). The global `express.json` skips non-JSON bodies.
 - **Deterministic key** `orders/<id>/<kind>.<ext>` → one object + one row per (order, kind).
   Re-upload upserts (`ON CONFLICT (object_key)`), so duplicate copies of sensitive images can't
-  pile up.
+  pile up. The key carries the extension, so a re-upload in ANOTHER format (PNG after JPEG)
+  lands on a new key: `savePhoto` then deletes the other copies of that (order, kind) — object
+  first, row only once the object is gone, so a failed delete is retried by the next upload.
 - Browser never talks to MinIO. `GET /api/orders/:id/photos` lists metadata;
   `…/photos/:pid/raw` **streams the bytes through the backend**. `presignGet` is kept for real
   deploys where MinIO is browser-reachable behind Caddy — locally `minio:9000` only resolves
@@ -412,7 +414,7 @@ Guards (`db/seedSafety.js`), because the seed truncates everything and its passw
 ## Testing
 
 ```bash
-cd backend && npm install && npm test   # 360 Jest unit tests, ESM via --experimental-vm-modules
+cd backend && npm install && npm test   # 370 Jest unit tests, ESM via --experimental-vm-modules
 ./scripts/verify/run-all.sh             # live suites over real HTTP + WebSocket
 ```
 
@@ -467,12 +469,23 @@ Working and verified against the live stack: full order lifecycle over WebSocket
 operator-confirmed payments with "I've paid" claims, operator-driven dispatch, photos in MinIO
 AIStor, authentication and per-order authorization everywhere, the transactional outbox,
 refunds as a ledger, staff onboarding by invite (admin-only), the offline write queue,
-multi-instance operation behind Redis, login codes delivered to a real US handset (then over ClickSend, now Twilio), and
-the EN/SO interface. The Android app builds and installs.
+multi-instance operation behind Redis, login codes delivered to a real US handset (then over ClickSend, now Twilio),
+sign-in by email (Phone | Email switch), reportable error messages (reason + `ref`), and the
+EN/SO interface. The Android app builds and installs. Production runs on one Vultr VPS
+(Frankfurt) at `app.gurikaabe.com`; deploy, backup and rollback are in `COMMANDS.md`.
 
 **Still to validate:** Twilio SMS and SendGrid email end to end, Twilio delivery to `+252` and `tel:`/USSD `%23`
 dialing. A Play reviewer signs in with the review login (`REVIEW_PHONE`/`REVIEW_CODE`), not a
 real text. Production deploy: `docker-compose.prod.yml` (+ `Caddyfile.prod`). See
 `docs/PLAY_RELEASE.md`.
 
+**Known gaps:** a few routes (placing an order, chat) catch their own errors and answer 400 with
+`err.message`, so an infrastructure failure there skips `describeFailure` and shows no status or
+cause (the `ref` still comes through). Real wallet merchant numbers and USSD codes aren't
+configured yet: no wallet is offered until they are (`domain/wallets.js`).
+
 Not started: push notifications.
+
+**Session history** (`docs/history/`): one dated file per working session — what changed, why,
+what was decided, and what was left open. Read the latest before picking work back up. Public
+repo: never put secrets, passwords or customer data in it.
