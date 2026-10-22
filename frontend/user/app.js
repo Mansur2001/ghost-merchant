@@ -500,11 +500,9 @@ GMQueue.onChange(renderSyncState);
 function connectSocket() {
   ws = new WebSocket(GMConfig.wsUrl());
   ws.onopen = () => {
-    $('liveDot').classList.add('on');
     ws.send(JSON.stringify({ type: 'auth', token }));
   };
   ws.onclose = () => {
-    $('liveDot').classList.remove('on');
     if (token && order) setTimeout(connectSocket, 2000); // auto-reconnect
   };
   ws.onmessage = (ev) => {
