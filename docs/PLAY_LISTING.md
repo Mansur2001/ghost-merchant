@@ -29,63 +29,59 @@ GuriKaabe
 ```
 Order from the market and pay from your own phone. Delivery you can follow live.
 ```
-*(79 characters)*
+*(80 characters, the limit)*
 
-**Full description (4000 chars max)**
+**Full description (4000 chars max)** — one line per paragraph, so it pastes cleanly
 ```
 GuriKaabe brings the market to your door.
 
-Tell us what you need in your own words, add the landmark nearest to you, and a driver
-collects it and brings it to you. You follow every step live — paid, dispatched, on the way,
-delivered.
+Tell us what you need in your own words, add the landmark nearest to you, and a driver collects it and brings it to you. You follow every step live — paid, dispatched, on the way, delivered.
 
 PAY FROM YOUR OWN PHONE
-Payment goes directly from your phone to the merchant using your mobile money. Tap to pay
-and your dialer opens with the code already filled in. We never hold your money and we never
-ask for card or bank details.
+Payment goes directly from your phone to the merchant using your mobile money. Tap to pay and your dialer opens with the code already filled in. We never hold your money and we never ask for card or bank details.
 
 BUILT FOR HOW ADDRESSES REALLY WORK
-Street addresses are unreliable where we operate, so GuriKaabe is built around landmarks.
-Describe the nearest landmark — the green house next to the yellow pharmacy — and optionally
-share your location to help the driver find you faster.
+Street addresses are unreliable where we operate, so GuriKaabe is built around landmarks. Describe the nearest landmark — the green house next to the yellow pharmacy — and optionally share your location to help the driver find you faster.
 
 SEE WHAT YOU ORDERED
-Attach a photo of what you need so the driver picks the right thing. When it arrives, the
-driver adds a delivery photo, so there is never a dispute about what turned up.
+Attach a photo of what you need so the driver picks the right thing. When it arrives, the driver adds a delivery photo, so there is never a dispute about what turned up.
 
 TALK TO YOUR DRIVER
-Every order has its own chat thread. Ask a question, adjust an item, tell the driver where to
-turn — all inside the app.
+Every order has its own chat thread. Ask a question, adjust an item, tell the driver where to turn — all inside the app.
 
 LIGHT ON DATA
-The whole app is under 4 MB and designed to work on older phones and slow connections.
+The app is a small download, made to work on older phones and slow connections.
+
+SOMALI OR ENGLISH
+Switch between Af-Soomaali and English with one tap.
 
 WHAT YOU NEED
-A phone number. That is your account — we send you a code to confirm it. No bank account, no
-email address, no social media login.
+A phone number. That is your account — we text you a code to sign in, so there is no password to remember. Once signed in you can add an email and get your codes there instead. No bank account and no social media login.
 ```
 
 **Category:** Shopping (alternative: Food & Drink)
 **Tags:** delivery, shopping, groceries
-**Contact email:** `[YOUR EMAIL]` · **Website:** `[YOUR SITE]` · **Privacy policy:** `[URL]`
+**Contact email:** `gurikaabe@gmail.com` · **Website:** `https://app.gurikaabe.com` · **Privacy policy:** `https://app.gurikaabe.com/privacy.html`
 
 ---
 
 ## 3. Graphics you still need
 
-| Asset | Spec | Status |
-|---|---|---|
-| App icon | 512×512 PNG | ✅ `mobile/resources/play-store-icon-512.png` |
-| Feature graphic | 1024×500 PNG/JPG | ❌ **you must make this** |
-| Phone screenshots | 2–8, min 320px, 16:9 or 9:16 | ❌ capture on your device |
-| Tablet screenshots | optional | — |
+All generated from staging seed data by `./scripts/staging.sh shots` into `play-screenshots/`
+(git-ignored; re-run after a UI change).
 
-**Screenshots — capture these five**, from the seeded demo data only:
-1. The landing/role picker
-2. The order form with a landmark filled in
-3. The order view with the live progress timeline
-4. The chat thread
-5. The delivered state with the proof photo
+| Console field | File(s) | Spec met |
+|---|---|---|
+| App icon | `app-icon-512.png` | 512×512 PNG, under 1 MB |
+| Feature graphic | `feature-graphic-1024x500.png` | 1024×500 PNG |
+| Phone screenshots | `phone/01…08.png` | 8 × 1080×1920 (9:16) — enough for promotion (4+ at ≥1080 px) |
+| 7-inch tablet screenshots | `tablet-7in/01…08.png` | 8 × 1206×2144 (9:16) |
+| 10-inch tablet screenshots | `tablet-10in/01…08.png` | 8 × 1620×2880 (9:16), each side ≥1080 |
+| Desktop screenshots | — | optional; skip (no PC/Chromebook build) |
+| Video | — | optional; skip |
+
+The eight screens, in upload order: home, order form, pay with mobile money, live tracking,
+chat, delivered with proof photo, sign-in (Phone | Email), and the Somali home screen.
 
 > **Use seeded data only.** Real screenshots would put a real customer's phone number and home
 > landmark in a public store listing.
@@ -180,7 +176,7 @@ Google reviews the app against what you declared. The realistic risks here:
 ```
 GuriKaabe requires a phone number and an SMS code to sign in. For review, please use:
   1. Tap "I'm a customer".
-  2. Tap the 🇺🇸 +1 switch, then enter: [REVIEW_PHONE without +1]
+  2. Keep "Phone" selected, tap the 🇺🇸 +1 switch, then enter: [REVIEW_PHONE without +1]
   3. Tap "Text me a code", then enter: [REVIEW_CODE]
 No text message is sent to this number; the code above always works for it.
 Language: the SO / EN button in the top bar switches between Somali and English.

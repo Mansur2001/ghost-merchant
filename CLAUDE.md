@@ -153,9 +153,12 @@ and it is bounded: it carries a code, never money. No SDK — one HTTPS call eac
 The phone number is still the customer (invariant 4). Email is only a second way to receive a
 code, and only for an email the customer **confirmed while signed in** (the session proves the
 phone, a code proves the email; `email_challenges`, kept apart from `otp_codes` so a code sent to
-an unconfirmed address can never log anyone in). Sign-in "Email me a code" sends to
-`users.email` or to nobody — and answers identically either way, cooldown included, so it can't
-be used to learn which numbers have accounts. Staff setup codes go by email when the admin gives
+an unconfirmed address can never log anyone in). At sign-in the **Phone | Email** switch swaps
+the phone box for an email box: the typed email finds its account (`users.email` is UNIQUE;
+confirming an email moves it off any older account) and the code for THAT phone goes there.
+No account behind the email = nothing sent, with an identical answer, and the cooldown is keyed
+by the email (never the account's phone), so neither can reveal who owns an address. The reply
+never includes the phone. New customers still start with their phone. Staff setup codes go by email when the admin gives
 one (`drivers.email` / `operators.email`); the claim still needs the phone and the code.
 
 ---
@@ -403,7 +406,7 @@ Guards (`db/seedSafety.js`), because the seed truncates everything and its passw
 ## Testing
 
 ```bash
-cd backend && npm install && npm test   # 343 Jest unit tests, ESM via --experimental-vm-modules
+cd backend && npm install && npm test   # 360 Jest unit tests, ESM via --experimental-vm-modules
 ./scripts/verify/run-all.sh             # live suites over real HTTP + WebSocket
 ```
 
@@ -416,6 +419,8 @@ import. Jest is a devDependency — the Docker image (`npm install --omit=dev`) 
 own volumes, the real Caddy/CSP, the log transport and a test EVC wallet. `staging.sh test`
 clears the rate limiter and runs the browser workflows (order lifecycle across all three apps,
 email codes, staff invite, smoke). Run it before every deploy; `COMMANDS.md` has the rest.
+`staging.sh shots` reseeds and renders the Play Store graphics (`e2e/play-assets.mjs` →
+`play-screenshots/`, git-ignored): seed data only, as everywhere public.
 
 The live suites are shell/Node rather than supertest, deliberately: they test the stack **as
 deployed** — through Caddy, with the real DB and MinIO — which is where the authorization rules

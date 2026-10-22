@@ -33,7 +33,7 @@ model User {
   phone_number String   @id
   created_at   DateTime @default(now()) @db.Timestamptz(6)
   /// Confirmed by the signed-in customer; only then can sign-in codes go here.
-  email        String?
+  email        String?  @unique
   orders       Order[]
 
   @@map("users")

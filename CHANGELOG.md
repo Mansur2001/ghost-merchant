@@ -9,6 +9,27 @@ first build served to a real paying customer.
 
 ---
 
+## [Unreleased] — sign in by email, Play Store graphics
+
+### Fixed
+- **Sign-in "Email" did nothing visible.** It only changed the button label, and still asked
+  for a phone number. The **Phone | Email** switch now swaps the phone box for an email box:
+  type the email you confirmed in your account and the code goes there. New customers still
+  start with a phone number. `POST /api/auth/otp/request {channel:'email', email}` and
+  `/auth/otp/verify {email, code}`; the reply never includes the phone, and the cooldown is
+  keyed by the email so it can't reveal who owns an address.
+- Terms and Privacy links were the browser's default blue, unreadable on the dark theme.
+
+### Changed
+- `users.email` is UNIQUE (migration `20261021150000_users_email_unique`): an email finds one
+  account. Confirming an email takes it off any older account that had it.
+
+### Added
+- `./scripts/staging.sh shots`: Play Store phone, 7" and 10" tablet screenshots, the feature
+  graphic and the 512 icon, rendered from seed data into `play-screenshots/`.
+
+---
+
 ## [Unreleased] — local staging + Playwright
 
 ### Added

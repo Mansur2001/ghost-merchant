@@ -3,6 +3,7 @@
 // The customer's phone number IS their identity (invariant 4), so this is the gate that turns
 // "a number someone typed" into "a number someone can prove they hold". Every customer-facing
 // read is authorized against the phone claim minted here.
+import { createHash } from 'node:crypto';
 import { prisma, withTransaction } from '../db/prisma.js';
 import { normalizeMsisdnOrThrow } from '../domain/phone.js';
 import {
@@ -50,44 +51,17 @@ export function emailAvailable() {
   return emailConfigured() || config.env !== 'production';
 }
 
-// Issue (or re-issue) a passcode for a phone number, by SMS or to the account's confirmed
-// email. The UPSERT is conditional on the cooldown having elapsed, which makes "one live
-// challenge per number" and the resend throttle a single atomic decision — two concurrent
-// requests cannot both win, and the loser learns nothing except "wait".
-export async function requestOtp(rawPhone, { channel = 'sms' } = {}) {
+// Issue (or re-issue) a passcode for a phone number, by SMS. The UPSERT is conditional on the
+// cooldown having elapsed, which makes "one live challenge per number" and the resend throttle
+// a single atomic decision — two concurrent requests cannot both win, and the loser learns
+// nothing except "wait".
+export async function requestOtp(rawPhone) {
   const phone = normalizeMsisdnOrThrow(rawPhone);
-  if (channel !== 'sms' && channel !== 'email') throw new AuthInputError('channel must be sms or email');
-  if (channel === 'email' && !emailAvailable()) throw new AuthInputError('email codes are not available');
   const reviewCode = reviewCodeFor(phone, config.otp.review);
   const code = reviewCode ?? generateCode();
-  const cooldownSeconds = Math.ceil(RESEND_COOLDOWN_MS / 1000);
   const ttlSeconds = Math.ceil(OTP_TTL_MS / 1000);
 
-  // RAW, and it must stay raw. This is a CONDITIONAL upsert: the update only fires if the
-  // cooldown has elapsed, which makes "one live challenge per number" and the resend throttle
-  // a single atomic decision. Prisma's upsert has no WHERE on its update branch, so the
-  // equivalent would be read-then-write — and two concurrent requests would both read "the
-  // cooldown passed" and both send an SMS, which is a real cost and an SMS-bomb vector.
-  const rows = await prisma.$queryRaw`
-    INSERT INTO otp_codes(phone, code_hash, expires_at, attempts, last_sent_at)
-    VALUES (${phone}, ${hashCode(code)}, now() + (${String(ttlSeconds)} || ' seconds')::interval, 0, now())
-    ON CONFLICT (phone) DO UPDATE
-      SET code_hash    = EXCLUDED.code_hash,
-          expires_at   = EXCLUDED.expires_at,
-          attempts     = 0,
-          last_sent_at = now()
-      WHERE otp_codes.last_sent_at <= now() - (${String(cooldownSeconds)} || ' seconds')::interval
-    RETURNING phone
-  `;
-
-  if (rows.length === 0) {
-    // Conflict + cooldown not elapsed: tell the caller how long to wait, nothing else.
-    const existing = await prisma.otpCode.findUnique({
-      where: { phone },
-      select: { last_sent_at: true },
-    });
-    throw new OtpCooldownError(cooldownRemainingMs(existing?.last_sent_at));
-  }
+  await issueChallenge(phone, code);
 
   // The review number gets no SMS: nobody holds a handset for it. Its transport is not `log`,
   // so the route never echoes the code back either — the reviewer has it from the Console notes.
@@ -97,15 +71,6 @@ export async function requestOtp(rawPhone, { channel = 'sms' } = {}) {
   }
 
   try {
-    if (channel === 'email') {
-      // Only a confirmed email ever receives a login code. With none on file nothing is sent,
-      // but the answer, and the cooldown row above, are the same as a real send — otherwise
-      // this endpoint would tell anyone which numbers have an account with an email.
-      const user = await prisma.user.findUnique({ where: { phone_number: phone }, select: { email: true } });
-      if (!user?.email) return { phone, transport: 'none', expiresInSeconds: ttlSeconds, code };
-      const { transport } = await sendOtpEmail(user.email, code);
-      return { phone, transport, expiresInSeconds: ttlSeconds, code };
-    }
     const { transport } = await sendOtpSms(phone, code);
     return { phone, transport, expiresInSeconds: ttlSeconds, code };
   } catch (err) {
@@ -115,6 +80,76 @@ export async function requestOtp(rawPhone, { channel = 'sms' } = {}) {
     await prisma.otpCode.deleteMany({ where: { phone } });
     throw err;
   }
+}
+
+// RAW, and it must stay raw. This is a CONDITIONAL upsert: the update only fires if the
+// cooldown has elapsed. Prisma's upsert has no WHERE on its update branch, so the equivalent
+// would be read-then-write — and two concurrent requests would both read "the cooldown passed"
+// and both send a message, which is a real cost and an SMS-bomb vector.
+async function issueChallenge(key, code, { cooldown = true } = {}) {
+  const cooldownSeconds = cooldown ? Math.ceil(RESEND_COOLDOWN_MS / 1000) : 0;
+  const ttlSeconds = Math.ceil(OTP_TTL_MS / 1000);
+  const rows = await prisma.$queryRaw`
+    INSERT INTO otp_codes(phone, code_hash, expires_at, attempts, last_sent_at)
+    VALUES (${key}, ${hashCode(code)}, now() + (${String(ttlSeconds)} || ' seconds')::interval, 0, now())
+    ON CONFLICT (phone) DO UPDATE
+      SET code_hash    = EXCLUDED.code_hash,
+          expires_at   = EXCLUDED.expires_at,
+          attempts     = 0,
+          last_sent_at = now()
+      WHERE otp_codes.last_sent_at <= now() - (${String(cooldownSeconds)} || ' seconds')::interval
+    RETURNING phone
+  `;
+  if (rows.length === 0) {
+    // Conflict + cooldown not elapsed: tell the caller how long to wait, nothing else.
+    const existing = await prisma.otpCode.findUnique({ where: { phone: key }, select: { last_sent_at: true } });
+    throw new OtpCooldownError(cooldownRemainingMs(existing?.last_sent_at));
+  }
+}
+
+// The cooldown for email sign-in is keyed by the EMAIL, never by the account it belongs to, so
+// the answer (cooldown included) depends only on what was typed. Keying it by the account's
+// phone would let someone who knows a number text it a code, then try emails until one is
+// "wait 60s" — learning whose email that is. The row holds an unusable random code.
+const emailCooldownKey = (email) => `email:${createHash('sha256').update(email).digest('hex')}`;
+
+// Sign in by email: the customer types the email they confirmed while signed in, and the code
+// for THEIR phone goes there. The phone is still the identity (invariant 4); the email only
+// finds it. With no account behind the email nothing is sent, and the answer is the same.
+export async function requestOtpByEmail(rawEmail) {
+  const email = normalizeEmail(rawEmail);
+  if (!email) throw new AuthInputError('that does not look like an email address');
+  if (!emailAvailable()) throw new AuthInputError('email codes are not available');
+  const ttlSeconds = Math.ceil(OTP_TTL_MS / 1000);
+
+  await issueChallenge(emailCooldownKey(email), generateCode());
+
+  const user = await prisma.user.findUnique({ where: { email }, select: { phone_number: true } });
+  if (!user) return { transport: 'none', expiresInSeconds: ttlSeconds };
+
+  // The email's own cooldown above already throttles this, so the phone's challenge is
+  // replaced outright — the newest code wins, exactly as a resend does.
+  const phone = user.phone_number;
+  const code = generateCode();
+  await issueChallenge(phone, code, { cooldown: false });
+  try {
+    const { transport } = await sendOtpEmail(email, code);
+    return { transport, expiresInSeconds: ttlSeconds, code };
+  } catch (err) {
+    await prisma.otpCode.deleteMany({ where: { phone } });
+    console.error(`[OTP] sign-in email to ${maskEmail(email)} failed: ${err.message}`);
+    throw err;
+  }
+}
+
+// Verify a code that was sent by email. The email resolves to its phone, and from there it is
+// the ordinary phone verification — same attempt cap, same single use, same one generic error
+// (an unknown email fails exactly like a wrong code).
+export async function verifyOtpByEmail(rawEmail, submittedCode) {
+  const email = normalizeEmail(rawEmail);
+  const user = email && await prisma.user.findUnique({ where: { email }, select: { phone_number: true } });
+  if (!user) throw new OtpInvalidError();
+  return verifyOtp(user.phone_number, submittedCode);
 }
 
 // Verify a submitted code. On success the challenge is consumed (single-use) and the customer
@@ -230,6 +265,9 @@ export async function verifyEmailLink(phone, submittedCode) {
       return { ok: false };
     }
     await tx.emailChallenge.deleteMany({ where: { phone } });
+    // One email, one account (users.email is UNIQUE): whoever just proved they read this inbox
+    // takes it, and an older account that had it stops getting codes there.
+    await tx.user.updateMany({ where: { email: challenge.email, NOT: { phone_number: phone } }, data: { email: null } });
     await tx.user.update({ where: { phone_number: phone }, data: { email: challenge.email } });
     return { ok: true, email: challenge.email };
   });

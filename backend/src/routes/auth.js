@@ -8,7 +8,7 @@
 //   4. per-challenge attempts - caps online guessing of the code itself
 import { Router } from 'express';
 import {
-  requestOtp, verifyOtp, OtpCooldownError, OtpInvalidError, AuthInputError, emailAvailable,
+  requestOtp, verifyOtp, requestOtpByEmail, verifyOtpByEmail, OtpCooldownError, OtpInvalidError, AuthInputError, emailAvailable,
   requestEmailLink, verifyEmailLink, removeEmail, getCustomerEmail,
 } from '../commands/auth.js';
 import { signToken, requireRole, CUSTOMER_TOKEN_TTL_SECONDS } from '../middleware/auth.js';
@@ -21,7 +21,11 @@ export const authRouter = Router();
 
 // Bucket key for the per-phone limits. Falls back to the raw input so garbage can't dodge
 // the limiter by simply being unparseable.
+// Signing in by email buckets by the email instead.
 const phoneKey = (req) => {
+  if (req.body?.channel === 'email' || (req.body?.email && !req.body?.phone)) {
+    return `email:${String(req.body?.email || '').trim().toLowerCase().slice(0, 254)}`;
+  }
   const parsed = parsePhone(req.body?.phone);
   return parsed.valid ? parsed.e164 : `raw:${String(req.body?.phone || '').slice(0, 24)}`;
 };
@@ -44,15 +48,17 @@ authRouter.get('/auth/channels', (req, res) => {
   res.json({ sms: true, email: emailAvailable() });
 });
 
-// POST /api/auth/otp/request { phone, channel? }  channel: 'sms' (default) | 'email'
+// POST /api/auth/otp/request { phone }  or  { channel: 'email', email }
+// By email the answer never includes the phone: it would tell anyone whose number an email is.
 authRouter.post('/auth/otp/request', ...requestLimits, async (req, res) => {
   try {
-    const result = await requestOtp(req.body?.phone, { channel: req.body?.channel || 'sms' });
-    const body = {
-      sent: true,
-      phone: result.phone,
-      expiresInSeconds: result.expiresInSeconds,
-    };
+    const channel = req.body?.channel || 'sms';
+    if (channel !== 'sms' && channel !== 'email') throw new AuthInputError('channel must be sms or email');
+    const result = channel === 'email'
+      ? await requestOtpByEmail(req.body?.email)
+      : await requestOtp(req.body?.phone);
+    const body = { sent: true, expiresInSeconds: result.expiresInSeconds };
+    if (channel === 'sms') body.phone = result.phone;
     // DEV ONLY: with the log transport there is no SMS, so the flow would be untestable
     // without echoing the code. Hard-gated on BOTH the transport and NODE_ENV so no
     // production configuration can reach it.
@@ -77,16 +83,18 @@ authRouter.post('/auth/otp/request', ...requestLimits, async (req, res) => {
   }
 });
 
-// POST /api/auth/otp/verify { phone, code } -> { token }
+// POST /api/auth/otp/verify { phone, code } or { email, code } -> { token }
 authRouter.post('/auth/otp/verify', ...verifyLimits, async (req, res) => {
-  const { phone, code } = req.body || {};
+  const { phone, email, code } = req.body || {};
   // Shape-check before touching the DB — but answer with the SAME generic error the real
   // verification uses, so "well-formed" isn't itself an information leak.
   if (!isWellFormedCode(String(code ?? ''))) {
     return res.status(401).json({ error: 'invalid or expired code' });
   }
   try {
-    const { phone: verified } = await verifyOtp(phone, code);
+    const { phone: verified } = email && !phone
+      ? await verifyOtpByEmail(email, code)
+      : await verifyOtp(phone, code);
     const token = signToken({ role: 'customer', phone: verified }, CUSTOMER_TOKEN_TTL_SECONDS);
     res.json({ token, phone: verified, expiresInSeconds: CUSTOMER_TOKEN_TTL_SECONDS });
   } catch (err) {

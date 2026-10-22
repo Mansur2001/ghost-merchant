@@ -93,34 +93,60 @@ $('homeBtn').addEventListener('click', () => showView('landingView'));
 $('authHome').addEventListener('click', () => showView('landingView'));
 
 // ── Sign-in: request a code, then verify it ──
-// By text, or to the email this account confirmed (only offered when the server sends email).
+// With a phone (a text), or with the email the account confirmed (only offered when the server
+// sends email). The switch swaps which box is shown; a new customer always starts with a phone.
 let otpChannel = 'sms';
 let emailOffered = false;
+let codeFor = null; // what the code was sent for — { phone } or { email } — so verify matches it
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 function renderChannel() {
+  const email = otpChannel === 'email';
   $('channelPick').querySelectorAll('[data-channel]').forEach((b) =>
     b.setAttribute('aria-pressed', b.dataset.channel === otpChannel ? 'true' : 'false'));
+  $('phoneSignin').classList.toggle('hidden', email);
+  $('emailSignin').classList.toggle('hidden', !email);
   // Swap the key, not just the text, so a language switch re-renders the right label.
-  $('sendCodeBtn').dataset.i18n = otpChannel === 'email' ? 'auth.sendEmail' : 'auth.send';
+  $('sendCodeBtn').dataset.i18n = email ? 'auth.sendEmail' : 'auth.send';
   $('sendCodeBtn').textContent = t($('sendCodeBtn').dataset.i18n);
+  $('consentNote').dataset.i18nHtml = email ? 'auth.consentEmail' : 'auth.consent';
+  $('consentNote').innerHTML = t($('consentNote').dataset.i18nHtml);
 }
 $('channelPick').querySelectorAll('[data-channel]').forEach((b) =>
-  b.addEventListener('click', () => { otpChannel = b.dataset.channel; renderChannel(); }));
+  b.addEventListener('click', () => {
+    if (otpChannel === b.dataset.channel) return;
+    otpChannel = b.dataset.channel;
+    // A code sent the other way belongs to the other box: start this one fresh.
+    codeFor = null;
+    $('codeStep').classList.add('hidden');
+    $('otpStatus').textContent = '';
+    renderChannel();
+    (otpChannel === 'email' ? $('signinEmail') : $('phone')).focus();
+  }));
 (async function loadChannels() {
   const res = await api('/auth/channels');
   emailOffered = Boolean(res.email);
   $('channelPick').classList.toggle('hidden', !emailOffered);
-  if (!emailOffered) { otpChannel = 'sms'; renderChannel(); }
+  if (!emailOffered) otpChannel = 'sms';
+  renderChannel();
 })();
 
 async function requestCode() {
-  if (!phoneValid) return toast(t('err.phone'));
+  let target;
+  if (otpChannel === 'email') {
+    const email = $('signinEmail').value.trim();
+    if (!EMAIL_RE.test(email)) return toast(t('email.bad'));
+    target = { channel: 'email', email };
+  } else {
+    if (!phoneValid) return toast(t('err.phone'));
+    target = { phone: phoneE164 };
+  }
   $('sendCodeBtn').disabled = true;
   $('resendBtn').disabled = true;
   $('otpStatus').textContent = t('auth.sending');
   const res = await api('/auth/otp/request', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone: phoneE164, channel: otpChannel }),
+    body: JSON.stringify(target),
   });
   $('sendCodeBtn').disabled = false;
   if (res.error) {
@@ -129,15 +155,16 @@ async function requestCode() {
     $('resendBtn').disabled = false;
     return;
   }
+  codeFor = target.email ? { email: target.email } : { phone: target.phone };
   $('codeStep').classList.remove('hidden');
   $('codeInput').focus();
   // devCode is only ever present with the log transport in a non-production backend.
-  // Email: the server answers the same whether or not this number has an email (so it can't
+  // Email: the server answers the same whether or not an account has this email (so it can't
   // be used to look people up), so the message has to say "if".
   const m = Math.round(res.expiresInSeconds / 60);
   $('otpStatus').textContent = res.devCode
     ? t('auth.dev', { code: res.devCode })
-    : otpChannel === 'email' ? t('auth.sentEmail', { m }) : t('auth.sent', { phone: res.phone, m });
+    : target.email ? t('auth.sentEmail', { m }) : t('auth.sent', { phone: res.phone, m });
   startResendCountdown();
 }
 
@@ -167,7 +194,7 @@ async function verifyCode() {
   const res = await api('/auth/otp/verify', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone: phoneE164, code }),
+    body: JSON.stringify({ ...(codeFor || { phone: phoneE164 }), code }),
   });
   $('verifyBtn').disabled = false;
   if (res.error || !res.token) {
@@ -178,6 +205,7 @@ async function verifyCode() {
   $('codeInput').value = '';
   $('otpStatus').textContent = '';
   $('codeStep').classList.add('hidden');
+  codeFor = null;
   $('signedInAs').textContent = res.phone;
   showView('startView');
   loadEmailBox();

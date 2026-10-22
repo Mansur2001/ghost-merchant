@@ -7,6 +7,7 @@
 #   ./scripts/staging.sh open      open the three apps in your browser
 #   ./scripts/staging.sh test      run the Playwright workflows (args pass through to Playwright)
 #   ./scripts/staging.sh seed      reset staging data to the seed
+#   ./scripts/staging.sh shots     Play Store screenshots + feature graphic -> play-screenshots/
 #   ./scripts/staging.sh logs      follow the backend log (login codes appear here too)
 #   ./scripts/staging.sh status    what's running
 #   ./scripts/staging.sh psql "SQL"  one query against the staging database
@@ -114,5 +115,14 @@ case "${1:-}" in
     [ -d node_modules ] || { npm install; npx playwright install chromium; }
     STAGING_URL="$URL" npx playwright test "$@"
     ;;
-  *) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  shots)
+    # Store graphics from the seed only (never real customers): reseed so they're reproducible.
+    wait_healthy
+    seed
+    dc exec -T redis sh -c 'redis-cli --scan --pattern "rl:*" | xargs -r redis-cli DEL' >/dev/null || true
+    cd e2e
+    [ -d node_modules ] || { npm install; npx playwright install chromium; }
+    STAGING_URL="$URL" node play-assets.mjs
+    ;;
+  *) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

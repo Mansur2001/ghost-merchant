@@ -26,6 +26,7 @@ codes appear on screen.
 | One SQL query | `./scripts/staging.sh psql "SELECT id, status FROM orders;"` |
 | Stop (keeps data) | `./scripts/staging.sh down` |
 | Wipe staging and start fresh | `./scripts/staging.sh reset` |
+| Play Store screenshots + feature graphic | `./scripts/staging.sh shots` (→ `play-screenshots/`, reseeds first) |
 
 - **Backend change** (`backend/`): re-run `up` (it rebuilds).
 - **Frontend change** (`frontend/`): just reload the page, after bumping `CACHE` in that app's

@@ -111,20 +111,27 @@
            chat thread and photo is authorized against, so it has to be verified once. -->
       <section id="authView" class="card hidden">
         <button class="secondary" id="authHome" type="button" style="max-width:130px;margin:0 0 12px;" data-i18n="nav.back">← Back</button>
-        <label for="phone" data-i18n="auth.phone">Your phone number</label>
-        <input id="phone" type="tel" inputmode="tel" placeholder="61 234 5678" autocomplete="tel" />
-        <div class="phone-hint muted" id="phoneHint">Enter your mobile number</div>
-        <!-- Where the code goes. Email only reaches an email the customer confirmed while signed
-             in, so it can't be used to get into someone else's number. Shown when the server
-             offers email at all (GET /api/auth/channels). -->
-        <div id="channelPick" class="cc-switch hidden" role="group" style="display:inline-flex;margin-top:10px;">
-          <button type="button" data-channel="sms" aria-pressed="true" data-i18n="auth.viaSms" style="padding:8px 16px;">Text</button>
-          <button type="button" data-channel="email" aria-pressed="false" data-i18n="auth.viaEmail" style="padding:8px 16px;">Email</button>
+        <!-- Phone or email: the switch swaps which box you fill in. Email only finds an account
+             whose owner confirmed that email while signed in, so new customers start with their
+             phone. Shown when the server offers email at all (GET /api/auth/channels). -->
+        <div id="channelPick" class="cc-switch channel-pick hidden" role="group" aria-label="Sign in with">
+          <button type="button" data-channel="sms" aria-pressed="true" data-i18n="auth.viaSms">Phone</button>
+          <button type="button" data-channel="email" aria-pressed="false" data-i18n="auth.viaEmail">Email</button>
+        </div>
+        <div id="phoneSignin">
+          <label for="phone" data-i18n="auth.phone">Your phone number</label>
+          <input id="phone" type="tel" inputmode="tel" placeholder="61 234 5678" autocomplete="tel" />
+          <div class="phone-hint muted" id="phoneHint">Enter your mobile number</div>
+        </div>
+        <div id="emailSignin" class="hidden">
+          <label for="signinEmail" data-i18n="auth.email">Your email</label>
+          <input id="signinEmail" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" />
+          <div class="phone-hint muted" data-i18n="auth.emailNote">Use the email you added to your account. New here? Use your phone.</div>
         </div>
         <button id="sendCodeBtn" type="button" data-i18n="auth.send">Text me a code</button>
         <!-- Consent shown where the number is collected: US carriers (10DLC) check for exactly
              this — what we text, rates, STOP/HELP, and links to the terms and privacy policy. -->
-        <p class="muted" style="font-size:13px;" data-i18n-html="auth.consent">We text you a one-time code each time you sign in. Message and data rates may apply. Reply STOP to opt out, HELP for help. By continuing you agree to our <a href="/terms.html">Terms</a> and <a href="/privacy.html">Privacy Policy</a>.</p>
+        <p class="muted" id="consentNote" style="font-size:13px;" data-i18n-html="auth.consent">We text you a one-time code each time you sign in. Message and data rates may apply. Reply STOP to opt out, HELP for help. By continuing you agree to our <a href="/terms.html">Terms</a> and <a href="/privacy.html">Privacy Policy</a>.</p>
 
         <div id="codeStep" class="hidden">
           <label for="codeInput" data-i18n="auth.code">Enter the 6-digit code</label>

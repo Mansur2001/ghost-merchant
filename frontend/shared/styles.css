@@ -69,6 +69,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 8px;
 }
 .linkbtn:hover { color: var(--text); border-color: var(--muted); }
+/* Inline links (Terms, Privacy): the browser's default blue is unreadable on the dark theme. */
+p a { color: var(--accent); }
 /* Header buttons never wrap mid-word; on a phone they tighten instead, so Home / FAQ /
    language / theme / logout fit in 360px in either language. */
 header .linkbtn { white-space: nowrap; flex: 0 0 auto; }
@@ -192,3 +194,6 @@ details p { margin: 8px 0 2px; }
   background: transparent; color: var(--muted); white-space: nowrap;
 }
 .cc-switch button[aria-pressed="true"] { background: var(--accent); color: #1a1400; }
+/* Sign in with Phone | Email: the same switch, full width, choosing which box shows below it. */
+.channel-pick { width: 100%; margin: 0 0 4px; }
+.channel-pick button { flex: 1; padding: 10px 0; font-size: 14px; }
