@@ -88,7 +88,7 @@ cd android && ./gradlew bundleRelease
   duplicates. Keep `versionName` in step with the repo tag (see `CHANGELOG.md`).
 - **Back the keystore up somewhere that is not the build laptop.** Lose it and you can never
   update this listing again.
-- `applicationId` is `so.gurikaabe.app` and is **permanent** — changing it creates a different
+- `applicationId` is `com.gurikaabe.app` and is **permanent** — changing it creates a different
   app and orphans every installed user.
 
 ## 5. Fill in the Console

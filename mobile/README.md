@@ -7,8 +7,8 @@ the customer flow ships to web and Android from the same file.
 | | |
 |---|---|
 | App name | **GuriKaabe** |
-| Application ID | `so.gurikaabe.app` — permanent; changing it means a new Play listing |
-| Version | `versionName 0.2.0`, `versionCode 2` |
+| Application ID | `com.gurikaabe.app` — permanent; changing it means a new Play listing |
+| Version | `versionName 0.2.0`, `versionCode 3` |
 | Min / target SDK | 24 (Android 7.0) / 35 |
 
 `minSdk 24` is the lowest Play accepts with automatic protection turned on (it refused 22).
@@ -162,6 +162,8 @@ for a whole session once. Before uploading, check the bundle holds today's app:
 ```bash
 unzip -p app/build/outputs/bundle/release/app-release.aab base/assets/public/shared/env.js   # your API base
 unzip -p app/build/outputs/bundle/release/app-release.aab base/assets/public/index.html | wc -c  # ≈ frontend/user/index.html
+$ANDROID_HOME/build-tools/*/aapt2 dump badging app/build/outputs/apk/release/app-release.apk | grep -E "package:|minSdk"
+#   expect name='com.gurikaabe.app', minSdkVersion:'24', and a versionCode above the last upload
 ```
 
 ### 3. Before you submit

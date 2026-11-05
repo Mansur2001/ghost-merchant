@@ -1,4 +1,4 @@
-package so.gurikaabe.app;
+package com.gurikaabe.app;
 
 import com.getcapacitor.BridgeActivity;
 
