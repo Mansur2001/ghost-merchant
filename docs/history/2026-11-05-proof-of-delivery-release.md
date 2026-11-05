@@ -36,6 +36,16 @@
   - cheating attempts;
   - a failure after payment.
 
+- **Production is live on 136.244.93.174** (Ubuntu 24.04, 2 vCPU / 8 GB, Frankfurt). Checked from outside:
+  - HTTPS with a Let's Encrypt certificate, plus HSTS and CSP;
+  - only ports 22, 80 and 443 open;
+  - email-only mode (`sms:false`);
+  - CORS accepts the Android app;
+  - migrations applied and all schema guards present;
+  - a nightly backup tested;
+  - a real email code delivered.
+  The database is empty apart from the bootstrap `admin`.
+
 ## Decisions
 
 - **GPS is evidence, not a gate.** Refusing a delivery because a cheap handset has no fix would strand a driver who did the job. It is flagged instead.

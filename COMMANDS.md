@@ -48,7 +48,7 @@ git add -A && git commit -m "What changed" && git push origin main
 # fill in the Twilio and/or SendGrid lines in .env.production
 ./scripts/new-server.sh setup SERVER_IP  # Docker, firewall, nightly backups, start, health check
 ```
-After that, deploys are the steps below. Current server: `80.240.16.128`.
+After that, deploys are the steps below. Current server: `136.244.93.174`.
 
 ```bash
 ssh root@SERVER_IP
