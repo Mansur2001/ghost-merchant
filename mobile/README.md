@@ -8,8 +8,8 @@ the customer flow ships to web and Android from the same file.
 |---|---|
 | App name | **GuriKaabe** |
 | Application ID | `com.gurikaabe.app` — permanent; changing it means a new Play listing |
-| Version | `versionName 0.2.0`, `versionCode 3` |
-| Min / target SDK | 24 (Android 7.0) / 35 |
+| Version | `versionName 0.2.0`, `versionCode 4` |
+| Min / target / compile SDK | 24 (Android 7.0) / 36 (Android 16) / 36 |
 
 `minSdk 24` is the lowest Play accepts with automatic protection turned on (it refused 22).
 The target market runs old, cheap handsets, so never raise it further without a reason that
@@ -206,7 +206,9 @@ bridge opens the dialer with the code pre-filled (`ACTION_DIAL`) and the user pr
 `CALL_PHONE` is restricted on Play and we don't need it.
 
 ## Known toolchain notes
-- AGP 8.2.1 warns that it doesn't officially support `compileSdk 35`. Builds work. Upgrading
+- Play requires `targetSdk 36` (Android 16); install it with
+  `sdkmanager "platforms;android-36" "build-tools;36.0.0"`. AGP 8.2.1 warns that it doesn't
+  officially support `compileSdk 36`. Builds work. Upgrading
   AGP (and the Gradle wrapper with it) is the clean fix and would also let R8 run.
 - R8 minification is **off**: this is a thin WebView shell, so shrinking the Java side saves
   almost nothing, R8 fails outright under AGP 8.2 + compileSdk 35, and over-aggressive

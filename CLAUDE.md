@@ -609,8 +609,9 @@ Not started: push notifications.
 with `cap copy android` — before 2026-11-06 it didn't, and every bundle silently carried the
 August web app), then `./gradlew bundleRelease`. Check inside the `.aab` before uploading
 (`mobile/README.md`). Package **`com.gurikaabe.app`** (what the Play Console listing is bound to —
-permanent once published), **minSdk 24** (Play automatic protection refuses lower), and
-`versionCode` must go up on every upload (3 was the first accepted candidate).
+permanent once published), **minSdk 24** (Play automatic protection refuses lower), **targetSdk/compileSdk 36** (Play's
+current floor — it moves up yearly; AGP 8.2.1 warns but builds), and `versionCode` must go up on
+every upload (4 = the first bundle Play's checks should accept).
 
 **Session history** (`docs/history/`): one dated file per working session — what changed, why,
 what was decided, and what was left open. Read the latest before picking work back up. Public

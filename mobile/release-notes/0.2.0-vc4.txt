@@ -1,5 +1,5 @@
 <en-US>
-0.2.0 (build 3) — first test build.
+0.2.0 (build 4) — first test build.
 • Create an account or sign in with just your email: we send a 6-digit code.
 • Follow your order live. Give the driver your 4-digit code only when you have your items.
 • Drivers: photo of the items at pickup, the customer's code at delivery.
@@ -9,7 +9,7 @@ Needs Android 7.0 or newer.
 Problem? Send us the "ref" code shown in the error.
 </en-US>
 <so>
-0.2.0 (nooca 3) — nooca tijaabada ee ugu horreeya.
+0.2.0 (nooca 4) — nooca tijaabada ee ugu horreeya.
 • Akoon samee ama gal iimaylkaaga oo kaliya: koodh 6 lambar ah ayaan kuu soo dirnaa.
 • Dalabkaaga si toos ah u raac. Darawalka sii koodhka 4-ta lambar marka alaabta aad hesho.
 • Darawalada: sawir alaabta marka la soo qaado, koodhka macmiilka marka la keeno.
