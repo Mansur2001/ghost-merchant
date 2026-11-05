@@ -519,7 +519,7 @@ Guards (`db/seedSafety.js`), because the seed truncates everything and its passw
 ## Testing
 
 ```bash
-cd backend && npm install && npm test   # 409 Jest unit tests, ESM via --experimental-vm-modules
+cd backend && npm install && npm test   # 410 Jest unit tests, ESM via --experimental-vm-modules
 ./scripts/verify/run-all.sh             # live suites over real HTTP + WebSocket
 ```
 
@@ -542,6 +542,16 @@ database rename is a one-line change rather than an edit to every suite.
 
 Quick syntax check without the runner:
 `cd backend && for f in $(find src -name '*.js'); do node --check "$f"; done`
+
+## API reference
+
+`docs/api/openapi.yaml` (OpenAPI 3.1) documents every HTTP route, written from the route files,
+plus the WebSocket protocol in its description. **Change it in the same commit as a route** —
+`tests/apiDoc.test.js` fails if the server and the doc list different routes. Browse it with
+`cd backend && npm run docs` → http://localhost:8099 (Swagger UI from the pinned `swagger-ui-dist`
+dev dependency; "Try it out" targets staging, whose CORS allows the docs page). It is **not**
+served in production: a public map of the operator/admin surface helps only someone probing it.
+One version (v1) exists; there is no v2 until an incompatible change actually ships.
 
 ## Conventions
 

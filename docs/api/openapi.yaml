@@ -1,0 +1,1480 @@
+openapi: 3.1.0
+info:
+  title: GuriKaabe API
+  version: "1.0.0"
+  summary: Proxy shopping and delivery for Somalia — customer, driver, operator and payment APIs.
+  description: |
+    The one API behind the three GuriKaabe apps (customer, driver, operator) and the prepared
+    mobile-money integration. Written from the route files in `backend/src/routes/`; when a route
+    changes, change this file in the same commit.
+
+    ## Who can call what
+    Every caller except the public endpoints sends `Authorization: Bearer <token>`. A token's
+    **role** decides what it may reach:
+
+    | Role | How you get a token | Lifetime | Sees |
+    |---|---|---|---|
+    | `customer` | `POST /api/auth/otp/verify` (email code; SMS when enabled) | 30 days | only orders of its own account |
+    | `driver` | `POST /api/driver/login` (phone + PIN) | 12 hours | only orders the **system** assigned to it |
+    | `operator` | `POST /api/operator/login` (username + password) | 12 hours | every order; **admins** also staff, refunds, audit |
+
+    Admin rights are re-checked against the database on every admin request.
+
+    ## Rules that shape the responses
+    - **Not yours = 404, never 403.** An order you may not see answers exactly like one that does
+      not exist, so ids can't be probed. Role checks on non-order routes may answer 401/403.
+    - **Every error has a `ref`** (first 8 characters of the `X-Request-Id` response header). Server
+      failures also carry `cause` (e.g. `DB-P1001`, `EMAIL-HTTP403`) — never a stack or a query.
+    - **Rate limits** answer `429` with `retryAfter` (seconds) and a `Retry-After` header.
+    - **Money:** GuriKaabe is merchant of record. One payment per order, no balances, and no
+      endpoint anywhere sends money. An order becomes paid only through
+      `POST /api/operator/orders/{id}/mark-paid` (operator mode) or the signed
+      `POST /api/payments/webhook` (api mode) — never both.
+    - **Dispatch is automatic.** There is no endpoint to choose a driver.
+    - **Order states:** `PENDING_PAYMENT → PAID_UNASSIGNED → DISPATCHED → IN_TRANSIT → DELIVERED`;
+      any live state may go to `FAILED_REFUND`. Illegal moves answer `409`.
+
+    ## Live updates (WebSocket — not expressible in OpenAPI)
+    Connect to `wss://app.gurikaabe.com/ws`. Send the token in the **first frame** (never in the URL):
+    ```json
+    {"type":"auth","token":"<bearer token>"}
+    ```
+    Unauthenticated sockets are closed after 10 s (code 4401). After `{"type":"authenticated","role":"…"}`:
+
+    | Send | Who | Then you receive |
+    |---|---|---|
+    | `{"type":"subscribe","orderId":"<uuid>"}` | anyone allowed to see that order | `subscribed`, then that order's events |
+    | `{"type":"subscribe_driver"}` | driver | events for every order assigned to you |
+    | `{"type":"subscribe_operator"}` | operator | every event |
+    | `{"type":"ping"}` | anyone | `{"type":"pong"}` |
+
+    Events: `order_state` `{orderId, from, to, actor}`, `payment_confirmed` `{orderId, amount, receiptId}`,
+    `payment_claimed` `{orderId, reference, wallet, walletName}`, `message` `{orderId, message}`,
+    `order_created` `{orderId, order}` (operators only). Delivery is at-least-once and every event
+    is a snapshot, so a duplicate is harmless. Room members are re-authorized on every event.
+  contact:
+    name: GuriKaabe
+    email: gurikaabe@gmail.com
+servers:
+  # Staging first, so "Try it out" in the docs never fires at production by accident.
+  - url: https://localhost:8444
+    description: Local staging (scripts/staging.sh) — codes are shown in responses as devCode
+  - url: https://app.gurikaabe.com
+    description: Production
+
+tags:
+  - name: Public
+    description: No token needed.
+  - name: Customer — account
+  - name: Customer — orders
+  - name: Orders (shared)
+    description: Any caller allowed to see the order — its customer, its assigned driver, or an operator.
+  - name: Driver
+    description: Each step needs evidence the server checks (proof of delivery).
+  - name: Operator
+  - name: Admin
+    description: Operators with admin rights (today, the owner only).
+  - name: Staff onboarding
+  - name: Mobile-money API
+    description: Prepared for a Sahal / EVC Plus / gateway integration. Off unless PAYMENT_CONFIRMATION=api. See docs/PAYMENT_API.md.
+
+security:
+  - bearer: []
+
+paths:
+  # ───────────────────────────── Public ─────────────────────────────
+  /api/health:
+    get:
+      tags: [Public]
+      summary: Is the backend up
+      security: []
+      responses:
+        "200":
+          description: Up
+          content: { application/json: { schema: { type: object, properties: { ok: { type: boolean, const: true } } } } }
+
+  /api/phone/validate/{phone}:
+    get:
+      tags: [Public]
+      summary: Check and normalise a phone number (Somali +252 or US +1)
+      description: The server is the source of truth for phone rules (2-digit operator prefix + 7 digits for Somalia). Bare digits are read as Somali. 120 requests/minute per IP.
+      security: []
+      parameters:
+        - { name: phone, in: path, required: true, schema: { type: string }, example: "612345678" }
+      responses:
+        "200":
+          description: Result (also 200 when invalid — read `valid`)
+          content: { application/json: { schema: { $ref: "#/components/schemas/PhoneCheck" } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/auth/channels:
+    get:
+      tags: [Public]
+      summary: Which sign-in channels this server offers
+      description: Production today answers `{sms:false, email:true}` — email only.
+      security: []
+      responses:
+        "200":
+          description: Channels
+          content:
+            application/json:
+              schema: { type: object, properties: { sms: { type: boolean }, email: { type: boolean } } }
+
+  /api/auth/otp/request:
+    post:
+      tags: [Public]
+      summary: Send a sign-in / sign-up code
+      description: |
+        Create account and sign in are the same call: the first code verified for an email (or phone)
+        creates the account. One live code per address, 60 s cooldown, 5-minute life.
+        Limits: 20/hour per IP and 5/hour per address.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - title: By email
+                  type: object
+                  required: [channel, email]
+                  properties: { channel: { const: email }, email: { type: string, format: email } }
+                - title: By SMS (when enabled)
+                  type: object
+                  required: [phone]
+                  properties: { phone: { type: string, example: "+252612345678" } }
+      responses:
+        "200":
+          description: Sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sent: { type: boolean, const: true }
+                  expiresInSeconds: { type: integer, example: 300 }
+                  phone: { type: string, description: masked, when by SMS }
+                  devCode: { type: string, description: "Development only (log transport) — never in production." }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "502":
+          description: The code could not be sent (`cause` e.g. EMAIL-HTTP403, SMS-21408)
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /api/auth/otp/verify:
+    post:
+      tags: [Public]
+      summary: Exchange a code for a customer token (creates the account on first use)
+      description: Every failure answers the same 401 — no difference between "no code" and "wrong code". 5 wrong tries burn the code. Limits 30/15 min per IP, 10/15 min per address.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                email: { type: string, format: email }
+                phone: { type: string }
+                code: { type: string, pattern: "^\\d{6}$" }
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  phone: { type: [string, "null"] }
+                  email: { type: [string, "null"] }
+                  expiresInSeconds: { type: integer, example: 2592000 }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/signup/contact:
+    get:
+      tags: [Public]
+      summary: The owner's contact details (for people who can't use the form)
+      security: []
+      responses:
+        "200":
+          description: Contact
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contact:
+                    type: object
+                    properties:
+                      name: { type: string, example: GuriKaabe }
+                      email: { type: string, example: gurikaabe@gmail.com }
+                      phone: { type: string, example: "+1 206 733 0555" }
+
+  /api/signup:
+    post:
+      tags: [Staff onboarding]
+      summary: Ask to join as a driver or operator (creates a REQUEST, never an account)
+      description: |
+        An admin reviews it **blind** (name + ID only) and, if approved, creates the account — the
+        setup code then goes to this email. Re-submitting while open updates the same request.
+        Limits: 10/hour per IP, 5/day per phone.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role, name, phone, email]
+              properties:
+                role: { type: string, enum: [driver, operator] }
+                name: { type: string, minLength: 2, maxLength: 80 }
+                phone: { type: string, description: Contact reference }
+                email: { type: string, format: email, description: Where the setup code will go }
+                message: { type: string, maxLength: 1000 }
+      responses:
+        "201":
+          description: Received
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received: { type: boolean }
+                  message: { type: string }
+                  uploadToken: { type: string, description: "15-minute token for POST /api/signup/id-document/{side}" }
+                  contact: { type: object }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/signup/id-document/{side}:
+    post:
+      tags: [Staff onboarding]
+      summary: Attach a photo of the applicant's ID (front or back)
+      description: Uses the `uploadToken` from `POST /api/signup`, scoped to that one request. Stored as a key only; deleted the moment the request is decided. Customers are never asked for ID.
+      security: [{ uploadToken: [] }]
+      parameters:
+        - { name: side, in: path, required: true, schema: { type: string, enum: [front, back] } }
+      requestBody:
+        required: true
+        content:
+          image/jpeg: { schema: { type: string, format: binary } }
+          image/png: { schema: { type: string, format: binary } }
+          image/webp: { schema: { type: string, format: binary } }
+      responses:
+        "201":
+          description: Stored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received: { type: boolean }
+                  ok: { type: boolean }
+                  haveFront: { type: boolean }
+                  haveBack: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { description: Over 6 MB }
+
+  /api/staff/setup:
+    post:
+      tags: [Staff onboarding]
+      summary: Claim an account an admin created — choose your own PIN or password
+      description: |
+        Needs the account's phone and the 8-digit code that was emailed. Driver PIN: 6 digits, not
+        repeated or sequential. Operator password: 12+ characters, not containing the username.
+        One generic 401 for every failure; 5 wrong tries burn the code.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role, phone, code, secret]
+              properties:
+                role: { type: string, enum: [driver, operator] }
+                phone: { type: string }
+                code: { type: string, pattern: "^\\d{8}$" }
+                secret: { type: string, description: New PIN (driver) or password (operator) }
+      responses:
+        "200":
+          description: Set — now sign in
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  role: { type: string }
+                  name: { type: string }
+                  username: { type: string, description: operators only }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/driver/login:
+    post:
+      tags: [Driver]
+      summary: Driver sign-in (phone + PIN)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [msisdn, pin]
+              properties:
+                msisdn: { type: string, example: "+252619876543" }
+                pin: { type: string }
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  driver: { type: object, properties: { id: { type: string }, name: { type: string } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/operator/login:
+    post:
+      tags: [Operator]
+      summary: Operator sign-in (username + password)
+      description: One error for "no such account" and "wrong password". 20/15 min per IP, 10/15 min per username.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties: { username: { type: string }, password: { type: string } }
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  operator:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      username: { type: string }
+                      displayName: { type: string }
+                      mustChangePassword: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  # ───────────────────────────── Customer ─────────────────────────────
+  /api/auth/me:
+    get:
+      tags: [Customer — account]
+      summary: The signed-in customer
+      responses:
+        "200":
+          description: Account
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  phone: { type: [string, "null"] }
+                  email: { type: [string, "null"] }
+                  role: { type: string, const: customer }
+                  exp: { type: integer }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/auth/email/request:
+    post:
+      tags: [Customer — account]
+      summary: Add an email to a phone account — send a confirmation code
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [email], properties: { email: { type: string, format: email } } } } }
+      responses:
+        "200": { description: Sent, content: { application/json: { schema: { type: object, properties: { sent: { type: boolean }, email: { type: string, description: masked }, devCode: { type: string } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "502": { description: Could not send, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/auth/email/verify:
+    post:
+      tags: [Customer — account]
+      summary: Confirm the email code
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [code], properties: { code: { type: string, pattern: "^\\d{6}$" } } } } }
+      responses:
+        "200": { description: Confirmed, content: { application/json: { schema: { type: object, properties: { email: { type: string } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { description: "This email already has its own account (an email-only account's email never moves)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/auth/email:
+    delete:
+      tags: [Customer — account]
+      summary: Stop using the linked email (not allowed for email-only accounts)
+      responses:
+        "200": { description: Removed, content: { application/json: { schema: { type: object, properties: { email: { type: "null" } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/orders/mine:
+    get:
+      tags: [Customer — orders]
+      summary: My orders (active first, up to 10)
+      responses:
+        "200":
+          description: Orders, each with its payment instructions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orders:
+                    type: array
+                    items: { allOf: [{ $ref: "#/components/schemas/Order" }, { $ref: "#/components/schemas/PaymentInstruction" }] }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/orders:
+    post:
+      tags: [Customer — orders]
+      summary: Place an order
+      description: |
+        The owner is taken from the token, never the body. Send your own `id` (UUID) to make retries
+        safe: a retry returns the original order with 200 instead of creating a second one. A 4-digit
+        delivery code is created with the order (readable only by this customer).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, items, totalAmount, landmark]
+              properties:
+                id: { type: string, format: uuid }
+                phone: { type: string, description: The number the driver calls (not proof of identity) }
+                items: { type: array, items: { $ref: "#/components/schemas/Item" } }
+                totalAmount: { type: number, minimum: 0, example: 7.5 }
+                lat: { type: [number, "null"] }
+                lng: { type: [number, "null"] }
+                landmark: { type: string, minLength: 1 }
+      responses:
+        "201":
+          description: Created
+          content: { application/json: { schema: { $ref: "#/components/schemas/OrderWithPayment" } } }
+        "200":
+          description: A retry of an order already created (same id)
+          content: { application/json: { schema: { $ref: "#/components/schemas/OrderWithPayment" } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/orders/{id}/paid:
+    post:
+      tags: [Customer — orders]
+      summary: '"I''ve paid" — a hint for the operator, never a status change'
+      description: Records the claim (and reference/wallet) so the operator checks the right merchant phone. 10 per 15 minutes.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reference: { type: string, description: Transaction number from the payment SMS (optional) }
+                wallet: { type: string, enum: [evc, edahab, zaad, sahal] }
+      responses:
+        "200": { description: Recorded, content: { application/json: { schema: { type: object, properties: { order: { $ref: "#/components/schemas/Order" } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Already paid, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/orders/{id}/photos/order_ref:
+    post:
+      tags: [Customer — orders]
+      summary: Attach a reference photo of the item (replaces the previous one)
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody: { $ref: "#/components/requestBodies/Image" }
+      responses:
+        "201": { $ref: "#/components/responses/PhotoSaved" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/orders/{id}/handoff:
+    get:
+      tags: [Customer — orders]
+      summary: My delivery code (customer only)
+      description: Shown from payment until delivery. Drivers and operators can't read it — the driver must hear it from the customer at the door.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200":
+          description: Code (null before payment, after use, or after delivery)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: [string, "null"], pattern: "^\\d{4}$" }
+                  used: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/orders/{id}/dispute:
+    post:
+      tags: [Customer — orders]
+      summary: '"I didn''t get my order" — puts the delivery back in the operator''s review queue'
+      description: Within 72 hours of delivery. Changes no status and moves no money. Twice is once. 5 per 15 minutes.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { note: { type: string, maxLength: 200 } } } } }
+      responses:
+        "200": { description: Recorded, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "Not delivered, or too late", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  # ───────────────────────────── Shared order reads ─────────────────────────────
+  /api/orders/{id}:
+    get:
+      tags: [Orders (shared)]
+      summary: One order (with payment instructions)
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200": { description: Order, content: { application/json: { schema: { $ref: "#/components/schemas/OrderWithPayment" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/orders/{id}/timeline:
+    get:
+      tags: [Orders (shared)]
+      summary: Status history (append-only audit of every transition)
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200":
+          description: Events, oldest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  timeline:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        from_status: { type: [string, "null"] }
+                        to_status: { $ref: "#/components/schemas/Status" }
+                        actor: { type: string, example: "system:dispatch" }
+                        note: { type: [string, "null"] }
+                        created_at: { type: string, format: date-time }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/orders/{id}/messages:
+    get:
+      tags: [Orders (shared)]
+      summary: The order's chat
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200": { description: Messages, content: { application/json: { schema: { type: object, properties: { messages: { type: array, items: { $ref: "#/components/schemas/Message" } } } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Orders (shared)]
+      summary: Post to the chat (sender comes from your role, never the body)
+      description: Send a `clientId` (UUID) to make offline replays land exactly once.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties: { body: { type: string }, clientId: { type: string, format: uuid } }
+      responses:
+        "201": { description: Posted, content: { application/json: { schema: { type: object, properties: { message: { $ref: "#/components/schemas/Message" } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/orders/{id}/proofs:
+    get:
+      tags: [Orders (shared)]
+      summary: How each driver step was proven (no code values)
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200": { description: Proofs, content: { application/json: { schema: { type: object, properties: { proofs: { type: array, items: { $ref: "#/components/schemas/Proof" } } } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/orders/{id}/photos:
+    get:
+      tags: [Orders (shared)]
+      summary: The order's photos (metadata; bytes via /raw)
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200":
+          description: Photos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  photos:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        kind: { type: string, enum: [order_ref, pickup_proof, delivery_proof] }
+                        uploaded_by: { type: string }
+                        created_at: { type: string, format: date-time }
+                        url: { type: string, example: "/api/orders/{id}/photos/12/raw" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/orders/{id}/photos/{photoId}/raw:
+    get:
+      tags: [Orders (shared)]
+      summary: Photo bytes (streamed, Cache-Control no-store)
+      parameters:
+        - { $ref: "#/components/parameters/OrderId" }
+        - { name: photoId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Image, content: { image/*: { schema: { type: string, format: binary } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ───────────────────────────── Driver ─────────────────────────────
+  /api/driver/queue:
+    get:
+      tags: [Driver]
+      summary: My jobs (DISPATCHED and IN_TRANSIT orders assigned to me)
+      responses:
+        "200": { description: Jobs, content: { application/json: { schema: { type: object, properties: { orders: { type: array, items: { $ref: "#/components/schemas/Order" } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/driver/orders/{id}:
+    get:
+      tags: [Driver]
+      summary: One job — shopping list and drop-off
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200":
+          description: Job
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      items: { type: array, items: { $ref: "#/components/schemas/Item" } }
+                      total_amount: { type: string }
+                      lat: { type: [number, "null"] }
+                      lng: { type: [number, "null"] }
+                      landmark_text: { type: string }
+                      status: { $ref: "#/components/schemas/Status" }
+                      user_phone: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/driver/orders/{id}/pickup-proof:
+    post:
+      tags: [Driver]
+      summary: Photo of the items (required before pickup)
+      description: Accepted only while DISPATCHED; frozen once pickup is confirmed (409).
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody: { $ref: "#/components/requestBodies/Image" }
+      responses:
+        "201": { $ref: "#/components/responses/PhotoSaved" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Step already done — the photo can't change, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/driver/orders/{id}/secured:
+    post:
+      tags: [Driver]
+      summary: Confirm pickup (DISPATCHED → IN_TRANSIT)
+      description: Requires the pickup photo. Records a proof row with the GPS fix in the same transaction as the transition.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { fix: { $ref: "#/components/schemas/Fix" } } } } }
+      responses:
+        "200": { description: Picked up, content: { application/json: { schema: { type: object, properties: { order: { $ref: "#/components/schemas/Order" } } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Not waiting for pickup, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "422": { description: '"take a photo of the items first"', content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/driver/orders/{id}/delivery-proof:
+    post:
+      tags: [Driver]
+      summary: Photo at the door (required for a delivery without the code)
+      description: Accepted only while IN_TRANSIT; frozen after delivery.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody: { $ref: "#/components/requestBodies/Image" }
+      responses:
+        "201": { $ref: "#/components/responses/PhotoSaved" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Step already done, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/driver/orders/{id}/delivered:
+    post:
+      tags: [Driver]
+      summary: Confirm delivery (IN_TRANSIT → DELIVERED)
+      description: |
+        Either the customer's 4-digit `code` (5 tries, then locked), or — when the customer can't give
+        it — a `noCodeReason` with the door photo already uploaded; that delivery is flagged for an
+        operator to check. GPS distance from the customer's pin is recorded; no fix or >300 m flags it.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - title: With the customer's code
+                  type: object
+                  required: [code]
+                  properties: { code: { type: string, pattern: "^\\d{4}$" }, fix: { $ref: "#/components/schemas/Fix" } }
+                - title: Without the code (door photo + reason)
+                  type: object
+                  required: [noCodeReason]
+                  properties: { noCodeReason: { type: string, minLength: 3, maxLength: 200 }, fix: { $ref: "#/components/schemas/Fix" } }
+      responses:
+        "200": { description: Delivered, content: { application/json: { schema: { type: object, properties: { order: { $ref: "#/components/schemas/Order" } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Not out for delivery, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "422":
+          description: Wrong code (with tries left) or no door photo
+          content:
+            application/json:
+              schema: { allOf: [{ $ref: "#/components/schemas/Error" }, { type: object, properties: { triesLeft: { type: integer } } }] }
+        "423": { description: Too many wrong codes — use the photo path, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/driver/orders/{id}/failed:
+    post:
+      tags: [Driver]
+      summary: Stop the order (→ FAILED_REFUND); a reason is required
+      description: If it was paid, a refund (owed) opens in the same transaction.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, minLength: 3, maxLength: 200 } } } } }
+      responses:
+        "200": { description: Stopped, content: { application/json: { schema: { type: object, properties: { order: { $ref: "#/components/schemas/Order" } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Illegal transition, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/driver/orders/{id}/adjust:
+    post:
+      tags: [Driver]
+      summary: Item or price change — updates the list and tells the customer in chat
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { items: { type: array, items: { $ref: "#/components/schemas/Item" } }, note: { type: string } }
+      responses:
+        "200": { description: Sent, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ───────────────────────────── Operator ─────────────────────────────
+  /api/operator/me:
+    get:
+      tags: [Operator]
+      summary: Who is signed in, and what this server allows
+      responses:
+        "200":
+          description: Operator and settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  operator: { $ref: "#/components/schemas/Operator" }
+                  settings:
+                    type: object
+                    properties:
+                      paymentConfirmation: { type: string, enum: [operator, api], description: "api = only the mobile-money callback can mark orders paid" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/operator/me/password:
+    post:
+      tags: [Operator]
+      summary: Change my password (12+ characters)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties: { currentPassword: { type: string }, newPassword: { type: string, minLength: 12 } }
+      responses:
+        "200": { description: Changed, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/operator/orders:
+    get:
+      tags: [Operator]
+      summary: All active orders
+      responses:
+        "200":
+          description: Orders, with the driver's name and the claimed wallet's merchant number
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orders:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/Order"
+                        - type: object
+                          properties:
+                            driver_name: { type: [string, "null"] }
+                            claim_wallet: { type: [object, "null"], properties: { name: { type: string }, merchant: { type: string } } }
+
+  /api/operator/orders/{id}/mark-paid:
+    post:
+      tags: [Operator]
+      summary: Confirm a payment seen on the merchant phone (operator mode only)
+      description: |
+        The transaction number is **required** and can confirm only one order ever. When `amount` is
+        given it must equal the order total. The payment row, the transition, the audit row and the
+        **automatic dispatch** commit together. Answers 403 when PAYMENT_CONFIRMATION=api.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reference]
+              properties: { reference: { type: string, example: EVC123456789 }, amount: { type: string, example: "7.50" } }
+      responses:
+        "200": { description: Paid (status is DISPATCHED if a driver was free), content: { application/json: { schema: { type: object, properties: { order: { $ref: "#/components/schemas/Order" } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { description: Payments are confirmed by the mobile-money API on this server, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "Not awaiting payment, wrong amount, or reference already used", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/operator/orders/{id}/refund:
+    post:
+      tags: [Operator]
+      summary: Fail an order (→ FAILED_REFUND). Opens what is owed; moves no money
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { reason: { type: string } } } } }
+      responses:
+        "200": { description: Failed, content: { application/json: { schema: { type: object, properties: { order: { $ref: "#/components/schemas/Order" } } } } } }
+        "409": { description: Illegal transition, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/operator/orders/{id}/message:
+    post:
+      tags: [Operator]
+      summary: Post to an order's chat as the operator
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [body], properties: { body: { type: string }, clientId: { type: string, format: uuid } } } } }
+      responses:
+        "200": { description: Posted, content: { application/json: { schema: { type: object, properties: { message: { $ref: "#/components/schemas/Message" } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/operator/deliveries:
+    get:
+      tags: [Operator]
+      summary: Last 7 days of deliveries and their proof (flagged, unchecked first)
+      responses:
+        "200":
+          description: Deliveries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deliveries:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/Proof"
+                        - type: object
+                          properties:
+                            order:
+                              type: object
+                              properties:
+                                id: { type: string, format: uuid }
+                                total_amount: { type: string }
+                                landmark_text: { type: string }
+                                user_phone: { type: string }
+                                driver_name: { type: [string, "null"] }
+
+  /api/operator/orders/{id}/proofs/review:
+    post:
+      tags: [Operator]
+      summary: Mark a flagged delivery as checked (records who)
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200": { description: Checked, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/operator/drivers:
+    get:
+      tags: [Operator]
+      summary: Driver roster with live workload
+      responses:
+        "200":
+          description: Drivers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  drivers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        msisdn: { type: string }
+                        active: { type: boolean }
+                        setup_pending: { type: boolean }
+                        has_email: { type: boolean }
+                        active_orders: { type: integer }
+                        delivered_orders: { type: integer }
+    post:
+      tags: [Admin]
+      summary: Add a driver (setup code is emailed; never replaces an existing driver)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, msisdn, email]
+              properties: { name: { type: string }, msisdn: { type: string }, email: { type: string, format: email } }
+      responses:
+        "201": { $ref: "#/components/responses/StaffCreated" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/AdminsOnly" }
+        "409": { description: A driver with this number exists, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/operator/refunds:
+    get:
+      tags: [Operator]
+      summary: What is owed to customers, plus recently closed
+      responses:
+        "200":
+          description: Ledger
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  refunds: { type: array, items: { $ref: "#/components/schemas/Refund" } }
+                  count: { type: integer }
+                  total: { type: string, example: "12.00" }
+                  settled: { type: array, items: { $ref: "#/components/schemas/Refund" } }
+
+  /api/operator/outbox:
+    get:
+      tags: [Operator]
+      summary: Live-update relay health
+      responses:
+        "200":
+          description: Backlog
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pending: { type: integer }
+                  parked: { type: integer }
+                  oldest_pending_seconds: { type: [integer, "null"] }
+
+  # ───────────────────────────── Admin ─────────────────────────────
+  /api/operator/refunds/{refundId}/settle:
+    post:
+      tags: [Admin]
+      summary: Record that the money was sent back (needs the return transfer's reference)
+      parameters: [{ name: refundId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reference], properties: { reference: { type: string }, note: { type: string } } } } }
+      responses:
+        "200": { description: Settled, content: { application/json: { schema: { type: object, properties: { refund: { $ref: "#/components/schemas/Refund" } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/AdminsOnly" }
+
+  /api/operator/refunds/{refundId}/waive:
+    post:
+      tags: [Admin]
+      summary: Close a refund as "nothing owed" (a note is required)
+      parameters: [{ name: refundId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [note], properties: { note: { type: string } } } } }
+      responses:
+        "200": { description: Closed, content: { application/json: { schema: { type: object, properties: { refund: { $ref: "#/components/schemas/Refund" } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/AdminsOnly" }
+
+  /api/operator/access-requests:
+    get:
+      tags: [Admin]
+      summary: People asking to join — BLIND until decided
+      description: For requests not yet approved or declined, `phone`, `email` and `message` are null and `blind` is true. Add `?all=1` to include closed requests.
+      parameters: [{ name: all, in: query, schema: { type: string, enum: ["1"] } }]
+      responses:
+        "200": { description: Requests, content: { application/json: { schema: { type: object, properties: { requests: { type: array, items: { $ref: "#/components/schemas/AccessRequest" } } } } } } }
+        "403": { $ref: "#/components/responses/AdminsOnly" }
+
+  /api/operator/access-requests/{requestId}/id-document/{side}:
+    get:
+      tags: [Admin]
+      summary: The applicant's ID image (streamed, no-store)
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { type: string } }
+        - { name: side, in: path, required: true, schema: { type: string, enum: [front, back] } }
+      responses:
+        "200": { description: Image, content: { image/*: { schema: { type: string, format: binary } } } }
+        "403": { $ref: "#/components/responses/AdminsOnly" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/operator/access-requests/{requestId}/review:
+    post:
+      tags: [Admin]
+      summary: Decide a request (approving creates NO account; deciding deletes the ID images)
+      parameters: [{ name: requestId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties: { status: { type: string, enum: [contacted, approved, declined] }, note: { type: string } }
+      responses:
+        "200": { description: Recorded, content: { application/json: { schema: { type: object, properties: { request: { $ref: "#/components/schemas/AccessRequest" } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/AdminsOnly" }
+
+  /api/operator/access-requests/{requestId}/account:
+    post:
+      tags: [Admin]
+      summary: Create the account an approved request asked for — emails a setup code
+      parameters: [{ name: requestId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: { type: string, description: Required for an operator }
+                email: { type: string, format: email, description: Defaults to the email they applied with }
+      responses:
+        "201": { $ref: "#/components/responses/StaffCreated" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/AdminsOnly" }
+        "409": { description: "Not approved, or the account already exists", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/operator/operators:
+    get:
+      tags: [Admin]
+      summary: Operator accounts
+      responses:
+        "200": { description: Operators, content: { application/json: { schema: { type: object, properties: { operators: { type: array, items: { $ref: "#/components/schemas/Operator" } } } } } } }
+        "403": { $ref: "#/components/responses/AdminsOnly" }
+    post:
+      tags: [Admin]
+      summary: Add an operator (setup code is emailed; they choose their own password)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, displayName, phone, email]
+              properties:
+                username: { type: string, pattern: "^[a-z0-9._-]{3,32}$" }
+                displayName: { type: string }
+                phone: { type: string, description: Contact reference }
+                email: { type: string, format: email }
+      responses:
+        "201": { $ref: "#/components/responses/StaffCreated" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/AdminsOnly" }
+        "409": { description: Username taken, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/operator/operators/{operatorId}/active:
+    post:
+      tags: [Admin]
+      summary: Deactivate / reactivate an operator (never yourself, never the last admin)
+      parameters: [{ name: operatorId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: { active: { type: boolean } } } } }
+      responses:
+        "200": { description: Updated, content: { application/json: { schema: { type: object, properties: { operator: { $ref: "#/components/schemas/Operator" } } } } } }
+        "403": { $ref: "#/components/responses/AdminsOnly" }
+        "409": { description: "Would remove the last active operator/admin, or yourself", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/operator/operators/{operatorId}/admin:
+    post:
+      tags: [Admin]
+      summary: Grant or remove admin rights (never the last admin)
+      parameters: [{ name: operatorId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: { admin: { type: boolean } } } } }
+      responses:
+        "200": { description: Updated, content: { application/json: { schema: { type: object, properties: { operator: { $ref: "#/components/schemas/Operator" } } } } } }
+        "403": { $ref: "#/components/responses/AdminsOnly" }
+        "409": { description: Would remove the last admin, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/operator/staff/{role}/{accountId}/setup-code:
+    post:
+      tags: [Admin]
+      summary: Re-send a setup code — also how a forgotten PIN/password is reset
+      description: The old PIN/password keeps working until the new one is set. Without an email on file or in the body, refused (setup codes are email-only).
+      parameters:
+        - { name: role, in: path, required: true, schema: { type: string, enum: [driver, operator] } }
+        - { name: accountId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { email: { type: string, format: email } } } } }
+      responses:
+        "200": { $ref: "#/components/responses/StaffCreated" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/AdminsOnly" }
+
+  /api/operator/drivers/{driverId}/active:
+    post:
+      tags: [Admin]
+      summary: Take a driver off (refused while they have active orders) or back on
+      parameters: [{ name: driverId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: { active: { type: boolean } } } } }
+      responses:
+        "200": { description: Updated, content: { application/json: { schema: { type: object, properties: { driver: { type: object, properties: { id: { type: string }, name: { type: string }, active: { type: boolean } } } } } } } }
+        "403": { $ref: "#/components/responses/AdminsOnly" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Driver still has active orders, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/operator/audit:
+    get:
+      tags: [Admin]
+      summary: The append-only decision log (latest 300)
+      description: Payments, automatic dispatches, refunds, reviews, staff changes, delivery checks. The database refuses UPDATE and DELETE on it.
+      responses:
+        "200":
+          description: Entries, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        at: { type: string, format: date-time }
+                        actor: { type: string, example: "operator:2:abdideq" }
+                        action:
+                          type: string
+                          enum: [payment.confirmed, payment.unmatched, order.dispatched, order.failed, delivery.checked, refund.settled, refund.waived, access.reviewed, staff.created, staff.active, staff.admin, staff.owner_set]
+                        subject: { type: [string, "null"], example: "order:9110aafa-…" }
+                        detail: { type: object }
+        "403": { $ref: "#/components/responses/AdminsOnly" }
+
+  # ───────────────────────────── Mobile-money API ─────────────────────────────
+  /api/payments/webhook:
+    post:
+      tags: [Mobile-money API]
+      summary: The provider says an order is paid (the ONLY way, in api mode)
+      description: |
+        **404 unless `PAYMENT_CONFIRMATION=api`.** Signed with HMAC-SHA256 over
+        `"<X-GK-Timestamp>.<exact raw body>"` using `PAYMENT_WEBHOOK_SECRET`; the timestamp must be
+        within 5 minutes. Retries are safe (same reference + order = 200 duplicate). Money that can't
+        be applied is logged as `payment.unmatched` for a refund — never forced through.
+        Full guide: `docs/PAYMENT_API.md`.
+      security: [{ webhookSignature: [], webhookTimestamp: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [orderId, reference, amount]
+              properties:
+                orderId: { type: string, format: uuid }
+                reference: { type: string, description: The telecom transaction id }
+                amount: { type: string, example: "7.50" }
+                payer: { type: string, example: "+252612345678" }
+      responses:
+        "200":
+          description: Applied (or a duplicate of one already applied)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  status: { $ref: "#/components/schemas/Status" }
+                  duplicate: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: "Webhook off (operator mode), or no such order" }
+        "409": { description: "Wrong amount, already paid, or reference used for another order", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: A customer, driver or operator token. Its role decides what you may call.
+    uploadToken:
+      type: http
+      scheme: bearer
+      description: The 15-minute `uploadToken` returned by POST /api/signup, valid for that request only.
+    webhookSignature:
+      type: apiKey
+      in: header
+      name: X-GK-Signature
+      description: hex(HMAC-SHA256(PAYMENT_WEBHOOK_SECRET, "<timestamp>.<raw body>"))
+    webhookTimestamp:
+      type: apiKey
+      in: header
+      name: X-GK-Timestamp
+      description: Unix seconds; within 5 minutes of the server clock.
+
+  parameters:
+    OrderId:
+      name: id
+      in: path
+      required: true
+      description: Order UUID. Anything else is a 404.
+      schema: { type: string, format: uuid }
+
+  requestBodies:
+    Image:
+      required: true
+      description: Raw image bytes, at most 6 MB. A re-upload replaces the previous one of that kind.
+      content:
+        image/jpeg: { schema: { type: string, format: binary } }
+        image/png: { schema: { type: string, format: binary } }
+        image/webp: { schema: { type: string, format: binary } }
+        image/heic: { schema: { type: string, format: binary } }
+
+  responses:
+    BadRequest:
+      description: The request itself is wrong (reason in `error`)
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Unauthorized:
+      description: No valid token / credentials / signature
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    NotFound:
+      description: Doesn't exist — or isn't yours. Deliberately the same answer.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    AdminsOnly:
+      description: Signed in as an operator without admin rights
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    RateLimited:
+      description: Too many requests — wait `retryAfter` seconds
+      headers: { Retry-After: { schema: { type: integer } } }
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    PhotoSaved:
+      description: Stored
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              photo:
+                type: object
+                properties:
+                  id: { type: string }
+                  order_id: { type: string, format: uuid }
+                  kind: { type: string, enum: [order_ref, pickup_proof, delivery_proof] }
+                  object_key: { type: string }
+                  content_type: { type: [string, "null"] }
+                  uploaded_by: { type: string }
+                  created_at: { type: string, format: date-time }
+    StaffCreated:
+      description: Account created / code re-sent. `error` set = account exists but the email failed — re-send.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              role: { type: string, enum: [driver, operator] }
+              account: { type: object }
+              sentVia: { type: string, enum: [email, sms] }
+              smsSent: { type: boolean, description: "Legacy name: true when the code was delivered by any channel" }
+              error: { type: string }
+              devCode: { type: string, description: Development only }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string, example: "not found" }
+        ref: { type: string, description: "First 8 chars of X-Request-Id — quote it when reporting", example: 1a2b3c4d }
+        cause: { type: string, description: "Server failures only, e.g. DB-P1001, EMAIL-HTTP403" }
+        retryAfter: { type: integer, description: 429 only }
+
+    Status:
+      type: string
+      enum: [PENDING_PAYMENT, PAID_UNASSIGNED, DISPATCHED, IN_TRANSIT, DELIVERED, FAILED_REFUND]
+
+    Item:
+      type: object
+      properties:
+        text: { type: string, example: "2kg rice, cooking oil" }
+        price: { type: [number, string] }
+
+    Order:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: integer }
+        user_phone: { type: string, description: The number the driver calls }
+        status: { $ref: "#/components/schemas/Status" }
+        total_amount: { type: string, example: "7.50" }
+        items: { type: array, items: { $ref: "#/components/schemas/Item" } }
+        lat: { type: [number, "null"] }
+        lng: { type: [number, "null"] }
+        landmark_text: { type: string }
+        driver_id: { type: [string, "null"], description: Set by automatic dispatch }
+        payment_claimed_at: { type: [string, "null"], format: date-time }
+        payment_claim_ref: { type: [string, "null"] }
+        payment_claim_wallet: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    PaymentInstruction:
+      type: object
+      properties:
+        paymentMethod: { type: string, enum: [ussd, manual] }
+        wallets:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, enum: [evc, edahab, zaad, sahal] }
+              name: { type: string, example: EVC Plus }
+              ussdUri: { type: string, example: "tel:*712*612345678*7.50%23", description: "Use verbatim — the # is pre-encoded as %23" }
+        ussdUri: { type: [string, "null"], description: Legacy single-wallet field }
+        paymentNote: { type: [string, "null"] }
+
+    OrderWithPayment:
+      allOf:
+        - type: object
+          properties:
+            order: { $ref: "#/components/schemas/Order" }
+            created: { type: boolean }
+        - $ref: "#/components/schemas/PaymentInstruction"
+
+    Message:
+      type: object
+      properties:
+        id: { type: string }
+        sender: { type: string, enum: [user, driver, operator, system] }
+        body: { type: string }
+        client_id: { type: [string, "null"], format: uuid }
+        created_at: { type: string, format: date-time }
+
+    Fix:
+      type: object
+      description: The phone's GPS fix. Evidence, not a gate — omit it when the phone has none.
+      properties:
+        lat: { type: number }
+        lng: { type: number }
+        accuracy: { type: number, description: metres }
+
+    Proof:
+      type: object
+      properties:
+        step: { type: string, enum: [pickup, delivery] }
+        method: { type: string, enum: [photo, code, photo_no_code] }
+        note: { type: [string, "null"] }
+        distance_m: { type: [integer, "null"], description: From the driver's fix to the customer's pin }
+        accuracy_m: { type: [integer, "null"] }
+        flags:
+          type: array
+          items: { type: string, enum: [no_code, no_gps, far_from_pin, customer_disputed] }
+        created_at: { type: string, format: date-time }
+        reviewed_by: { type: [string, "null"] }
+        reviewed_at: { type: [string, "null"], format: date-time }
+
+    Refund:
+      type: object
+      properties:
+        id: { type: string }
+        amount: { type: string }
+        reason: { type: [string, "null"] }
+        status: { type: string, enum: [owed, settled, waived] }
+        settlement_reference: { type: [string, "null"] }
+        settlement_note: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+        order:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            user_phone: { type: string }
+            status: { $ref: "#/components/schemas/Status" }
+            landmark_text: { type: string }
+
+    Operator:
+      type: object
+      properties:
+        id: { type: string }
+        username: { type: string }
+        display_name: { type: string }
+        active: { type: boolean }
+        is_admin: { type: boolean }
+        must_change_password: { type: boolean }
+        last_login_at: { type: [string, "null"], format: date-time }
+        setup_pending: { type: boolean }
+        has_email: { type: boolean }
+
+    AccessRequest:
+      type: object
+      properties:
+        id: { type: string }
+        role: { type: string, enum: [driver, operator] }
+        name: { type: string }
+        phone: { type: [string, "null"], description: null while blind }
+        email: { type: [string, "null"], description: null while blind }
+        message: { type: [string, "null"], description: null while blind }
+        blind: { type: boolean, description: true until approved or declined }
+        status: { type: string, enum: [new, contacted, approved, declined] }
+        id_document_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+        account_created_at: { type: [string, "null"], format: date-time }
+
+    PhoneCheck:
+      type: object
+      properties:
+        valid: { type: boolean }
+        e164: { type: string, example: "+252612345678" }
+        country: { type: string }
+        operator: { type: string, description: Somali network name, when known }
+        reason: { type: string, description: Why it is invalid }

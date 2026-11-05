@@ -34,6 +34,12 @@ cd backend && npm test && cd ..
 ./scripts/staging.sh simulate   # look at the report before sending a build to anyone
 ```
 
+## API reference (Swagger UI)
+
+```bash
+cd backend && npm run docs      # http://localhost:8099 — the spec is docs/api/openapi.yaml
+```
+
 ## Commit
 
 ```bash
