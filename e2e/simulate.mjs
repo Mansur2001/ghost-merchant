@@ -113,18 +113,28 @@ async function driverLogin(page, msisdn = '619876543', pin = '1234') {
   await page.waitForSelector('#queueView', { state: 'visible' });
 }
 
+// The operator confirms the payment; the SYSTEM picks the driver. Returns who it picked.
 async function payAndDispatch(op, order, ref) {
   const card = op.locator(`#orders [data-open="${order.id}"]`);
   await card.waitFor();
   await card.click();
   await op.fill(`[data-payref="${order.id}"]`, ref);
   await op.click(`[data-confirm="${order.id}"]`);
-  await waitText(card, /Needs a driver/);
-  await waitText(op.locator('#orderDetail'), /Assign a driver/);
-  const pick = op.locator(`select[data-assign="${order.id}"]`);
-  await pick.selectOption(await pick.locator('option', { hasText: 'Amina' }).getAttribute('value'));
-  await op.click(`[data-assignbtn="${order.id}"]`);
-  await waitText(op.locator('.toast'), /Driver assigned/);
+  await waitText(card, /Driver at market/);
+  const txt = await waitText(op.locator('#orderDetail'), /🛵 \w+/);
+  return txt.match(/🛵 (\w+)/)[1];
+}
+
+// One phone per driver, signed in as them.
+const DRIVERS = { Amina: ['619876543', '1234'], Bashir: ['651112223', '5678'] };
+const driverPhones = {};
+async function driverFor(name, geo = DOOR) {
+  if (!DRIVERS[name]) throw new Error(`dispatched to unknown driver ${name}`);
+  if (!driverPhones[name]) driverPhones[name] = await device('phone', { permissions: ['geolocation'], geolocation: geo });
+  const dv = driverPhones[name];
+  await dv.ctx.setGeolocation(geo);
+  await driverLogin(dv.page, ...DRIVERS[name]);
+  return dv;
 }
 
 const api = (page, path, opts = {}) => page.evaluate(async ([p, o]) => {
@@ -180,9 +190,13 @@ await step(op.page, 'Operator', 'Opens the dispatch console and selects the clai
   await card.click();
   must((await op.page.inputValue(`[data-payref="${A.id}"]`)) === `SIM${stamp}`, 'reference not pre-filled');
 });
-await step(op.page, 'Operator', 'Checks the merchant phone, confirms the payment, assigns driver Amina', 'Card moves to “Driver at market”', async () => {
-  await payAndDispatch(op.page, A, `SIM${stamp}`);
-  await waitText(op.page.locator(`#orders [data-open="${A.id}"]`), /Driver at market/);
+await step(op.page, 'Operator', 'Checks the merchant phone and confirms the payment (transaction number required)', 'The SYSTEM assigns a driver at once — “Driver at market”, “assigned automatically”', async () => {
+  A.driver = await payAndDispatch(op.page, A, `SIM${stamp}`);
+  await waitText(op.page.locator('#orderDetail'), /assigned automatically/);
+});
+await step(op.page, 'Operator', 'Looks for a way to choose or change the driver', 'There is none: no driver picker anywhere on the order', async () => {
+  must(await op.page.locator('#orderDetail select').count() === 0, 'a driver picker exists');
+  must(await op.page.locator('#orderDetail [data-assignbtn]').count() === 0, 'an assign button exists');
 });
 let code;
 await step(cust.page, 'Customer', 'Watches the order (no reload)', 'Paid → driver getting items; a 4-digit delivery code appears', async () => {
@@ -192,8 +206,7 @@ await step(cust.page, 'Customer', 'Watches the order (no reload)', 'Paid → dri
   must(/^\d{4}$/.test(code), `code looks wrong: ${code}`);
 });
 
-const drv = await device('phone', { permissions: ['geolocation'], geolocation: DOOR });
-await driverLogin(drv.page);
+let drv = await driverFor(A.driver);
 await step(drv.page, 'Driver', 'Signs in with phone + PIN', 'Sees only the jobs assigned to them, with counts', async () => {
   await drv.page.waitForSelector(`#queue [data-id="${A.id}"]`);
 });
@@ -253,9 +266,8 @@ await emailOnly(custB.page);
 await customerSignsUp(custB.page, `sim-b-${stamp}@example.com`);
 const B = await placeOrder(custB.page, { what: 'Sugar 1kg, tea, powdered milk', amount: '4.25', landmark: 'Blue door behind the mosque', phoneNo: '651234567' });
 await section(op.page, 'orders');
-await payAndDispatch(op.page, B, `SIMB${stamp}`);
-const drvB = await device('phone', { permissions: ['geolocation'], geolocation: FAR });
-await driverLogin(drvB.page);
+B.driver = await payAndDispatch(op.page, B, `SIMB${stamp}`);
+const drvB = await driverFor(B.driver, FAR);
 await drvB.page.click(`#queue [data-id="${B.id}"]`);
 await drvB.page.setInputFiles('#pickPhoto', PHOTO);
 await drvB.page.waitForSelector('#pickCap.done');
@@ -312,10 +324,10 @@ await emailOnly(custC.page);
 await customerSignsUp(custC.page, `sim-c-${stamp}@example.com`);
 const C = await placeOrder(custC.page, { what: 'Bread x3, butter', amount: '3.20', landmark: 'Corner shop, blue awning', phoneNo: '771234567' });
 await section(op.page, 'orders');
-await payAndDispatch(op.page, C, `SIMC${stamp}`);
+C.driver = await payAndDispatch(op.page, C, `SIMC${stamp}`);
 await custC.page.waitForSelector('#handoffCard', { state: 'visible' });
 const codeC = (await custC.page.textContent('#handoffCode')).trim();
-await driverLogin(drv.page);
+drv = await driverFor(C.driver);
 await drv.page.click(`#queue [data-id="${C.id}"]`);
 await drv.page.setInputFiles('#pickPhoto', PHOTO);
 await drv.page.waitForSelector('#pickCap.done');
@@ -345,8 +357,8 @@ await emailOnly(custD.page);
 await customerSignsUp(custD.page, `sim-d-${stamp}@example.com`);
 const D = await placeOrder(custD.page, { what: 'Flour 5kg', amount: '6.00', landmark: 'White building', phoneNo: '612345678' });
 await section(op.page, 'orders');
-await payAndDispatch(op.page, D, `SIMD${stamp}`);
-await driverLogin(drv.page);
+D.driver = await payAndDispatch(op.page, D, `SIMD${stamp}`);
+drv = await driverFor(D.driver);
 await step(null, 'Driver', 'Asks the server for the customer’s delivery code', 'Refused (customers only) and no code in the answer', async () => {
   const r = await api(drv.page, `/orders/${D.id}/handoff`);
   must([401, 403, 404].includes(r.status) && !r.body?.code, `got ${r.status}`);
@@ -389,16 +401,37 @@ await step(null, 'Driver', 'Guesses codes as fast as possible', 'Locked after 5 
   }
   must(last.status === 423, `after 6 guesses got ${last.status}`);
 });
-const bashir = await device('phone');
-await driverLogin(bashir.page, '651112223', '5678');
-await step(null, 'Another driver', 'Bashir (not assigned) opens the order', 'Not found (404) — drivers see only their own jobs', async () => {
-  const r = await api(bashir.page, `/driver/orders/${D.id}`);
+const otherName = D.driver === 'Amina' ? 'Bashir' : 'Amina';
+const other = await driverFor(otherName);
+await step(null, 'Another driver', `${otherName} (not assigned) opens the order`, 'Not found (404) — drivers see only their own jobs', async () => {
+  const r = await api(other.page, `/driver/orders/${D.id}`);
   must(r.status === 404, `got ${r.status}`);
 });
 await step(null, 'Another customer', 'Customer A tries to read customer D’s order and code', 'Not found (404)', async () => {
   const r1 = await api(cust.page, `/orders/${D.id}`);
   const r2 = await api(cust.page, `/orders/${D.id}/handoff`);
   must(r1.status === 404 && r2.status === 404, `got ${r1.status}/${r2.status}`);
+});
+await step(null, 'Operator', 'Calls the old “assign driver” API directly to hand the order to a friend', 'Gone (404) — dispatch is automatic, there is no way to choose', async () => {
+  const r = await op.page.evaluate(async (id) => {
+    const res = await fetch(`/api/operator/orders/${id}/assign`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionStorage.getItem('opToken')}` }, body: JSON.stringify({ driverId: 1 }) });
+    return res.status;
+  }, D.id);
+  must(r === 404, `got ${r}`);
+});
+await step(null, 'Operator', 'Tries to confirm a payment without a transaction number', 'Refused (400) — every confirmation names a real payment', async () => {
+  const r = await op.page.evaluate(async (id) => {
+    const res = await fetch(`/api/operator/orders/${id}/mark-paid`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionStorage.getItem('opToken')}` }, body: '{}' });
+    return res.status;
+  }, B.id);
+  must(r === 400 || r === 409, `got ${r}`);
+});
+await step(null, 'Operator', 'Tries to mark a refund as paid (ordinary operator, not an admin)', 'Refused (403) — only an admin records money going back', async () => {
+  const r = await op.page.evaluate(async () => {
+    const res = await fetch('/api/operator/refunds/1/settle', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionStorage.getItem('opToken')}` }, body: JSON.stringify({ reference: 'FAKE123' }) });
+    return res.status;
+  });
+  must(r === 403, `got ${r}`);
 });
 await step(null, 'Customer', 'Disputes an order that was never delivered', 'Refused (409)', async () => {
   const r = await api(custD.page, `/orders/${D.id}/dispute`, { method: 'POST', body: '{}' });
@@ -423,11 +456,12 @@ await step(custD.page, 'Customer', 'Sees the update', '“Cancelled”, with a n
   await waitText(custD.page.locator('#statusSub'), /money owed/);
 });
 await section(op.page, 'refunds');
-await step(op.page, 'Operator', 'Opens Refunds and selects the new one', '$6.00 owed, with the driver’s reason and the form to record the refund', async () => {
+await step(op.page, 'Operator', 'Opens Refunds and selects the new one', '$6.00 owed with the driver’s reason — and NO button to mark it paid: only an admin can', async () => {
   await waitText(op.page.locator('#refunds'), /\$6\.00/);
   await op.page.locator('#refunds [data-open]', { hasText: '$6.00' }).first().click();
   await waitText(op.page.locator('#refundDetail'), /Items not available/);
-  await op.page.waitForSelector('#rfSettle');
+  await waitText(op.page.locator('#refundDetail'), /Only an admin/);
+  must(await op.page.locator('#rfSettle').count() === 0, 'an ordinary operator can settle refunds');
 });
 
 // ═══ F ═══
@@ -456,9 +490,11 @@ await adm.page.fill('#password', 'change-me-please-1');
 await adm.page.click('#loginBtn');
 await adm.page.waitForSelector('#orders', { state: 'visible' });
 await section(adm.page, 'team');
-await step(adm.page, 'Admin', 'Opens Team and selects the request', 'Shows the applicant’s email and phone; Approve / Decline', async () => {
+await step(adm.page, 'Admin', 'Opens Team and selects the request', 'BLIND review: name and ID only — phone and email hidden until a decision', async () => {
   await adm.page.locator('#accessRequests [data-open]', { hasText: 'Sim Applicant' }).first().click();
-  await waitText(adm.page.locator('#teamDetail'), new RegExp(appEmail));
+  await waitText(adm.page.locator('#teamDetail'), /Blind review/);
+  const txt = await adm.page.textContent('#teamDetail');
+  must(!txt.includes(appEmail) && !txt.includes(appPhone), 'contact details visible before the decision');
 });
 await step(adm.page, 'Admin', 'Approves, then creates the account', 'Setup code emailed to the applicant (on staging the code is shown instead)', async () => {
   await adm.page.click('#teamDetail [data-status="approved"]');
@@ -479,8 +515,24 @@ await step(applicant.page, 'New driver', 'Enters phone, the emailed code, and a 
   await applicant.page.waitForSelector('#queueView', { state: 'visible' });
 });
 await section(adm.page, 'drivers');
-await step(adm.page, 'Admin', 'Opens Drivers', 'The new driver is on the roster and can be assigned orders', async () => {
+await step(adm.page, 'Admin', 'Opens Drivers', 'The new driver is on the roster; dispatch can now give them orders', async () => {
   await waitText(adm.page.locator('#drivers'), /Sim Applicant/);
+});
+await section(adm.page, 'refunds');
+await step(adm.page, 'Admin', 'Sends the $6.00 back from the business phone, then records the reference', 'Refund recorded; it moves to “Recently closed”', async () => {
+  await adm.page.locator('#refunds [data-open]', { hasText: '$6.00' }).first().click();
+  await adm.page.fill('#rfRef', `RF${stamp}`);
+  await adm.page.click('#rfSettle');
+  await waitText(adm.page.locator('.toast'), /Refund recorded/);
+});
+await section(adm.page, 'audit');
+await step(adm.page, 'Admin', 'Opens the Audit log', 'Every decision today is there — payments, automatic dispatches, the review, the new account — and cannot be edited', async () => {
+  const log = adm.page.locator('#auditList');
+  await waitText(log, /Payment confirmed/);
+  await waitText(log, /Order dispatched/);
+  await waitText(log, /Access request decided/);
+  await waitText(log, /Staff account created/);
+  await waitText(log, /Refund recorded as paid/);
 });
 
 await browser.close();

@@ -5,12 +5,14 @@ import http from 'node:http';
 import express from 'express';
 import { config } from './config.js';
 import { ordersRouter } from './routes/orders.js';
+import { paymentsWebhookRouter } from './routes/paymentsWebhook.js';
 import { driversRouter } from './routes/drivers.js';
 import { operatorRouter } from './routes/operator.js';
 import { authRouter } from './routes/auth.js';
 import { signupRouter } from './routes/signup.js';
 import { staffSetupRouter } from './routes/staffSetup.js';
 import { sweepExpiredSetupCodes } from './commands/staffAccounts.js';
+import { dispatchWaitingSoon } from './commands/dispatch.js';
 import { attachSocketServer } from './realtime/socketServer.js';
 import { ensureBucket } from './storage/objectStore.js';
 import { sweepExpiredOtps } from './commands/auth.js';
@@ -53,6 +55,8 @@ app.use((req, res, next) => {
   next();
 });
 
+// Before the JSON parser: the payment callback's signature covers its raw bytes.
+app.use('/api', paymentsWebhookRouter);
 app.use(express.json({ limit: '32kb' })); // order payloads must stay small
 app.use('/api', authRouter);
 app.use('/api', signupRouter);
@@ -87,6 +91,11 @@ const housekeeping = setInterval(() => {
 }, 60 * 60 * 1000);
 housekeeping.unref();
 
+// Backstop for automatic dispatch: paid orders waiting for a free driver are retried every
+// 30s, in case a driver freed up in a way that didn't trigger it directly.
+const dispatchTimer = setInterval(dispatchWaitingSoon, 30 * 1000);
+dispatchTimer.unref();
+
 async function boot() {
   // The `log` transport prints login codes to the server log, so anyone with log access could
   // sign in as any customer. Fine in dev, fatal in production.
@@ -118,6 +127,20 @@ async function boot() {
       ? `[wallets] offering ${wallets.map((w) => w.name).join(', ')}`
       : '[wallets] none configured — every order uses the operator-confirmed manual path'
   );
+
+  // Who may mark an order paid. 'api' with no (or a weak) secret would let anyone who can
+  // reach the server forge "paid" callbacks — refuse to start instead.
+  if (!['operator', 'api'].includes(config.paymentConfirmation)) {
+    console.error(`FATAL: PAYMENT_CONFIRMATION must be operator or api (got "${config.paymentConfirmation}").`);
+    process.exit(1);
+  }
+  if (config.paymentConfirmation === 'api' && config.paymentWebhookSecret.length < 32) {
+    console.error('FATAL: PAYMENT_CONFIRMATION=api needs PAYMENT_WEBHOOK_SECRET of at least 32 characters.');
+    process.exit(1);
+  }
+  console.log(config.paymentConfirmation === 'api'
+    ? '[payments] confirmed ONLY by the signed mobile-money callback; operators cannot mark orders paid'
+    : '[payments] confirmed by an operator with the transaction number (switch to api when the provider is live)');
 
   // A half-set review login is silently disabled by reviewCodeFor(), which would surface as a
   // Play rejection days later. Say so now, while someone is watching the deploy.

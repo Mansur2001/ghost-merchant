@@ -8,6 +8,7 @@ import { transitionOrder, postMessage } from '../commands/orders.js';
 import { savePhoto } from '../commands/photos.js';
 import { confirmPickup, confirmDelivery, ProofError } from '../commands/proofs.js';
 import { cleanReason } from '../domain/proof.js';
+import { dispatchWaitingSoon } from '../commands/dispatch.js';
 import { getDriverQueue, getShoppingList } from '../queries/orders.js';
 import { STATUS } from '../domain/stateMachine.js';
 import { parsePhone } from '../domain/phone.js';
@@ -100,6 +101,7 @@ driversRouter.post('/driver/orders/:id/delivered', ...myOrder, async (req, res, 
       noCodeReason: req.body?.noCodeReason,
       fix: req.body?.fix,
     });
+    dispatchWaitingSoon(); // a job done is a driver free: give them the next one waiting
     res.json({ order });
   } catch (err) {
     proofError(err, res, next);
@@ -118,6 +120,7 @@ driversRouter.post('/driver/orders/:id/failed', ...myOrder, async (req, res) => 
       `driver:${req.auth.id}`,
       reason
     );
+    dispatchWaitingSoon();
     res.json({ order });
   } catch (err) {
     res.status(409).json({ error: err.message });

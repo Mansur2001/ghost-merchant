@@ -73,6 +73,13 @@ export const config = {
   // collected here and refused at boot (index.js), where someone is watching the deploy.
   payment: parseWallets(process.env),
 
+  // Who says an order is paid. 'operator' (today): a person checks the merchant phone and
+  // enters the transaction number. 'api': only the mobile-money provider's signed callback can
+  // (POST /api/payments/webhook) — the operator's confirm button is switched off entirely.
+  // See docs/PAYMENT_API.md. The secret signs the callbacks; boot refuses 'api' without one.
+  paymentConfirmation: process.env.PAYMENT_CONFIRMATION || 'operator',
+  paymentWebhookSecret: process.env.PAYMENT_WEBHOOK_SECRET || '',
+
   // Redis is OPTIONAL. Unset = single-instance mode (in-process bus + rate limiter), which
   // is exactly how this ran before P2. Set it to run more than one backend container.
   redis: {

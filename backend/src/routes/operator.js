@@ -40,6 +40,8 @@ import {
 } from '../commands/accessRequests.js';
 import { getObject } from '../storage/objectStore.js';
 import { confirmPayment, PaymentError } from '../commands/payments.js';
+import { audit, auditAfter } from '../commands/audit.js';
+import { dispatchWaitingSoon } from '../commands/dispatch.js';
 import { isUuid } from '../domain/ids.js';
 
 export const operatorRouter = Router();
@@ -133,7 +135,8 @@ operatorRouter.get('/operator/me', operatorOnly, async (req, res, next) => {
   try {
     const me = await getOperatorById(req.auth.id);
     if (!me) return res.status(401).json({ error: 'unauthorized' }); // deactivated mid-session
-    res.json({ operator: me });
+    // The console hides controls this server doesn't allow (e.g. confirm payment in api mode).
+    res.json({ operator: me, settings: { paymentConfirmation: config.paymentConfirmation } });
   } catch (err) {
     next(err);
   }
@@ -159,6 +162,7 @@ operatorRouter.post('/operator/operators', adminOnly, async (req, res, next) => 
       role: 'operator', name: displayName || username, phone, username, email,
       createdBy: actorLabel(req.auth),
     });
+    auditAfter({ actor: actorLabel(req.auth), action: 'staff.created', subject: `operator:${r.account?.id}`, detail: { username } });
     res.status(201).json(staffResult(r));
   } catch (err) {
     staffError(err, res, next);
@@ -169,6 +173,7 @@ operatorRouter.post('/operator/operators', adminOnly, async (req, res, next) => 
 operatorRouter.post('/operator/operators/:id/active', adminOnly, async (req, res, next) => {
   try {
     const operator = await setOperatorActive(req.params.id, req.body?.active !== false, req.auth.id);
+    auditAfter({ actor: actorLabel(req.auth), action: 'staff.active', subject: `operator:${req.params.id}`, detail: { active: req.body?.active !== false } });
     res.json({ operator });
   } catch (err) {
     staffError(err, res, next);
@@ -179,6 +184,7 @@ operatorRouter.post('/operator/operators/:id/active', adminOnly, async (req, res
 operatorRouter.post('/operator/operators/:id/admin', adminOnly, async (req, res, next) => {
   try {
     const operator = await setOperatorAdmin(req.params.id, req.body?.admin === true);
+    auditAfter({ actor: actorLabel(req.auth), action: 'staff.admin', subject: `operator:${req.params.id}`, detail: { admin: req.body?.admin === true } });
     res.json({ operator });
   } catch (err) {
     staffError(err, res, next);
@@ -259,7 +265,9 @@ operatorRouter.get('/operator/refunds', operatorOnly, async (req, res, next) => 
 // POST /api/operator/refunds/:id/settle { reference, note }
 // The reference is the telecom receipt for the RETURN transfer — the only thing that can be
 // checked against the telecom's own records in a dispute, so it is required.
-operatorRouter.post('/operator/refunds/:id/settle', operatorOnly, async (req, res, next) => {
+// Money going back to a customer is an ADMIN's decision, never an ordinary operator's: an
+// operator who could record "refunded" could close a debt that was never paid.
+operatorRouter.post('/operator/refunds/:id/settle', adminOnly, async (req, res, next) => {
   try {
     const refund = await settleRefund({
       refundId: req.params.id,
@@ -267,6 +275,7 @@ operatorRouter.post('/operator/refunds/:id/settle', operatorOnly, async (req, re
       note: req.body?.note,
       settledBy: actorLabel(req.auth),
     });
+    auditAfter({ actor: actorLabel(req.auth), action: 'refund.settled', subject: `refund:${req.params.id}`, detail: { reference: req.body?.reference || null } });
     res.json({ refund });
   } catch (err) {
     if (err instanceof RefundError) return res.status(err.status).json({ error: err.message });
@@ -277,13 +286,14 @@ operatorRouter.post('/operator/refunds/:id/settle', operatorOnly, async (req, re
 // POST /api/operator/refunds/:id/waive { note }
 // Closes a refund WITHOUT paying it. Separate from settle on purpose: conflating "we paid
 // this back" with "nothing was owed" makes the ledger useless in the argument it exists for.
-operatorRouter.post('/operator/refunds/:id/waive', operatorOnly, async (req, res, next) => {
+operatorRouter.post('/operator/refunds/:id/waive', adminOnly, async (req, res, next) => {
   try {
     const refund = await waiveRefund({
       refundId: req.params.id,
       note: req.body?.note,
       settledBy: actorLabel(req.auth),
     });
+    auditAfter({ actor: actorLabel(req.auth), action: 'refund.waived', subject: `refund:${req.params.id}`, detail: { note: req.body?.note || null } });
     res.json({ refund });
   } catch (err) {
     if (err instanceof RefundError) return res.status(err.status).json({ error: err.message });
@@ -297,7 +307,13 @@ operatorRouter.post('/operator/refunds/:id/waive', operatorOnly, async (req, res
 operatorRouter.get('/operator/access-requests', adminOnly, async (req, res, next) => {
   try {
     const requests = await listAccessRequests({ includeClosed: req.query.all === '1' });
-    res.json({ requests });
+    // BLIND review: until a decision is made, the reviewer sees the role, the typed name and the
+    // ID — enough to check that the two match — and nothing that says who the person is to
+    // them (phone, email, their message). Contact details unlock once the decision is recorded.
+    const decided = (r) => r.status === 'approved' || r.status === 'declined';
+    res.json({
+      requests: requests.map((r) => (decided(r) ? r : { ...r, phone: null, email: null, message: null, blind: true })),
+    });
   } catch (err) {
     next(err);
   }
@@ -335,6 +351,7 @@ operatorRouter.post('/operator/access-requests/:id/review', adminOnly, async (re
       note: req.body?.note,
       reviewedBy: actorLabel(req.auth),
     });
+    auditAfter({ actor: actorLabel(req.auth), action: 'access.reviewed', subject: `access_request:${req.params.id}`, detail: { status: req.body?.status } });
     res.json({ request });
   } catch (err) {
     if (err instanceof AccessRequestError) {
@@ -355,6 +372,8 @@ operatorRouter.post('/operator/access-requests/:id/account', adminOnly, async (r
       email: req.body?.email,
       createdBy: actorLabel(req.auth),
     });
+    auditAfter({ actor: actorLabel(req.auth), action: 'staff.created', subject: `${r.role}:${r.account?.id}`, detail: { fromRequest: req.params.id } });
+    if (r.role === 'driver') dispatchWaitingSoon();
     res.status(201).json(staffResult(r));
   } catch (err) {
     staffError(err, res, next);
@@ -366,47 +385,18 @@ operatorRouter.get('/operator/drivers', operatorOnly, async (req, res) => {
   res.json({ drivers: await getDriversWithStats() });
 });
 
-// POST /api/operator/orders/:id/assign  { driverId } — explicit operator→driver dispatch.
-// From PAID_UNASSIGNED this assigns the driver AND transitions to DISPATCHED. If the order is
-// already active it just re-assigns the driver (and notes it in the thread).
-operatorRouter.post('/operator/orders/:id/assign', operatorOnly, async (req, res) => {
-  try {
-    const { driverId } = req.body || {};
-    if (!driverId) return res.status(400).json({ error: 'driverId required' });
-    const order = await getOrder(req.params.id);
-    if (!order) return res.status(404).json({ error: 'order not found' });
-    const driver = await getDriverById(driverId);
-    if (!driver || !driver.active) return res.status(400).json({ error: 'unknown or inactive driver' });
-
-    // One transaction: an order must never end up assigned-but-not-dispatched (or the
-    // reverse) because the process died between two writes.
-    const result = await withTransaction(async (client) => {
-      await assignDriver(order.id, driverId, { client });
-      if (order.status === STATUS.PAID_UNASSIGNED) {
-        return transitionOrder(
-          order.id, STATUS.DISPATCHED, actorLabel(req.auth), `assigned to ${driver.name}`,
-          { client }
-        );
-      }
-      // Re-assignment on an already-dispatched/in-transit order (no status change).
-      await postMessage(
-        { orderId: order.id, sender: 'system', body: `Reassigned to driver ${driver.name}.` },
-        { client }
-      );
-      return null;
-    });
-    wakeOutbox();
-    res.json({ order: result || (await getOrder(order.id)) });
-  } catch (err) {
-    res.status(409).json({ error: err.message });
-  }
-});
+// NOTE: there is no assign route. Operators don't choose drivers: a paid order is dispatched
+// automatically (commands/dispatch.js), so nobody at the desk can favour or punish a driver.
 
 // POST /api/operator/orders/:id/mark-paid { reference? }
 // THE way an order becomes paid: the operator saw the money on the merchant phone. Records the
 // payment (so a later refund knows what is owed) and moves the order on, in one transaction.
 // `reference` is the EVC/eDahab transaction id — unique, so one payment can't pay two orders.
 operatorRouter.post('/operator/orders/:id/mark-paid', operatorOnly, async (req, res, next) => {
+  // Once the provider's API is live, no person can mark an order paid — only its signed callback.
+  if (config.paymentConfirmation === 'api') {
+    return res.status(403).json({ error: 'payments are confirmed automatically by the mobile-money API' });
+  }
   if (!isUuid(req.params.id)) return res.status(404).json({ error: 'order not found' });
   try {
     const order = await confirmPayment({
@@ -431,6 +421,10 @@ operatorRouter.post('/operator/orders/:id/refund', operatorOnly, async (req, res
       actorLabel(req.auth),
       req.body?.reason || 'operator refund'
     );
+    // Failing a paid order opens a refund (owed) — it moves no money, and only an admin can
+    // close the debt. Logged like every other decision.
+    auditAfter({ actor: actorLabel(req.auth), action: 'order.failed', subject: `order:${req.params.id}`, detail: { reason: req.body?.reason || null } });
+    dispatchWaitingSoon(); // its driver, if any, is free again
     res.json({ order });
   } catch (err) {
     res.status(409).json({ error: err.message });
@@ -448,6 +442,7 @@ operatorRouter.post('/operator/orders/:id/proofs/review', operatorOnly, async (r
   if (!isUuid(req.params.id)) return res.status(404).json({ error: 'order not found' });
   try {
     await markProofReviewed({ orderId: req.params.id, actor: actorLabel(req.auth) });
+    auditAfter({ actor: actorLabel(req.auth), action: 'delivery.checked', subject: `order:${req.params.id}` });
     res.json({ ok: true });
   } catch (err) {
     if (err instanceof ProofError) return res.status(err.status).json({ error: err.message });
@@ -472,6 +467,7 @@ operatorRouter.post('/operator/drivers', adminOnly, async (req, res, next) => {
     const r = await createStaffAccount({
       role: 'driver', name, phone: msisdn, email, createdBy: actorLabel(req.auth),
     });
+    auditAfter({ actor: actorLabel(req.auth), action: 'staff.created', subject: `driver:${r.account?.id}`, detail: { name } });
     res.status(201).json(staffResult(r));
   } catch (err) {
     staffError(err, res, next);
@@ -482,14 +478,36 @@ operatorRouter.post('/operator/drivers', adminOnly, async (req, res, next) => {
 // Deactivated, never deleted: their deliveries reference them.
 operatorRouter.post('/operator/drivers/:id/active', adminOnly, async (req, res, next) => {
   try {
+    const active = req.body?.active !== false;
+    // Taking a driver off with goods or jobs in hand would strand those orders: dispatch only
+    // ever hands work TO drivers, so nobody could move it. Finish or fail them first.
+    if (!active) {
+      const busy = await prisma.order.count({
+        where: { driver_id: BigInt(req.params.id), status: { in: ['DISPATCHED', 'IN_TRANSIT'] } },
+      });
+      if (busy) return res.status(409).json({ error: `this driver has ${busy} active order(s) — they must finish or fail them first` });
+    }
     const driver = await prisma.driver.update({
       where: { id: BigInt(req.params.id) },
-      data: { active: req.body?.active !== false },
+      data: { active },
       select: { id: true, name: true, active: true },
     });
+    auditAfter({ actor: actorLabel(req.auth), action: 'staff.active', subject: `driver:${req.params.id}`, detail: { active } });
+    if (active) dispatchWaitingSoon();
     res.json({ driver });
   } catch (err) {
     if (err.code === 'P2025') return res.status(404).json({ error: 'driver not found' });
+    next(err);
+  }
+});
+
+// GET /api/operator/audit — the append-only decision log, newest first. Admins only: it names
+// staff and customers' orders, and it is the record a dispute is settled with.
+operatorRouter.get('/operator/audit', adminOnly, async (req, res, next) => {
+  try {
+    const entries = await prisma.auditLog.findMany({ orderBy: { at: 'desc' }, take: 300 });
+    res.json({ entries });
+  } catch (err) {
     next(err);
   }
 });

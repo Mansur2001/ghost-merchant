@@ -76,11 +76,12 @@ customer's page flips to paid live.`
    Customers: `users.phone_number` and `users.email` UNIQUE, upserted on sign-in. Drivers: `msisdn UNIQUE`,
    never upserted (an upsert silently replaced an existing driver's PIN). Photos: `order_photos.object_key UNIQUE` with a deterministic key per (order, kind),
    so a re-upload overwrites one object/row instead of leaking duplicate copies of an image.
-3. **Only an operator's confirmation makes an order paid** (`commands/payments.js`
-   `confirmPayment`). A customer's "I've paid" (`claimPayment`) is a hint for the operator and
-   never changes status — anyone can tap a button. Confirming records the payment row in the
-   SAME transaction as the transition, because the refund ledger sums those rows: a paid order
-   with no payment row would fail owing nothing.
+3. **Only a confirmed payment makes an order paid** (`commands/payments.js`
+   `confirmPayment`): an operator with the telecom transaction number (REQUIRED) while
+   `PAYMENT_CONFIRMATION=operator`, or ONLY the provider's signed callback once it is `api`
+   (docs/PAYMENT_API.md). A customer's "I've paid" (`claimPayment`) is a hint and never changes
+   status. Confirming records the payment row, the audit row and the automatic dispatch in the
+   SAME transaction as the transition — the refund ledger sums those payment rows.
 4. **A customer is an account (`users.id`), not a phone.** They sign in with a verified phone
    (SMS code) OR a verified email (email code); either alone is enough, and the first sign-in
    creates the account. Customer tokens carry `uid` only, and ownership is `orders.user_id`.
@@ -106,6 +107,9 @@ customer's page flips to paid live.`
    a route under `/orders/:id` without `requireAuth, requireOrderAccess` is a data breach, not a
    missing feature. The same rule governs WebSocket `subscribe`.
 
+10. **No operator leverage over money, dispatch or people** (see the section below). Never add a
+   driver picker, a manual "mark paid" in api mode, an operator path that moves or closes money,
+   or a review screen that shows an applicant's contact details before the decision.
 9. **A driver step needs evidence, checked on the server** (`domain/proof.js`,
    `commands/proofs.js`). Pickup needs a `pickup_proof` photo; delivery needs the customer's
    4-digit handoff code, or a door photo + reason (flagged for an operator). The proof row is
@@ -113,6 +117,29 @@ customer's page flips to paid live.`
    transitions without it.
 
 ---
+
+## No operator leverage
+
+The desk coordinates; it does not decide who gets paid, who gets work, or who gets hired.
+
+- **Dispatch is automatic** (`domain/dispatch.js`, `commands/dispatch.js`). A paid order goes
+  to the active, set-up driver with the fewest active orders (max 3), ties to whoever has
+  waited longest (`drivers.last_assigned_at`). It runs in the payment's transaction, under a
+  `pg_advisory_xact_lock` so two at once can't pick the same "free" driver. When nobody is free
+  the order waits (PAID_UNASSIGNED) and `dispatchWaiting()` assigns it when a driver frees up
+  (delivered, failed, set up, reactivated) and every 30s. There is no assign route. A driver
+  with active orders can't be deactivated (their orders would strand).
+- **Payments**: transaction number required, amount (when known) must match to the cent; in
+  `api` mode the operator route is 403 and only `POST /api/payments/webhook` (HMAC + 5-minute
+  timestamp, mounted before the JSON parser) can confirm. Money we can't match is logged as
+  `payment.unmatched`, never forced through.
+- **Refunds**: an operator may fail an order (which opens what is owed); only an **admin** may
+  record it as refunded or waived. No route anywhere sends money.
+- **Staff approval is admin-only and blind**: until approved/declined, the review shows the role,
+  the typed name and the ID — phone, email and message are withheld by the API, not just hidden.
+- **Audit log** (`audit_log`, `commands/audit.js`): every payment, dispatch, refund, review,
+  staff change and delivery check. A DB trigger refuses UPDATE/DELETE on it and on
+  `order_events`. Admins read it under *Audit log*.
 
 ## Proof of delivery: the verification standard
 
@@ -415,9 +442,8 @@ Worker that cache-first serves its shell.
   then joins `subscribe_driver` (its own feed, not the operator firehose). Queue shows **only
   orders the operator assigned to this driver** — there is no shared self-serve pool. Order
   detail can capture a delivery-proof photo.
-- **Operator**: password → token in `sessionStorage` (`opToken`). Order cards show photo
-  thumbnails; PAID_UNASSIGNED cards have a driver picker →
-  `POST /operator/orders/:id/assign`, which sets `driver_id` and transitions to DISPATCHED.
+- **Operator**: password → token in `sessionStorage` (`opToken`). Confirms payments (while in
+  operator mode), watches dispatch happen, checks flagged deliveries, chats. No driver picker.
   A Drivers panel lists the roster with live workload stats.
 - **Layout**: standard delivery-app shell. Customer: app bar + bottom tabs (Home / Orders /
   Help / Account), sectioned checkout with a sticky action bar, tracking screen (status hero,
@@ -473,7 +499,7 @@ Guards (`db/seedSafety.js`), because the seed truncates everything and its passw
 ## Testing
 
 ```bash
-cd backend && npm install && npm test   # 394 Jest unit tests, ESM via --experimental-vm-modules
+cd backend && npm install && npm test   # 409 Jest unit tests, ESM via --experimental-vm-modules
 ./scripts/verify/run-all.sh             # live suites over real HTTP + WebSocket
 ```
 

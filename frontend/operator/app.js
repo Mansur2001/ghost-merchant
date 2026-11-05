@@ -2,6 +2,11 @@
 // checks the merchant phone and confirms each payment here, so "Confirm payment" is the step
 // every order passes through. Customers who tap "I've paid" are surfaced first.
 //
+// No leverage at this desk: drivers are assigned by the system (fair rotation), refunds are
+// recorded by admins only, staff requests are reviewed blind, and every decision lands in an
+// append-only audit log. When the mobile-money API is live (settings.paymentConfirmation =
+// 'api'), the confirm-payment control disappears: only the provider can mark an order paid.
+//
 // Layout: every section is a list (left) and a detail panel (right) for the selected item.
 // The page never scrolls; each pane does. Lists redraw on every live event, the detail panel
 // only when ITS item changes — so a half-typed reference or a picked driver is never wiped.
@@ -9,6 +14,7 @@
 const $ = (id) => document.getElementById(id);
 let token = sessionStorage.getItem('opToken') || null;
 let me = null; // the signed-in operator
+let settings = { paymentConfirmation: 'operator' };
 
 // ── Small helpers ──
 function setStatus(text, kind) {
@@ -105,11 +111,12 @@ const ICON = {
   refunds: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v10M9.5 9.5c0-1 1-1.5 2.5-1.5s2.5.6 2.5 1.8c0 2.7-5 1.4-5 4.2 0 1.2 1 1.8 2.5 1.8s2.5-.5 2.5-1.5"/>',
   drivers: '<circle cx="5.5" cy="17.5" r="2.5"/><circle cx="18.5" cy="17.5" r="2.5"/><path d="M8 17.5h7l2-6h-4l-2-4H7"/><path d="M15 6h3l1.5 5.5"/>',
   team: '<circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6s7 2 7 6"/><path d="M17 4a4 4 0 0 1 0 8M22 21c0-3-1.5-5-4-5.7"/>',
+  audit: '<path d="M5 3h11l3 3v15H5z"/><path d="M9 9h6M9 13h6M9 17h4"/>',
   account: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/>',
 };
 const SECTIONS = [
   ['orders', 'Orders'], ['deliveries', 'Deliveries'], ['refunds', 'Refunds'],
-  ['drivers', 'Drivers'], ['team', 'Team', 'admin'], ['account', 'Account'],
+  ['drivers', 'Drivers'], ['team', 'Team', 'admin'], ['audit', 'Audit log', 'admin'], ['account', 'Account'],
 ];
 let panel = 'orders';
 const counts = {};
@@ -128,6 +135,7 @@ function setPanel(id) {
   document.querySelectorAll('[data-panel]').forEach((el) => el.classList.toggle('hidden', el.dataset.panel !== id));
   renderNav();
   if (id === 'deliveries') loadDeliveries();
+  if (id === 'audit') loadAudit();
 }
 function setCount(id, n) {
   if ((counts[id] || 0) === n) return;
@@ -227,6 +235,7 @@ async function loadMe() {
   const res = await api('/operator/me');
   if (res.error || !res.operator) return logout();
   me = res.operator;
+  settings = res.settings || settings;
   $('whoami').textContent = me.display_name;
   $('whoami').classList.remove('hidden');
   $('pwNag').classList.toggle('hidden', !me.must_change_password);
@@ -241,8 +250,8 @@ function renderFirstRun({ drivers: driverCount, orders: orderCount }) {
   let msg = '';
   if (driverCount === 0) {
     msg = me?.is_admin
-      ? 'Getting started: add a driver under <strong>Drivers</strong>. Until there is one, paid orders can’t be dispatched.'
-      : 'Getting started: ask an admin to add a driver. Until there is one, paid orders can’t be dispatched.';
+      ? 'Getting started: add a driver under <strong>Drivers</strong>. Until one has set their PIN, paid orders wait.'
+      : 'Getting started: ask an admin to add a driver. Until one has set their PIN, paid orders wait.';
   } else if (orderCount === 0) {
     msg = 'Ready. Place a test order from the customer app to watch it come through.';
   }
@@ -250,7 +259,7 @@ function renderFirstRun({ drivers: driverCount, orders: orderCount }) {
   el.classList.toggle('hidden', !msg);
 }
 
-let drivers = []; // roster with workload stats, kept fresh for the assign picker
+let drivers = []; // roster with workload stats
 
 async function refreshAll() {
   await loadDrivers(); // first, so the order detail can build its driver picker
@@ -269,7 +278,7 @@ const STATUS_LABEL = {
 };
 // Chips say what the order needs from someone, not the enum.
 const STATUS_CHIP = {
-  PENDING_PAYMENT: ['Awaiting payment', 'pending'], PAID_UNASSIGNED: ['Needs a driver', 'gold'],
+  PENDING_PAYMENT: ['Awaiting payment', 'pending'], PAID_UNASSIGNED: ['Finding a driver', 'gold'],
   DISPATCHED: ['Driver at market', 'info'], IN_TRANSIT: ['On the way', 'info'],
   DELIVERED: ['Delivered', 'ok'], FAILED_REFUND: ['Failed', 'fail'],
 };
@@ -292,7 +301,7 @@ const isClaimed = (o) => o.status === 'PENDING_PAYMENT' && Boolean(o.payment_cla
 const ORDER_GROUPS = [
   ['Payment to check', isClaimed],
   ['Awaiting payment', (o) => o.status === 'PENDING_PAYMENT' && !o.payment_claimed_at],
-  ['Needs a driver', (o) => o.status === 'PAID_UNASSIGNED'],
+  ['Paid — waiting for a free driver', (o) => o.status === 'PAID_UNASSIGNED'],
   ['On the road', (o) => o.status === 'DISPATCHED' || o.status === 'IN_TRANSIT'],
 ];
 
@@ -309,10 +318,10 @@ function renderOrders() {
   $('kpis').innerHTML = [
     ['Payment to check', n(isClaimed), 'warn'],
     ['Awaiting payment', n((o) => o.status === 'PENDING_PAYMENT'), ''],
-    ['Needs a driver', n((o) => o.status === 'PAID_UNASSIGNED'), 'gold'],
+    ['Waiting for a driver', n((o) => o.status === 'PAID_UNASSIGNED'), 'gold'],
     ['On the road', n(FILTERS.road), ''],
   ].map(([k, v, tone]) => `<div class="kpi ${v ? tone : ''}"><span class="k-label">${k}</span><span class="k-value">${v}</span></div>`).join('');
-  setCount('orders', n(isClaimed) + n((o) => o.status === 'PAID_UNASSIGNED'));
+  setCount('orders', settings.paymentConfirmation === 'api' ? 0 : n(isClaimed));
   $('ordersCount').textContent = `${orders.length}`;
 
   const shown = orders.filter(FILTERS[orderFilter]);
@@ -360,12 +369,6 @@ function openOrder(id) {
   showDetail('ordersWs', true);
 }
 
-function driverOptions(current) {
-  const opts = drivers.filter((d) => d.active && !d.setup_pending).map((d) =>
-    `<option value="${d.id}" ${String(d.id) === String(current) ? 'selected' : ''}>${escapeHtml(d.name)}${d.active_orders > 0 ? ` (${d.active_orders} active)` : ''}</option>`);
-  return `<option value="">Choose a driver…</option>${opts.join('')}`;
-}
-
 function renderOrderDetail(o) {
   const el = $('orderDetail');
   el.dataset.key = orderKey(o);
@@ -377,20 +380,21 @@ function renderOrderDetail(o) {
 
   let action = '';
   if (o.status === 'PENDING_PAYMENT') {
-    action = `<div class="dsec"><h4>Confirm payment</h4>
-      ${isClaimed(o) ? `<div class="callout" style="margin-bottom:10px;"><strong>💰 Customer says they paid${o.claim_wallet
+    const claim = isClaimed(o) ? `<div class="callout" style="margin-bottom:10px;"><strong>💰 Customer says they paid${o.claim_wallet
         ? ` with ${escapeHtml(o.claim_wallet.name)} — check ${escapeHtml(o.claim_wallet.merchant)}` : ''}</strong>
         <div class="muted">${o.payment_claim_ref ? `Ref ${escapeHtml(o.payment_claim_ref)} · ` : ''}${timeAgo(o.payment_claimed_at)}</div></div>`
-        : '<p class="muted" style="margin:0 0 8px;">The customer hasn’t said they paid yet.</p>'}
-      <label for="payref-${o.id}">Transaction number from the merchant phone</label>
+      : '<p class="muted" style="margin:0 0 8px;">The customer hasn’t said they paid yet.</p>';
+    action = settings.paymentConfirmation === 'api'
+      ? `<div class="dsec"><h4>Payment</h4>${claim}<p class="muted" style="margin:0;">Confirmed automatically when the money arrives through the mobile-money API. Nobody at the desk can mark it paid.</p></div>`
+      : `<div class="dsec"><h4>Confirm payment</h4>${claim}
+      <label for="payref-${o.id}">Transaction number from the merchant phone (required)</label>
       <input id="payref-${o.id}" data-payref="${o.id}" value="${escapeHtml(o.payment_claim_ref || '')}" autocapitalize="characters" spellcheck="false" />
-      <button data-confirm="${o.id}">Confirm ${money(o.total_amount)} received</button></div>`;
-  } else if (['PAID_UNASSIGNED', 'DISPATCHED', 'IN_TRANSIT'].includes(o.status)) {
-    const re = o.status !== 'PAID_UNASSIGNED';
-    action = `<div class="dsec"><h4>${re ? 'Driver' : 'Assign a driver'}</h4>
-      ${re ? `<p class="muted" style="margin:0 0 8px;">With ${escapeHtml(o.driver_name || 'a driver')}.${o.status === 'IN_TRANSIT' ? ' ✓ Items photographed at pickup.' : ''}</p>` : ''}
-      <select data-assign="${o.id}">${driverOptions(re ? o.driver_id : null)}</select>
-      <button data-assignbtn="${o.id}" ${re ? 'class="secondary"' : ''}>${re ? 'Reassign' : 'Assign'}</button></div>`;
+      <button data-confirm="${o.id}">Confirm ${money(o.total_amount)} received</button>
+      <p class="muted" style="margin:8px 0 0;">The number is checked against every other payment, and your name is recorded with it.</p></div>`;
+  } else if (o.status === 'PAID_UNASSIGNED') {
+    action = `<div class="dsec"><h4>Driver</h4><p class="muted" style="margin:0;">Paid. The system gives it to the next free driver automatically — fewest jobs first, then whoever has waited longest. Nobody picks.</p></div>`;
+  } else if (o.status === 'DISPATCHED' || o.status === 'IN_TRANSIT') {
+    action = `<div class="dsec"><h4>Driver</h4><p style="margin:0;">🛵 ${escapeHtml(o.driver_name || '—')} <span class="muted">· assigned automatically${o.status === 'IN_TRANSIT' ? ' · ✓ items photographed at pickup' : ''}</span></p></div>`;
   }
 
   el.innerHTML = `
@@ -422,29 +426,12 @@ function renderOrderDetail(o) {
     // this payment to this order: the same number can't confirm a second order.
     confirm.addEventListener('click', async () => {
       const reference = el.querySelector('[data-payref]').value.trim();
-      if (!reference && confirm.dataset.noref !== '1') {
-        confirm.dataset.noref = '1';
-        confirm.textContent = 'Confirm WITHOUT a transaction number?';
-        return toast('Adding the transaction number stops one payment being used for two orders.');
-      }
+      if (!reference) return toast('Enter the transaction number from the merchant phone.');
       confirm.disabled = true;
       const res = await api(`/operator/orders/${o.id}/mark-paid`, { method: 'POST', body: JSON.stringify({ reference }) });
       confirm.disabled = false;
       if (res.error) return toast(res.error);
       toast('Payment confirmed ✓ — the customer sees it now');
-      refreshAll();
-    });
-  }
-  const assign = el.querySelector('[data-assignbtn]');
-  if (assign) {
-    assign.addEventListener('click', async () => {
-      const driverId = el.querySelector('[data-assign]').value;
-      if (!driverId) return toast('Pick a driver first.');
-      assign.disabled = true;
-      const res = await api(`/operator/orders/${o.id}/assign`, { method: 'POST', body: JSON.stringify({ driverId }) });
-      assign.disabled = false;
-      if (res.error) return toast(res.error);
-      toast('Driver assigned ✓');
       refreshAll();
     });
   }
@@ -628,17 +615,18 @@ function openRefund(id) {
         <dt>Opened</dt><dd>${new Date(r.created_at).toLocaleString()}</dd>
         ${!open ? `<dt>Closed with</dt><dd>${escapeHtml(r.settlement_reference || r.settlement_note || '')}</dd>` : ''}
       </dl></div>
-      ${open ? `<div class="dsec"><h4>Record it</h4>
+      ${open && !me?.is_admin ? '<div class="dsec muted">Only an admin can record a refund as paid or close it.</div>' : ''}
+      ${open && me?.is_admin ? `<div class="dsec"><h4>Record it</h4>
         <label for="rfRef">Reference of the money you sent back</label>
         <input id="rfRef" autocapitalize="characters" spellcheck="false" />
         <label for="rfNote">Note (required for “Nothing owed”)</label>
         <input id="rfNote" /></div>` : ''}
     </div>
-    ${open ? `<div class="pane-foot"><button id="rfSettle" type="button">Mark refunded</button>
+    ${open && me?.is_admin ? `<div class="pane-foot"><button id="rfSettle" type="button">Mark refunded</button>
       <button class="secondary" id="rfWaive" type="button">Nothing owed</button></div>` : ''}`;
   bindBack(el);
   showDetail('refundsWs', true);
-  if (!open) return;
+  if (!open || !me?.is_admin) return;
   $('rfSettle').addEventListener('click', async () => {
     const reference = $('rfRef').value.trim();
     if (!reference) return toast('Enter the reference from the transfer you sent.');
@@ -791,10 +779,13 @@ function openRequest(id) {
     <div class="pane-body">
       <div class="dsec"><h4>Request</h4><dl class="kv">
         <dt>Wants to</dt><dd>${r.role === 'driver' ? 'Deliver orders' : 'Coordinate orders and payments'}</dd>
-        <dt>Email</dt><dd>${r.email ? `<a href="mailto:${escapeHtml(r.email)}">${escapeHtml(r.email)}</a>` : '<span class="muted">none given</span>'}</dd>
-        <dt>Phone</dt><dd><a href="tel:${escapeHtml(r.phone)}">${escapeHtml(r.phone)}</a></dd>
+        <dt>Name given</dt><dd>${escapeHtml(r.name)}</dd>
+        ${r.blind ? '' : `<dt>Email</dt><dd>${r.email ? `<a href="mailto:${escapeHtml(r.email)}">${escapeHtml(r.email)}</a>` : '<span class="muted">none given</span>'}</dd>
+        <dt>Phone</dt><dd><a href="tel:${escapeHtml(r.phone)}">${escapeHtml(r.phone)}</a></dd>`}
         <dt>Sent</dt><dd>${new Date(r.created_at).toLocaleString()}</dd>
-      </dl>${r.message ? `<p style="margin:10px 0 0;">${escapeHtml(r.message)}</p>` : ''}</div>
+      </dl>${r.blind
+        ? '<p class="muted" style="margin:10px 0 0;">🔒 Blind review: check that the ID matches the name. Their phone, email and message stay hidden until you decide, and your decision is logged.</p>'
+        : r.message ? `<p style="margin:10px 0 0;">${escapeHtml(r.message)}</p>` : ''}</div>
       <div class="dsec"><h4>ID document</h4>
         ${r.id_document_at ? `<div class="btn-row">
             <button class="secondary small" data-side="front" type="button">Show front</button>
@@ -808,8 +799,7 @@ function openRequest(id) {
     </div>
     <div class="pane-foot">${approved
       ? '<button id="reqAcct" type="button">Create account &amp; email setup code</button>'
-      : `<button class="secondary" data-status="contacted" type="button">Contacted</button>
-         <button data-status="approved" type="button">Approve</button>
+      : `<button data-status="approved" type="button">Approve</button>
          <button class="danger-ghost" data-status="declined" type="button">Decline</button>`}</div>`;
   bindBack(el);
   showDetail('teamWs', true);
@@ -947,6 +937,30 @@ $('newOperatorBtn').addEventListener('click', () => {
     if (res.account?.id) openOperator(String(res.account.id));
   });
 });
+
+// ═══════════════ Audit log (admin, read-only) ═══════════════
+// Append-only in the database: this screen can only ever show it, never change it.
+const AUDIT_TEXT = {
+  'payment.confirmed': 'Payment confirmed', 'payment.unmatched': 'Payment could not be matched',
+  'order.dispatched': 'Order dispatched', 'order.failed': 'Order failed', 'delivery.checked': 'Delivery checked',
+  'refund.settled': 'Refund recorded as paid', 'refund.waived': 'Refund closed — nothing owed',
+  'access.reviewed': 'Access request decided', 'staff.created': 'Staff account created',
+  'staff.active': 'Staff activated / deactivated', 'staff.admin': 'Admin rights changed',
+};
+async function loadAudit() {
+  const res = await api('/operator/audit');
+  if (res.error) return;
+  const who = (a) => escapeHtml(String(a).replace(/^operator:\d+:/, '').replace(/^system:/, '⚙ '));
+  $('auditList').innerHTML = (res.entries || []).map((e) => {
+    const d = e.detail || {};
+    const bits = Object.entries(d).filter(([, v]) => v !== null && v !== '').map(([k, v]) => `${escapeHtml(k)}: ${escapeHtml(v)}`).join(' · ');
+    return `<div class="lrow" style="cursor:default;">
+      <span class="l1"><span class="t">${AUDIT_TEXT[e.action] || escapeHtml(e.action)}</span><span class="mono">${escapeHtml(e.subject || '')}</span></span>
+      <span class="l2">${who(e.actor)}${bits ? ` · ${bits}` : ''}</span>
+      <span class="side"><span class="muted" style="font-size:12px;">${new Date(e.at).toLocaleString()}</span></span>
+    </div>`;
+  }).join('') || '<div class="pane-empty">Nothing recorded yet.</div>';
+}
 
 // ═══════════════ Account ═══════════════
 $('changePw').addEventListener('click', async () => {

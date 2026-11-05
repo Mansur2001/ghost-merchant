@@ -8,6 +8,7 @@ import { claimSetup, StaffError, SetupInvalidError } from '../commands/staffAcco
 import { isWellFormedSetupCode } from '../domain/staffInvite.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { parsePhone } from '../domain/phone.js';
+import { dispatchWaitingSoon } from '../commands/dispatch.js';
 
 export const staffSetupRouter = Router();
 
@@ -29,7 +30,10 @@ staffSetupRouter.post(
     }
     try {
       res.set('Cache-Control', 'no-store');
-      res.json(await claimSetup({ role, phone, code: String(code), secret }));
+      const result = await claimSetup({ role, phone, code: String(code), secret });
+      // A newly ready driver can take orders that were waiting for someone free.
+      if (role === 'driver') dispatchWaitingSoon();
+      res.json(result);
     } catch (err) {
       if (err instanceof SetupInvalidError) return res.status(401).json({ error: err.message });
       if (err instanceof StaffError) return res.status(err.status).json({ error: err.message });

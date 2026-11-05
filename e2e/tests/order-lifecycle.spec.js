@@ -2,7 +2,7 @@
 // operator confirms and dispatches, the driver delivers — and the customer's page follows
 // every step live over the WebSocket.
 import { test, expect } from '@playwright/test';
-import { openApp, signInCustomer, signInOperator, signInDriver, somaliNumber, SEED, DRIVER_PHONE, goSection } from './helpers.js';
+import { openApp, signInCustomer, signInOperator, signInDriver, somaliNumber, SEED, DRIVER_PHONE, goSection, assignedDriver } from './helpers.js';
 
 // A 1×1 PNG: the server checks a photo exists, not what's in it.
 const photo = (name) => ({
@@ -56,18 +56,14 @@ test('order → pay → confirm → dispatch → pickup photo → customer code,
   const code = (await customer.locator('#handoffCode').textContent()).trim();
   expect(code).toMatch(/^\d{4}$/);
 
-  // Dispatch to the seeded driver — once the panel has redrawn as paid.
-  await expect(card).toContainText('Needs a driver');
-  await expect(detail).toContainText('Assign a driver');
-  const assign = operator.locator(`select[data-assign="${orderId}"]`);
-  const amina = await assign.locator('option', { hasText: SEED.driver.name }).getAttribute('value');
-  await assign.selectOption(amina);
-  await operator.locator(`[data-assignbtn="${orderId}"]`).click();
-  await expect(operator.locator('.toast')).toContainText('Driver assigned');
+  // Nobody picks the driver: the system assigns one the moment it's paid.
+  await expect(card).toContainText('Driver at market');
+  const chosen = await assignedDriver(operator);
+  await expect(detail.locator('select')).toHaveCount(0);
 
   // Driver: only their assigned order. Pickup needs the photo of the items first.
   const driver = await openApp(browser, testInfo, DRIVER_PHONE);
-  await signInDriver(driver, SEED.driver);
+  await signInDriver(driver, chosen);
   await driver.locator(`#queue [data-id="${orderId}"]`).click();
   await expect(driver.locator('#pickBtn')).toBeDisabled();
   await driver.setInputFiles('#pickPhoto', photo('items.png'));
@@ -125,14 +121,11 @@ test('a delivery without the code needs a door photo and a reason, and waits for
   await card.click();
   await operator.fill(`[data-payref="${orderId}"]`, `NC${Date.now().toString().slice(-7)}`);
   await operator.locator(`[data-confirm="${orderId}"]`).click();
-  await expect(card).toContainText('Needs a driver');
-  const assign = operator.locator(`select[data-assign="${orderId}"]`);
-  await assign.selectOption(await assign.locator('option', { hasText: SEED.driver.name }).getAttribute('value'));
-  await operator.locator(`[data-assignbtn="${orderId}"]`).click();
-  await expect(operator.locator('.toast')).toContainText('Driver assigned');
+  await expect(card).toContainText('Driver at market');
+  const chosen = await assignedDriver(operator);
 
   const driver = await openApp(browser, testInfo, DRIVER_PHONE);
-  await signInDriver(driver, SEED.driver);
+  await signInDriver(driver, chosen);
   await driver.locator(`#queue [data-id="${orderId}"]`).click();
   await driver.setInputFiles('#pickPhoto', photo('items.png'));
   await expect(driver.locator('#pickBtn')).toBeEnabled();

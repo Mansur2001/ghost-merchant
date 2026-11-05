@@ -46,6 +46,20 @@
   - a real email code delivered.
   The database is empty apart from the bootstrap `admin`.
 
+## 2026-11-06: email-only staff, operator console, no operator leverage
+
+- **Email only.** SMS was too much friction. "Ask to join" requires an email (`access_requests.email`); staff setup codes go by email. The phone is a contact reference. The owner's phone is +1 206 733 0555.
+- **Operator console** rebuilt as list + detail panes: the page never scrolls, each pane does.
+- **No operator leverage:**
+  - automatic fair dispatch, with the assign route removed;
+  - payment confirmation needs a transaction number, plus a matching amount when one is given;
+  - `PAYMENT_CONFIRMATION=api` plus a signed `/api/payments/webhook`, prepared and tested on staging but off in production (docs/PAYMENT_API.md);
+  - refunds are admin-only;
+  - staff review is admin-only and blind;
+  - an append-only `audit_log`, with DB triggers on it and on `order_events`.
+- **Not built, on purpose:** custody/escrow wallets, cash advances to drivers, and customer ID checks (see *Business posture*). The pasted brief asked for these; they conflict with the rules in CLAUDE.md.
+- Tests: 409 unit, 17 Playwright, and a 52-step simulation (`staging.sh simulate`).
+
 ## Decisions
 
 - **GPS is evidence, not a gate.** Refusing a delivery because a cheap handset has no fix would strand a driver who did the job. It is flagged instead.

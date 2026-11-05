@@ -94,7 +94,7 @@
               <div class="chips" id="orderFilter" role="group" aria-label="Filter">
                 <button class="chip" type="button" data-filter="all" aria-pressed="true">All</button>
                 <button class="chip" type="button" data-filter="pay" aria-pressed="false">Payment</button>
-                <button class="chip" type="button" data-filter="dispatch" aria-pressed="false">Needs driver</button>
+                <button class="chip" type="button" data-filter="dispatch" aria-pressed="false">Waiting for driver</button>
                 <button class="chip" type="button" data-filter="road" aria-pressed="false">On the road</button>
               </div>
             </div>
@@ -172,6 +172,18 @@
                 </div>
               </div>
               <div class="pane detail" id="teamDetail"></div>
+            </div>
+          </div>
+
+          <!-- ── Audit log (admin): every decision, append-only ── -->
+          <div data-panel="audit" class="panel hidden">
+            <div class="panel-head">
+              <h2>Audit log</h2>
+              <p class="muted grow" style="margin:0;">Every payment, dispatch, refund and staff decision. Nobody can edit or delete these entries — not even an admin.</p>
+            </div>
+            <div class="pane" style="flex:1;min-height:0;">
+              <div class="pane-head"><strong>Latest 300</strong></div>
+              <div class="pane-body" id="auditList"></div>
             </div>
           </div>
 

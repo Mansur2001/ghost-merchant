@@ -16,10 +16,15 @@
 import { withTransaction, withCriticalTransaction } from '../db/prisma.js';
 import { transitionOrder, postMessage } from './orders.js';
 import { STATUS } from '../domain/stateMachine.js';
-import { normalizeReference, manualReceiptId } from '../domain/paymentRef.js';
+import { normalizeReference } from '../domain/paymentRef.js';
+
+// Money compared in whole cents: 7.5 and "7.50" are the same price, 7.499 is not.
+const toCents = (v) => Math.round(Number(v) * 100);
 import { EVENTS } from '../events/bus.js';
 import { enqueue, wakeOutbox } from '../events/outbox.js';
 import { config } from '../config.js';
+import { dispatchOrder } from './dispatch.js';
+import { audit } from './audit.js';
 
 export class PaymentError extends Error {
   constructor(message, status = 400) {
@@ -92,11 +97,17 @@ export async function claimPayment({ orderId, reference, wallet: walletId, walle
   return order;
 }
 
-// Operator: the money is on the merchant phone. `reference` is the transaction id from that
-// receipt; it is optional, but without it the same payment could be confirmed twice.
-export async function confirmPayment({ orderId, reference, actor }) {
+// The money is on the merchant phone. Called by an operator (PAYMENT_CONFIRMATION=operator)
+// or by the provider's signed callback (=api). `reference` is the telecom's transaction id and
+// is REQUIRED: it is the only thing that ties one real payment to one order, and the only thing
+// anyone can check against the telecom's records later. `amount`, when the caller knows it
+// (the API always does), must equal the order total to the cent.
+//
+// A paid order is dispatched in the same transaction — no human chooses the driver.
+export async function confirmPayment({ orderId, reference, amount, actor }) {
   const ref = referenceOrThrow(reference);
-  const receiptId = ref || manualReceiptId(orderId);
+  if (!ref) throw new PaymentError('enter the transaction number from the payment');
+  const receiptId = ref;
 
   // CP path: money. Linearizable and durable before we answer.
   const result = await withCriticalTransaction(async (tx) => {
@@ -108,6 +119,9 @@ export async function confirmPayment({ orderId, reference, actor }) {
     if (!order) throw new PaymentError('order not found', 404);
     if (order.status !== STATUS.PENDING_PAYMENT) {
       throw new PaymentError('this order is not waiting for payment', 409);
+    }
+    if (amount !== undefined && amount !== null && toCents(amount) !== toCents(order.total_amount)) {
+      throw new PaymentError(`amount ${amount} does not match the order total ${order.total_amount}`, 409);
     }
 
     // UNIQUE telecom_receipt_id is the real guarantee (invariant 2); this check only turns a
@@ -138,7 +152,7 @@ export async function confirmPayment({ orderId, reference, actor }) {
       orderId,
       STATUS.PAID_UNASSIGNED,
       actor,
-      ref ? `payment confirmed (ref ${ref})` : 'payment confirmed (no reference)',
+      `payment confirmed (ref ${ref})`,
       { client: tx }
     );
     await enqueue(tx, EVENTS.PAYMENT_RECEIVED, {
@@ -146,7 +160,13 @@ export async function confirmPayment({ orderId, reference, actor }) {
       amount: order.total_amount,
       receiptId,
     });
-    return updated;
+    await audit({
+      actor, action: 'payment.confirmed', subject: `order:${orderId}`,
+      detail: { reference: ref, amount: String(order.total_amount) },
+    }, { client: tx });
+    // A free driver gets it now; otherwise it waits for the next one to free up.
+    const driver = await dispatchOrder(tx, orderId);
+    return driver ? { ...updated, status: STATUS.DISPATCHED, driver_id: driver.id } : updated;
   });
 
   wakeOutbox();

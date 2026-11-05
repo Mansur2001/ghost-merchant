@@ -7,6 +7,11 @@ export const SEED = {
   admin: { username: 'admin', password: 'change-me-please-1' },
   dispatcher: { username: 'hodan', password: 'seeded-operator-pw-1' },
   driver: { msisdn: '619876543', pin: '1234', name: 'Amina' },
+  // Dispatch is automatic: tests sign in as whichever driver the system chose.
+  drivers: {
+    Amina: { msisdn: '619876543', pin: '1234', name: 'Amina' },
+    Bashir: { msisdn: '651112223', pin: '5678', name: 'Bashir' },
+  },
 };
 
 const digits = (n) => Array.from({ length: n }, () => Math.floor(Math.random() * 10)).join('');
@@ -66,4 +71,12 @@ export async function signInDriver(page, { msisdn, pin }) {
 // Operator console sections: a sidebar on a desk, pills on a phone — click whichever shows.
 export async function goSection(page, id) {
   await page.locator(`[data-nav="${id}"]:visible`).first().click();
+}
+
+// After payment the SYSTEM assigns a driver; read who from the operator's order panel.
+export async function assignedDriver(operator) {
+  const panel = operator.locator('#orderDetail');
+  await expect(panel).toContainText('assigned automatically');
+  const name = (await panel.textContent()).match(/🛵 (\w+)/)[1];
+  return SEED.drivers[name];
 }

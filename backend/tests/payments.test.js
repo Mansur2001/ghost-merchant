@@ -34,9 +34,13 @@ jest.unstable_mockModule('../src/events/bus.js', () => ({
   EVENTS: { PAYMENT_RECEIVED: 'payment.received', PAYMENT_CLAIMED: 'payment.claimed' },
 }));
 jest.unstable_mockModule('../src/events/outbox.js', () => ({ enqueue, wakeOutbox }));
+const dispatchOrder = jest.fn(async () => null);
+const audit = jest.fn(async () => ({}));
+jest.unstable_mockModule('../src/commands/dispatch.js', () => ({ dispatchOrder }));
+jest.unstable_mockModule('../src/commands/audit.js', () => ({ audit, auditAfter: audit }));
 
 const { claimPayment, confirmPayment } = await import('../src/commands/payments.js');
-const { normalizeReference, manualReceiptId } = await import('../src/domain/paymentRef.js');
+const { normalizeReference } = await import('../src/domain/paymentRef.js');
 
 const ORDER = '9110aafa-fd8f-4469-8592-4d5f944952e3';
 const pending = { id: ORDER, status: 'PENDING_PAYMENT', user_phone: '+252612345678', total_amount: '7.25' };
@@ -44,7 +48,7 @@ const pending = { id: ORDER, status: 'PENDING_PAYMENT', user_phone: '+2526123456
 beforeEach(() => {
   orderRow = { ...pending };
   usedReceipt = null;
-  [transitionOrder, postMessage, enqueue, wakeOutbox, tx.order.update, tx.transaction.create].forEach((f) => f.mockClear());
+  [transitionOrder, postMessage, enqueue, wakeOutbox, tx.order.update, tx.transaction.create, dispatchOrder, audit].forEach((f) => f.mockClear());
 });
 
 describe('normalizeReference', () => {
@@ -118,9 +122,27 @@ describe('confirmPayment (operator saw the money)', () => {
     expect(enqueue).toHaveBeenCalledWith(tx, 'payment.received', expect.objectContaining({ orderId: ORDER }));
   });
 
-  test('without a reference it still records a payment, with a per-order receipt id', async () => {
-    await confirmPayment({ orderId: ORDER, actor: 'operator:1:hodan' });
-    expect(tx.transaction.create.mock.calls[0][0].data.telecom_receipt_id).toBe(manualReceiptId(ORDER));
+  test('without a reference it is refused: nothing to check it against, nothing to stop reuse', async () => {
+    await expect(confirmPayment({ orderId: ORDER, actor: 'operator:1:hodan' })).rejects.toMatchObject({ status: 400 });
+    expect(tx.transaction.create).not.toHaveBeenCalled();
+    expect(transitionOrder).not.toHaveBeenCalled();
+  });
+
+  test('an amount that does not match the order total is refused (the API always sends one)', async () => {
+    await expect(confirmPayment({ orderId: ORDER, reference: 'EVC992', amount: '7.00', actor: 'system:mobile-money' }))
+      .rejects.toMatchObject({ status: 409, message: expect.stringMatching(/does not match/) });
+    expect(tx.transaction.create).not.toHaveBeenCalled();
+  });
+
+  test('the same amount written differently is accepted (7.25 == "7.250")', async () => {
+    await confirmPayment({ orderId: ORDER, reference: 'EVC993', amount: '7.250', actor: 'system:mobile-money' });
+    expect(transitionOrder).toHaveBeenCalled();
+  });
+
+  test('the decision is audited and the order is dispatched in the SAME transaction', async () => {
+    await confirmPayment({ orderId: ORDER, reference: 'EVC994', actor: 'operator:1:hodan' });
+    expect(audit).toHaveBeenCalledWith(expect.objectContaining({ action: 'payment.confirmed', actor: 'operator:1:hodan' }), { client: tx });
+    expect(dispatchOrder).toHaveBeenCalledWith(tx, ORDER);
   });
 
   test('a reference already used for another order is refused — one payment, one order', async () => {
@@ -132,12 +154,12 @@ describe('confirmPayment (operator saw the money)', () => {
 
   test('an order that is not waiting for payment cannot be confirmed twice', async () => {
     orderRow.status = 'PAID_UNASSIGNED';
-    await expect(confirmPayment({ orderId: ORDER, actor: 'op' })).rejects.toMatchObject({ status: 409 });
+    await expect(confirmPayment({ orderId: ORDER, reference: 'EVC995', actor: 'op' })).rejects.toMatchObject({ status: 409 });
     expect(tx.transaction.create).not.toHaveBeenCalled();
   });
 
   test('an unknown order is a 404', async () => {
     orderRow = null;
-    await expect(confirmPayment({ orderId: ORDER, actor: 'op' })).rejects.toMatchObject({ status: 404 });
+    await expect(confirmPayment({ orderId: ORDER, reference: 'EVC996', actor: 'op' })).rejects.toMatchObject({ status: 404 });
   });
 });

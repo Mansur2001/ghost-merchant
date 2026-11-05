@@ -55,6 +55,10 @@ SESSION_SECRET=$(rand 32)
 # First sign-in to the operator console: username "admin" + this. It asks you to change it.
 OPERATOR_PASSWORD=$op
 REDIS_URL=redis://redis:6379
+# Who marks orders paid: operator today; api once a mobile-money provider is connected
+# (docs/PAYMENT_API.md). The secret is pre-generated for that day.
+PAYMENT_CONFIRMATION=operator
+PAYMENT_WEBHOOK_SECRET=$(rand 32)
 
 # ── Login codes. Fill in AT LEAST ONE of the two blocks, or nobody can sign in. ──
 OTP_TRANSPORT=twilio
