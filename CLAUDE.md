@@ -5,29 +5,45 @@ deployment; this file is the reasoning you need before changing anything.
 
 ## What this is
 
-A **sovereign, local-first delivery coordination platform** for Somalia. It bypasses formal
-fintech/telecom APIs: customers pay the merchant peer-to-peer via **USSD `tel:` links** (EVC Plus
-/ eDahab), and an **operator confirms each payment** by checking the merchant phone. No device
-reads receipts. No AWS, no Meta/WhatsApp, no Google Maps — self-hosted and containerized.
+A **sovereign, local-first proxy-shopping and delivery platform** for Somalia. Customers order
+from the market and pay GuriKaabe's merchant wallet over **USSD `tel:` links** (EVC Plus / eDahab
+/ Zaad / Sahal); today an **operator confirms each payment** with its transaction number, and the
+code is ready for a mobile-money API to do it instead (`docs/PAYMENT_API.md`). No AWS, no
+Meta/WhatsApp, no Google Maps — self-hosted and containerized.
+
+**Owner and only admin: Abdideq Firin** (+1 206 733 0555, operator `abdideq`). Ordinary operators
+dispatch-watch and confirm payments; only the owner manages staff, refunds and the audit log.
+Change the owner with `backend/scripts/set-owner.mjs` on the server, never by editing rows.
 
 `CREDENTIALS.md` (git-ignored) holds local logins and seeded data.
 
 ### Business posture — read before proposing features
 
-The margin is **coordination fees on delivery**, not payment float. It is a thin, honest,
-unglamorous business: revenue scales with completed deliveries and operator time, not with
-users. Anything that looks like easy money in this niche (holding customer funds, skimming the
-USSD flow, sidestepping telecom terms, harvesting contact lists, gray-market FX) is either
-illegal, gets the merchant MSISDN frozen, or gets the app pulled from Play. **We don't build
-those.** Three consequences:
+**The model: GuriKaabe is the merchant of record, not an escrow or a wallet.** The customer
+buys from GuriKaabe: one price per order (goods + delivery fee + margin), paid upfront to
+GuriKaabe's merchant wallet. The driver buys the goods with the **company's float** (GuriKaabe's
+own operating money), delivers, and the company keeps the fee. Revenue is the fee and margin on
+completed deliveries, not money sitting in accounts. That gives everything "escrow" was wanted
+for — paid before anyone shops, money tied to one order, no person deciding where it goes —
+without becoming a stored-value business, which needs a licence and gets merchant numbers
+frozen. Anything that looks like easy money in this niche (customer balances, skimming the USSD
+flow, sidestepping telecom terms, harvesting contact lists, gray-market FX) is illegal, gets the
+merchant MSISDN frozen, or gets the app pulled from Play. **We don't build those.** Consequences:
 
-- **Never custody customer money.** Payment goes customer → merchant MSISDN directly. The
-  platform *records* a payment an operator confirmed; it never sits in the funds flow. This is why refunds are
-  manual and off-platform — correct, not a shortcut.
+- **Every payment belongs to exactly one order.** No customer balance, no top-up, no wallet, no
+  customer-to-customer or customer-to-driver transfer, no credit carried to "next time". A
+  payment is spent on that order's goods, kept as its fee, or refunded — the refund ledger is
+  how the third is never forgotten.
+- **Drivers never hold customer money.** They buy with the company float; customer money is never
+  forwarded to a driver's phone. Driver float and driver fees are company bookkeeping, done
+  outside the app for now; when a payout API exists they become automated, audited transfers
+  from the company account — never from a specific customer's payment.
+- **No person moves money.** Payments are confirmed against a telecom reference (by the API once
+  connected); refunds are recorded only by the owner (by the payout API once connected).
 - **Cheap to run beats clever.** One small VPS serves the whole thing. Reject dependencies that
   add monthly cost or a vendor relationship.
-- **Collect the minimum.** Phone, address, landmark, order contents, photos. Nothing else.
-  Every extra field is a liability we can't monetize anyway.
+- **Collect the minimum.** Email (sign-in), the phone the driver calls, landmark, order contents,
+  photos. Nothing else — customers are never asked for ID. Every extra field is a liability.
 
 ### Ship-fast, build-in-public rules
 
@@ -96,8 +112,9 @@ customer's page flips to paid live.`
    pre-encoded. A bare `#` reaching the browser makes Android truncate the dial string.
    Each wallet's template is validated at boot (`domain/wallets.js`), so a bare `#` refuses to
    start rather than reaching a customer.
-6. **Money never flows through the platform.** No wallet, no balance, no held funds, no
-   platform-initiated transfer. The backend only *records* a payment an operator confirmed.
+6. **No stored value.** No wallet, no balance, no top-up, no platform-initiated transfer from
+   customer money. Payments land in GuriKaabe's merchant wallet, one per order; the backend
+   *records* each confirmed payment against its order and nothing else.
 7. **Domain events are written in the same transaction as the state they describe.** Commands
    call `enqueue(client, EVENT, payload)` with the transaction's client — never `publish()`
    directly (`events/outbox.js`). Publishing after COMMIT is two steps with a crash-shaped gap
@@ -379,8 +396,9 @@ Over Somali mobile networks **P is not optional**, so the design picks C or A *p
 
 ## Refunds & access requests
 
-- **Refunds are a ledger, not a transfer.** The platform never holds funds (invariant 6), so
-  settling means an operator sent money back from their own phone. A `FAILED_REFUND` transition
+- **Refunds are a ledger, not a transfer.** The app moves no money (invariant 6), so settling
+  means the owner sent money back from the business wallet and recorded its reference (admins
+  only — an ordinary operator can open a debt by failing an order, never close one). A `FAILED_REFUND` transition
   opens a `refunds` row **in the same transaction** — an order must never end up failed with no
   record of what is owed, because that record is the only thing that will remind anyone to pay
   it. Nothing is opened if no payment ever arrived.
@@ -432,7 +450,9 @@ Three photo types, stored in MinIO and indexed in `order_photos`:
 framework-free to respect the SRS data budget (initial load < 1.5MB). Each PWA has a Service
 Worker that cache-first serves its shell.
 
-- **User**: signs in by SMS or email code; checkout asks for the phone the driver calls
+- **User**: **Create account** or **Sign in** (landing buttons + a switch on the auth screen).
+  Both are the same email code — the first verified code creates the account — the switch only
+  changes the words, because people look for "sign up". Checkout asks for the phone the driver calls
   (filled with the last one used, `gm_contact`). Session token in `localStorage`
   (`gm_token`/`gm_phone`, which holds the phone or email signed in with) — not `sessionStorage`, because re-verifying costs a real SMS and the
   customer is on one personal handset. Any 401 clears the session. Resume via
@@ -556,12 +576,15 @@ AIStor, authentication and per-order authorization everywhere, the transactional
 refunds as a ledger, staff onboarding by invite (admin-only), the offline write queue,
 multi-instance operation behind Redis, login codes delivered to a real US handset (then over ClickSend, now Twilio),
 sign-in or sign-up by email alone (Phone | Email switch), reportable error messages (reason + `ref`), and the
-EN/SO interface. The Android app builds and installs. **There is no production server right
-now:** the Vultr VPS was deleted on 2026-10-22 to stop the cost until the app is ready. Work
-and test on local staging; `COMMANDS.md` has the deploy, backup and rollback steps for a new box.
+EN/SO interface, proof of delivery, automatic dispatch, the audit log, and the operator console.
+The Android app builds and installs (`0.2.0`, signed; upload key `~/gurikaabe-release.jks`).
+**Production: https://app.gurikaabe.com on 136.244.93.174** (Vultr, Ubuntu 24.04), email-only
+(no Twilio), `PAYMENT_CONFIRMATION=operator`, nightly `pg_dump`. `COMMANDS.md` has deploy,
+backup and rollback; `./scripts/staging.sh simulate` is the end-to-end check before any release.
 
-**Still to validate:** Twilio SMS and SendGrid email end to end, Twilio delivery to `+252` and `tel:`/USSD `%23`
-dialing. A Play reviewer signs in with the review login (`REVIEW_PHONE`/`REVIEW_CODE`), not a
+**Still to validate:** email codes reaching inboxes (they are sent from `@gmail.com` through
+SendGrid and can land in Spam — authenticate a domain to fix), and `tel:`/USSD `%23` dialing on a
+Somali handset. SMS is deliberately off (too much friction); if it ever returns, Twilio is wired. A Play reviewer signs in with the review login (`REVIEW_PHONE`/`REVIEW_CODE`), not a
 real text. Production deploy: `docker-compose.prod.yml` (+ `Caddyfile.prod`). See
 `docs/PLAY_RELEASE.md`.
 

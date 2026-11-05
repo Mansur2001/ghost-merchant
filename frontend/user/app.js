@@ -103,7 +103,23 @@ function prefillOrderPhone(phone) {
 // ── Home / role selection ──
 // The landing is the default first screen; "I'm a customer" reveals sign-in, or jumps
 // straight to the order form if this handset is already verified.
-$('asCustomer').addEventListener('click', () => goTab('home', { start: true }));
+$('asCustomer').addEventListener('click', () => { setAuthMode('signup'); goTab('home', { start: true }); });
+$('asSignin').addEventListener('click', () => { setAuthMode('signin'); goTab('home', { start: true }); });
+
+// Create account vs Sign in: one email code either way (the first verified code creates the
+// account), so this only changes the words — but people look for "sign up", and a screen that
+// only ever says "Sign in" reads as "you need an account first".
+let authMode = 'signup';
+function setAuthMode(mode) {
+  authMode = mode;
+  $('authMode').querySelectorAll('[data-mode]').forEach((b) =>
+    b.setAttribute('aria-pressed', b.dataset.mode === mode ? 'true' : 'false'));
+  $('authTitle').dataset.i18n = `auth.title.${mode}`;
+  $('authIntro').dataset.i18n = `auth.intro.${mode}`;
+  $('authTitle').textContent = t($('authTitle').dataset.i18n);
+  $('authIntro').textContent = t($('authIntro').dataset.i18n);
+}
+$('authMode').querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => setAuthMode(b.dataset.mode)));
 $('authHome').addEventListener('click', () => showView('landingView'));
 
 // ── Sign-in: request a code, then verify it ──
@@ -178,7 +194,7 @@ async function requestCode() {
   const m = Math.round(res.expiresInSeconds / 60);
   $('otpStatus').textContent = res.devCode
     ? t('auth.dev', { code: res.devCode })
-    : target.email ? t('auth.sentEmail', { m }) : t('auth.sent', { phone: res.phone, m });
+    : target.email ? t('auth.sentEmailTo', { email: target.email, m }) : t('auth.sent', { phone: res.phone, m });
   startResendCountdown();
 }
 
@@ -225,7 +241,7 @@ async function verifyCode() {
   // Where they were headed before sign-in (My orders, Account) — otherwise a new order.
   goTab(afterSignIn || 'home');
   afterSignIn = null;
-  toast(t('auth.ok'));
+  toast(t(authMode === 'signup' ? 'auth.okNew' : 'auth.ok'));
 }
 
 // ── Adding an email to a phone account (signed in) ──
@@ -796,6 +812,8 @@ function goTab(tab, { start = false } = {}) {
   if (!token) {
     if (tab === 'home' && !start) return showView('landingView');
     afterSignIn = tab;
+    // Orders and Account are what a returning customer taps: open on Sign in for them.
+    if (tab === 'orders' || tab === 'account') setAuthMode('signin');
     return showView('authView', tab);
   }
   if (tab === 'home') {

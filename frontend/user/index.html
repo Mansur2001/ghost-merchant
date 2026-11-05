@@ -29,7 +29,8 @@
           <div class="eyebrow" data-i18n="hero.eyebrow">Market delivery</div>
           <h2 data-i18n="hero.title">Order from the market. Pay from your phone.</h2>
           <p data-i18n="hero.sub">Pay the merchant from your mobile money. We never hold your money. All you need is a phone number and a nearby landmark.</p>
-          <button id="asCustomer" type="button" style="margin-top:18px;" data-i18n="role.customer.cta">Start an order</button>
+          <button id="asCustomer" type="button" style="margin-top:18px;" data-i18n="role.customer.cta">Create account</button>
+          <button class="ghost" id="asSignin" type="button" data-i18n="role.signin">I already have an account — sign in</button>
         </div>
 
         <div class="section-title" data-i18n="how.title">How it works</div>
@@ -121,9 +122,15 @@
       <!-- Sign in (or up) with a phone or an email code. -->
       <section id="authView" class="hidden">
         <button class="linkbtn" id="authHome" type="button" style="margin-bottom:12px;" data-i18n="nav.back">← Back</button>
+        <!-- Create account and Sign in are the same email code underneath (the first code creates
+             the account); the switch just says plainly which one you're doing. -->
+        <div class="cc-switch channel-pick" id="authMode" role="group" aria-label="Create account or sign in" style="margin-bottom:12px;">
+          <button type="button" data-mode="signup" aria-pressed="true" data-i18n="auth.mode.signup">Create account</button>
+          <button type="button" data-mode="signin" aria-pressed="false" data-i18n="auth.mode.signin">Sign in</button>
+        </div>
         <div class="screen-head">
-          <h2 data-i18n="auth.title">Sign in</h2>
-          <p class="muted" data-i18n="auth.intro">New here? The same code creates your account.</p>
+          <h2 id="authTitle" data-i18n="auth.title.signup">Create your account</h2>
+          <p class="muted" id="authIntro" data-i18n="auth.intro.signup">Just your email. We send you a code — no password to remember.</p>
         </div>
         <div class="card">
           <div id="channelPick" class="cc-switch channel-pick hidden" role="group" aria-label="Sign in with">
