@@ -203,8 +203,11 @@ verify, so the answer never depends on whether one exists.
   "add an email" box.
 - An email account and a phone account are separate accounts even if the same person owns
   both; there is no merge.
-- Staff setup codes go by email when the admin gives one (`drivers.email` /
-  `operators.email`); the claim still needs the phone and the code.
+- **Email only for now (no SMS: too much friction).** Production has no Twilio, so
+  `/auth/channels` answers `sms:false` and customers sign in by email. Staff setup codes go by
+  email (`drivers.email` / `operators.email`); creating staff without one is refused. "Ask to
+  join" requires an email (`access_requests.email`) and keeps the phone as a contact reference.
+  Drivers still sign in with phone + PIN; the claim still needs the phone and the code.
 
 ---
 
@@ -419,8 +422,11 @@ Worker that cache-first serves its shell.
 - **Layout**: standard delivery-app shell. Customer: app bar + bottom tabs (Home / Orders /
   Help / Account), sectioned checkout with a sticky action bar, tracking screen (status hero,
   delivery code, proof, timeline from `/orders/:id/timeline`, chat). Driver: job list, then
-  one job with a 2-step stepper and the step's proof panel. Operator: sidebar sections
-  (pills on a phone) — Orders, Deliveries, Refunds, Drivers, Team, Account. Gold is the accent
+  one job with a 2-step stepper and the step's proof panel. Operator: a desk console — the
+  page never scrolls; every section (Orders, Deliveries, Refunds, Drivers, Team, Account) is a
+  grouped list + a detail panel, each scrolling on its own, actions in the detail panel (one
+  pane at a time on a phone). Lists redraw on live events; the detail only when its item
+  changes, so typing is never wiped. Never go back to stacked cards with inline forms. Gold is the accent
   only; surfaces are neutral. Old WebViews (minSdk 22) lack `color-mix`: keep a plain fallback
   line before any use of it.
 - **Theme** (`shared/theme.js`): black ↔ white with constant gold trim, set before paint (no

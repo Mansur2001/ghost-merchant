@@ -40,10 +40,13 @@ test('order → pay → confirm → dispatch → pickup photo → customer code,
   // Operator: the claim is at the top, names the wallet, and has the reference filled in.
   const operator = await openApp(browser, testInfo);
   await signInOperator(operator, SEED.dispatcher);
-  const card = operator.locator('#orders .card', { hasText: `#${short}` });
+  // A list row per order; the work happens in the detail panel beside it.
+  const card = operator.locator(`#orders [data-open="${orderId}"]`);
   await expect(card).toContainText('Customer says they paid with EVC Plus');
-  await expect(card.locator(`[data-payref="${orderId}"]`)).toHaveValue(ref);
-  await card.locator(`[data-confirm="${orderId}"]`).click();
+  await card.click();
+  const detail = operator.locator('#orderDetail');
+  await expect(detail.locator(`[data-payref="${orderId}"]`)).toHaveValue(ref);
+  await detail.locator(`[data-confirm="${orderId}"]`).click();
 
   // Paid shows up on the customer's page without a reload.
   await expect(customer.locator('#statusBadge')).toHaveClass(/paid/);
@@ -53,9 +56,9 @@ test('order → pay → confirm → dispatch → pickup photo → customer code,
   const code = (await customer.locator('#handoffCode').textContent()).trim();
   expect(code).toMatch(/^\d{4}$/);
 
-  // Dispatch to the seeded driver — once the card has redrawn as paid, so the picker we fill
-  // in is the one that stays on screen.
+  // Dispatch to the seeded driver — once the panel has redrawn as paid.
   await expect(card).toContainText('Needs a driver');
+  await expect(detail).toContainText('Assign a driver');
   const assign = operator.locator(`select[data-assign="${orderId}"]`);
   const amina = await assign.locator('option', { hasText: SEED.driver.name }).getAttribute('value');
   await assign.selectOption(amina);
@@ -90,18 +93,19 @@ test('order → pay → confirm → dispatch → pickup photo → customer code,
 
   // The operator sees it as proven, with nothing to check.
   await goSection(operator, 'deliveries');
-  const delivered = operator.locator('#deliveries .card', { hasText: `#${short}` });
+  const deliveredRow = operator.locator(`#deliveries [data-open="${orderId}"]`);
+  await expect(deliveredRow).toContainText('Proven');
+  await deliveredRow.click();
+  const delivered = operator.locator('#deliveryDetail');
   await expect(delivered).toContainText('Customer gave the code');
-  await expect(delivered).toContainText('Proven');
 
   // The customer's own check: "I didn't get my order" puts it back in front of an operator.
   await customer.locator('#disputeBtn').click();
   await customer.locator('#disputeBtn').click();
   await expect(customer.locator('#disputeNote')).toBeVisible();
-  await goSection(operator, 'orders');
-  await goSection(operator, 'deliveries');
+  // It reaches the desk live, without a reload.
   await expect(delivered).toContainText('Customer says not received');
-  await expect(delivered).toContainText('Check');
+  await expect(deliveredRow).toContainText('Check');
 });
 
 test('a delivery without the code needs a door photo and a reason, and waits for an operator', async ({ browser }, testInfo) => {
@@ -117,9 +121,10 @@ test('a delivery without the code needs a door photo and a reason, and waits for
 
   const operator = await openApp(browser, testInfo);
   await signInOperator(operator, SEED.dispatcher);
-  const card = operator.locator('#orders .card', { hasText: `#${short}` });
+  const card = operator.locator(`#orders [data-open="${orderId}"]`);
+  await card.click();
   await operator.fill(`[data-payref="${orderId}"]`, `NC${Date.now().toString().slice(-7)}`);
-  await card.locator(`[data-confirm="${orderId}"]`).click();
+  await operator.locator(`[data-confirm="${orderId}"]`).click();
   await expect(card).toContainText('Needs a driver');
   const assign = operator.locator(`select[data-assign="${orderId}"]`);
   await assign.selectOption(await assign.locator('option', { hasText: SEED.driver.name }).getAttribute('value'));
@@ -144,7 +149,8 @@ test('a delivery without the code needs a door photo and a reason, and waits for
 
   // Flagged for the office: check it, and it records who did.
   await goSection(operator, 'deliveries');
-  const delivered = operator.locator('#deliveries .card', { hasText: `#${short}` });
+  await operator.locator(`#deliveries [data-open="${orderId}"]`).click();
+  const delivered = operator.locator('#deliveryDetail');
   await expect(delivered).toContainText('No customer code');
   await delivered.locator('[data-review]').click();
   await expect(delivered).toContainText('Checked by');

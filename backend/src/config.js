@@ -127,7 +127,7 @@ export const config = {
   owner: {
     name: process.env.OWNER_NAME || 'GuriKaabe',
     email: process.env.OWNER_EMAIL || 'gurikaabe@gmail.com',
-    phone: process.env.OWNER_PHONE || '+1 206 687 6538',
+    phone: process.env.OWNER_PHONE || '+1 206 733 0555',
   },
 
   // Behind Caddy the socket peer is always the proxy, so req.ip would be the proxy for every

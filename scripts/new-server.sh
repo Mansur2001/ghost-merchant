@@ -74,7 +74,7 @@ REVIEW_CODE=
 
 OWNER_NAME=GuriKaabe
 OWNER_EMAIL=gurikaabe@gmail.com
-OWNER_PHONE=+1 206 687 6538
+OWNER_PHONE=+1 206 733 0555
 
 # Wallets: each one appears only when BOTH lines are set (see .env.example). Blank = testers
 # use "I've paid" and an operator confirms by hand.

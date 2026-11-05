@@ -100,26 +100,28 @@ async function sendCode({ phone, email }, role, code) {
 //   requestId — optional: create it FROM an approved access request (name/phone/role come
 //               from the request, and the request is marked as having produced an account).
 export async function createStaffAccount({ role, name, phone, username, email: rawEmail, createdBy, requestId }) {
-  const email = emailOrNull(rawEmail);
-  // No texts on this server: the code can only go by email, so say so before creating anything.
-  if (!email && !smsAvailable()) throw new StaffError('text messages are off on this server — add an email to send the setup code');
+  const typedEmail = emailOrNull(rawEmail);
   const result = await withTransaction(async (tx) => {
-    let r = { role, name, phone };
+    let r = { role, name, phone, email: typedEmail };
 
     if (requestId != null) {
       let id;
       try { id = BigInt(requestId); } catch { throw new StaffError('request not found', 404); }
       // RAW: FOR UPDATE, so two admins clicking "Create account" at once can't make two.
       const rows = await tx.$queryRaw`
-        SELECT id, role, name, phone, status, account_created_at
+        SELECT id, role, name, phone, email, status, account_created_at
           FROM access_requests WHERE id = ${id} FOR UPDATE
       `;
       const req = rows[0];
       if (!req) throw new StaffError('request not found', 404);
       if (req.status !== 'approved') throw new StaffError('approve the request first', 409);
       if (req.account_created_at) throw new StaffError('an account was already created for this request', 409);
-      r = { role: req.role, name: req.name, phone: req.phone };
+      // The email the admin typed wins (a correction); otherwise the one they applied with.
+      r = { role: req.role, name: req.name, phone: req.phone, email: typedEmail || req.email || null };
     }
+    const email = r.email;
+    // No texts on this server: the code can only go by email, so say so before creating anything.
+    if (!email && !smsAvailable()) throw new StaffError('add an email — setup codes are sent by email');
 
     if (!ROLES.has(r.role)) throw new StaffError('role must be driver or operator');
     const cleanName = String(r.name || '').trim();
@@ -166,10 +168,10 @@ export async function createStaffAccount({ role, name, phone, username, email: r
         data: { account_created_at: new Date(), account_ref: `${r.role}:${account.id}` },
       });
     }
-    return { role: r.role, account, phone: e164, code };
+    return { role: r.role, account, phone: e164, email, code };
   });
 
-  const sent = await sendCode({ phone: result.phone, email }, result.role, result.code);
+  const sent = await sendCode({ phone: result.phone, email: result.email }, result.role, result.code);
   return { ...result, ...sent };
 }
 
@@ -197,7 +199,7 @@ export async function resendSetupCode({ role, accountId, createdBy, email: rawEm
       await model.update({ where: { id }, data: { email: newEmail } });
     }
     const email = via === 'sms' ? null : newEmail || account.email || null;
-    if (!email && !smsAvailable()) throw new StaffError('text messages are off on this server — add an email to send the setup code');
+    if (!email && !smsAvailable()) throw new StaffError('add an email — setup codes are sent by email');
     const code = await issueCode(tx, { role, accountId: id, phone, createdBy });
     return { role, phone, email, code };
   });

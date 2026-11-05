@@ -32,15 +32,15 @@ signupRouter.get('/signup/contact', (req, res) => {
   res.json({ contact: config.owner });
 });
 
-// POST /api/signup { role, name, phone, message }
+// POST /api/signup { role, name, phone, email, message }
 signupRouter.post(
   '/signup',
   rateLimit({ windowMs: HOUR, max: 10, message: 'too many requests — try again later' }),
   rateLimit({ windowMs: 24 * HOUR, max: 5, key: phoneKey, message: 'too many requests — try again later' }),
   async (req, res, next) => {
     try {
-      const { role, name, phone, message } = req.body || {};
-      const { id } = await submitAccessRequest({ role, name, phone, message });
+      const { role, name, phone, email, message } = req.body || {};
+      const { id } = await submitAccessRequest({ role, name, phone, email, message });
 
       // A short-lived token scoped to THIS request, so the applicant can attach their ID
       // without the request id ever being exposed. Without it the upload endpoint would
@@ -52,7 +52,7 @@ signupRouter.post(
       res.status(201).json({
         received: true,
         message:
-          'Thanks — your request is with the team. Someone will contact you on this number.',
+          'Thanks — your request is with the team. We will contact you by email or phone.',
         uploadToken,
         contact: config.owner,
       });

@@ -10,6 +10,7 @@ test('admin invites a driver by email; the driver sets a PIN and signs in', asyn
   const name = `Staging Driver ${Date.now().toString().slice(-5)}`;
   const phone = somaliNumber('65');
   await goSection(admin, 'drivers');
+  await admin.click('#newDriverBtn');
   await admin.fill('#dName', name);
   await admin.fill('#dMsisdn', phone);
   await admin.fill('#dEmail', `driver-${Date.now()}@example.com`);
@@ -17,7 +18,7 @@ test('admin invites a driver by email; the driver sets a PIN and signs in', asyn
   // Dev mode shows the setup code in the toast instead of sending it.
   const code = await codeIn(admin.locator('.toast'), 8);
   await expect(admin.locator('#drivers')).toContainText(name);
-  await expect(admin.locator('#drivers')).toContainText('Re-send setup code by email');
+  await expect(admin.locator('#driverDetail')).toContainText('Re-send setup code by email');
 
   const driver = await openApp(browser, testInfo);
   await driver.goto('/driver/');

@@ -10,6 +10,7 @@
 import crypto from 'node:crypto';
 import { prisma } from '../db/prisma.js';
 import { normalizeMsisdnOrThrow } from '../domain/phone.js';
+import { normalizeEmail } from '../domain/email.js';
 import { putObject, deleteObject } from '../storage/objectStore.js';
 
 export class AccessRequestError extends Error {
@@ -22,7 +23,7 @@ export class AccessRequestError extends Error {
 const ROLES = new Set(['driver', 'operator']);
 
 // Submit a request. Public endpoint — treat every field as hostile.
-export async function submitAccessRequest({ role, name, phone, message }) {
+export async function submitAccessRequest({ role, name, phone, email, message }) {
   if (!ROLES.has(role)) throw new AccessRequestError('choose driver or operator');
 
   const cleanName = String(name || '').trim();
@@ -38,6 +39,10 @@ export async function submitAccessRequest({ role, name, phone, message }) {
     throw new AccessRequestError(err.message);
   }
 
+  // Codes go by email only: without one we could approve them and never reach them.
+  const cleanEmail = normalizeEmail(email);
+  if (!cleanEmail) throw new AccessRequestError('enter a valid email — your setup code goes there');
+
   const cleanMessage = message ? String(message).trim().slice(0, 1000) : null;
 
   // One open request per person per role. Re-submitting updates the message rather than
@@ -49,13 +54,13 @@ export async function submitAccessRequest({ role, name, phone, message }) {
   if (existing) {
     await prisma.accessRequest.update({
       where: { id: existing.id },
-      data: { name: cleanName, message: cleanMessage },
+      data: { name: cleanName, email: cleanEmail, message: cleanMessage },
     });
     return { id: existing.id, resubmitted: true };
   }
 
   const created = await prisma.accessRequest.create({
-    data: { role, name: cleanName, phone: e164, message: cleanMessage },
+    data: { role, name: cleanName, phone: e164, email: cleanEmail, message: cleanMessage },
     select: { id: true },
   });
   return { id: created.id, resubmitted: false };

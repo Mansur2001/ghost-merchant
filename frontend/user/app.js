@@ -939,13 +939,15 @@ $('joinSubmit').addEventListener('click', async () => {
 
   if (name.length < 2) return toast(t('join.err.name'));
   if (!joinPhoneValid) return toast(t('err.phone'));
+  const email = $('joinEmail').value.trim();
+  if (!EMAIL_RE.test(email)) return toast(t('join.err.email'));
 
   $('joinSubmit').disabled = true;
   $('joinStatus').textContent = t('join.sending');
   const res = await api('/signup', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ role, name, phone: joinPhoneE164, message }),
+    body: JSON.stringify({ role, name, phone: joinPhoneE164, email, message }),
   });
   $('joinSubmit').disabled = false;
 
@@ -991,6 +993,7 @@ $('joinSubmit').addEventListener('click', async () => {
 
   $('joinStatus').textContent = t('join.done');
   $('joinName').value = '';
+  $('joinEmail').value = '';
   $('joinMessage').value = '';
   $('joinIdFront').value = '';
   $('joinIdBack').value = '';

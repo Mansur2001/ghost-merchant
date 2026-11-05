@@ -114,11 +114,13 @@ async function driverLogin(page, msisdn = '619876543', pin = '1234') {
 }
 
 async function payAndDispatch(op, order, ref) {
-  const card = op.locator('#orders .card', { hasText: `#${order.short}` });
+  const card = op.locator(`#orders [data-open="${order.id}"]`);
   await card.waitFor();
+  await card.click();
   await op.fill(`[data-payref="${order.id}"]`, ref);
   await op.click(`[data-confirm="${order.id}"]`);
   await waitText(card, /Needs a driver/);
+  await waitText(op.locator('#orderDetail'), /Assign a driver/);
   const pick = op.locator(`select[data-assign="${order.id}"]`);
   await pick.selectOption(await pick.locator('option', { hasText: 'Amina' }).getAttribute('value'));
   await op.click(`[data-assignbtn="${order.id}"]`);
@@ -172,14 +174,15 @@ await step(cust.page, 'Customer', 'Pays the merchant by USSD, then taps “I’v
 
 const op = await device('desk');
 await operatorLogin(op.page);
-await step(op.page, 'Operator', 'Opens the dispatch console', 'The claimed order is at the top, highlighted, reference pre-filled', async () => {
-  const card = op.page.locator('#orders .card', { hasText: `#${A.short}` });
+await step(op.page, 'Operator', 'Opens the dispatch console and selects the claimed order', 'It is first under “Payment to check”; the detail panel has the reference pre-filled', async () => {
+  const card = op.page.locator(`#orders [data-open="${A.id}"]`);
   await waitText(card, /Customer says they paid/);
+  await card.click();
   must((await op.page.inputValue(`[data-payref="${A.id}"]`)) === `SIM${stamp}`, 'reference not pre-filled');
 });
 await step(op.page, 'Operator', 'Checks the merchant phone, confirms the payment, assigns driver Amina', 'Card moves to “Driver at market”', async () => {
   await payAndDispatch(op.page, A, `SIM${stamp}`);
-  await waitText(op.page.locator('#orders .card', { hasText: `#${A.short}` }), /Driver at market/);
+  await waitText(op.page.locator(`#orders [data-open="${A.id}"]`), /Driver at market/);
 });
 let code;
 await step(cust.page, 'Customer', 'Watches the order (no reload)', 'Paid → driver getting items; a 4-digit delivery code appears', async () => {
@@ -233,11 +236,13 @@ await step(cust.page, 'Customer', 'Scrolls the tracking page', 'Timeline with re
   await waitText(cust.page.locator('#timeline'), /Delivered/);
 });
 await section(op.page, 'deliveries');
-await step(op.page, 'Operator', 'Opens Deliveries', 'Order proven by code, GPS ~25 m from the pin, both photos — nothing to check', async () => {
-  const card = op.page.locator('#deliveries .card', { hasText: `#${A.short}` });
+await step(op.page, 'Operator', 'Opens Deliveries and selects the order', 'Proven by code, GPS ~25 m from the pin, photos — nothing to check', async () => {
+  const row = op.page.locator(`#deliveries [data-open="${A.id}"]`);
+  await waitText(row, /Proven/);
+  await row.click();
+  const card = op.page.locator('#deliveryDetail');
   await waitText(card, /Customer gave the code/);
   await waitText(card, /m from the customer/);
-  await waitText(card, /Proven/);
 });
 
 // ═══ B ═══
@@ -267,14 +272,17 @@ await step(drvB.page, 'Driver', 'Takes the door photo, picks “Customer’s pho
   await drvB.page.waitForSelector('#queueView', { state: 'visible', timeout: 10000 });
 });
 await section(op.page, 'deliveries');
-await step(op.page, 'Operator', 'Opens Deliveries', 'Flagged: “No customer code” and “Far from the pin”, waiting for a check', async () => {
-  const card = op.page.locator('#deliveries .card', { hasText: `#${B.short}` });
+await step(op.page, 'Operator', 'Opens Deliveries and selects the flagged one', 'Under “To check”: “No customer code” and “Far from the pin”', async () => {
+  const row = op.page.locator(`#deliveries [data-open="${B.id}"]`);
+  await waitText(row, /Check/);
+  await row.click();
+  const card = op.page.locator('#deliveryDetail');
   await waitText(card, /No customer code/);
   await waitText(card, /Far from the pin/);
 });
-await step(op.page, 'Operator', 'Calls the customer, looks at the photos, taps Mark checked', '“Checked by Hodan”', async () => {
-  await op.page.locator('#deliveries .card', { hasText: `#${B.short}` }).locator('[data-review]').click();
-  await waitText(op.page.locator('#deliveries .card', { hasText: `#${B.short}` }), /Checked by/);
+await step(op.page, 'Operator', 'Calls the customer, looks at the photos, taps Mark checked', '“Checked by hodan”', async () => {
+  await op.page.locator('#deliveryDetail [data-review]').click();
+  await waitText(op.page.locator('#deliveryDetail'), /Checked by/);
 });
 await custB.page.reload();
 await custB.page.waitForSelector('#orderView', { state: 'visible' }).catch(async () => {
@@ -291,10 +299,9 @@ await step(custB.page, 'Customer', 'Sees the delivery “with a photo (no code)�
   await custB.page.click('#disputeBtn');
   await custB.page.waitForSelector('#disputeNote', { state: 'visible' });
 });
-await section(op.page, 'orders');
-await section(op.page, 'deliveries');
-await step(op.page, 'Operator', 'Opens Deliveries again', 'Back in the queue: “Customer says not received — call them”', async () => {
-  await waitText(op.page.locator('#deliveries .card', { hasText: `#${B.short}` }), /Customer says not received/);
+await step(op.page, 'Operator', 'Watches the desk (no reload)', 'Back in “To check”: “Customer says not received — call them”', async () => {
+  await waitText(op.page.locator('#deliveryDetail'), /Customer says not received/);
+  await waitText(op.page.locator(`#deliveries [data-open="${B.id}"]`), /Check/);
 });
 
 // ═══ C ═══
@@ -416,9 +423,64 @@ await step(custD.page, 'Customer', 'Sees the update', '“Cancelled”, with a n
   await waitText(custD.page.locator('#statusSub'), /money owed/);
 });
 await section(op.page, 'refunds');
-await step(op.page, 'Operator', 'Opens Refunds', '$6.00 owed to the customer, with the driver’s reason', async () => {
+await step(op.page, 'Operator', 'Opens Refunds and selects the new one', '$6.00 owed, with the driver’s reason and the form to record the refund', async () => {
   await waitText(op.page.locator('#refunds'), /\$6\.00/);
-  await waitText(op.page.locator('#refunds'), /Items not available/);
+  await op.page.locator('#refunds [data-open]', { hasText: '$6.00' }).first().click();
+  await waitText(op.page.locator('#refundDetail'), /Items not available/);
+  await op.page.waitForSelector('#rfSettle');
+});
+
+// ═══ F ═══
+scenario('F. A new driver joins (email only)',
+  'Someone asks to drive. Their phone is a contact reference; the setup code goes to their email. An admin approves, creates the account, and the driver sets their own PIN.');
+const applicant = await device('phone');
+const appPhone = `65${stamp.slice(-6)}1`;
+const appEmail = `driver-${stamp}@example.com`;
+await applicant.page.goto(BASE + '/');
+await applicant.page.click('#joinBtn');
+await step(applicant.page, 'Applicant', 'Opens “Ask to join” and fills in name, phone (reference) and email', 'Email is required — it is where the setup code will go', async () => {
+  await applicant.page.fill('#joinName', 'Sim Applicant');
+  await applicant.page.fill('#joinPhone', appPhone);
+  await applicant.page.click('#joinSubmit');
+  await waitText(applicant.page.locator('.toast'), /email/i);
+  await applicant.page.fill('#joinEmail', appEmail);
+});
+await step(applicant.page, 'Applicant', 'Sends the request', '“Request sent” — no account exists yet', async () => {
+  await applicant.page.click('#joinSubmit');
+  await waitText(applicant.page.locator('#joinStatus'), /Request sent/);
+});
+const adm = await device('desk');
+await adm.page.goto(BASE + '/operator/');
+await adm.page.fill('#username', 'admin');
+await adm.page.fill('#password', 'change-me-please-1');
+await adm.page.click('#loginBtn');
+await adm.page.waitForSelector('#orders', { state: 'visible' });
+await section(adm.page, 'team');
+await step(adm.page, 'Admin', 'Opens Team and selects the request', 'Shows the applicant’s email and phone; Approve / Decline', async () => {
+  await adm.page.locator('#accessRequests [data-open]', { hasText: 'Sim Applicant' }).first().click();
+  await waitText(adm.page.locator('#teamDetail'), new RegExp(appEmail));
+});
+await step(adm.page, 'Admin', 'Approves, then creates the account', 'Setup code emailed to the applicant (on staging the code is shown instead)', async () => {
+  await adm.page.click('#teamDetail [data-status="approved"]');
+  await adm.page.waitForSelector('#reqAcct');
+  must((await adm.page.inputValue('#reqEmail')) === appEmail, 'email not pre-filled');
+  await adm.page.click('#reqAcct');
+  await waitText(adm.page.locator('.toast'), /\d{8}/);
+});
+const setupCode = ((await adm.page.textContent('.toast')) || '').match(/\d{8}/)?.[0];
+await applicant.page.goto(BASE + '/driver/');
+await applicant.page.click('#showSetup');
+await step(applicant.page, 'New driver', 'Enters phone, the emailed code, and a new 6-digit PIN', 'Signed in to an empty job list', async () => {
+  await applicant.page.fill('#sPhone', appPhone);
+  await applicant.page.fill('#sCode', setupCode || '');
+  await applicant.page.fill('#sPin', '482913');
+  await applicant.page.fill('#sPin2', '482913');
+  await applicant.page.click('#setupBtn');
+  await applicant.page.waitForSelector('#queueView', { state: 'visible' });
+});
+await section(adm.page, 'drivers');
+await step(adm.page, 'Admin', 'Opens Drivers', 'The new driver is on the roster and can be assigned orders', async () => {
+  await waitText(adm.page.locator('#drivers'), /Sim Applicant/);
 });
 
 await browser.close();

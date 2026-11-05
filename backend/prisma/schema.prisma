@@ -317,7 +317,9 @@ model AccessRequest {
   id           BigInt    @id @default(autoincrement())
   role         String    // 'driver' | 'operator'
   name         String
-  phone        String    // canonical E.164
+  phone        String    // canonical E.164 — a contact reference
+  /// Where the setup code goes when the account is created (codes are email-only).
+  email        String?
   message      String?
   status       String    @default("new") // 'new' | 'contacted' | 'approved' | 'declined'
   // ID document held in MinIO. This is the most sensitive data in the system — a leaked
