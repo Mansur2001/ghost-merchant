@@ -473,7 +473,7 @@ Worker that cache-first serves its shell.
   grouped list + a detail panel, each scrolling on its own, actions in the detail panel (one
   pane at a time on a phone). Lists redraw on live events; the detail only when its item
   changes, so typing is never wiped. Never go back to stacked cards with inline forms. Gold is the accent
-  only; surfaces are neutral. Old WebViews (minSdk 22) lack `color-mix`: keep a plain fallback
+  only; surfaces are neutral. Old WebViews (minSdk 24 = Android 7) lack `color-mix`: keep a plain fallback
   line before any use of it.
 - **Theme** (`shared/theme.js`): black ↔ white with constant gold trim, set before paint (no
   flash), persisted in `localStorage` (`gm_theme`) across all three PWAs.

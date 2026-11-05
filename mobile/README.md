@@ -8,11 +8,12 @@ the customer flow ships to web and Android from the same file.
 |---|---|
 | App name | **GuriKaabe** |
 | Application ID | `so.gurikaabe.app` — permanent; changing it means a new Play listing |
-| Version | `versionName 0.1.0`, `versionCode 1` |
-| Min / target SDK | 22 (Android 5.1) / 35 |
+| Version | `versionName 0.2.0`, `versionCode 2` |
+| Min / target SDK | 24 (Android 7.0) / 35 |
 
-`minSdk 22` is deliberate: the target market runs old, cheap handsets, and every version you
-drop is customers you can't serve.
+`minSdk 24` is the lowest Play accepts with automatic protection turned on (it refused 22).
+The target market runs old, cheap handsets, so never raise it further without a reason that
+outweighs the customers it drops.
 
 ---
 
