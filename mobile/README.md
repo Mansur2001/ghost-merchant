@@ -154,7 +154,8 @@ cd android && ./gradlew bundleRelease
 ```
 
 Bump `versionCode` in `android/app/build.gradle` for **every** upload — Play rejects a
-duplicate.
+duplicate. Write that upload's Play release notes in `release-notes/<versionName>-vc<versionCode>.txt`
+(`<en-US>` and `<so>` blocks, each under Play's 500-character limit, plain everyday Somali).
 
 `npm run build` ends with `cap copy android`, which puts the web app INTO the Android project.
 Without that step Gradle packages whatever copy was there before — this shipped an August build
