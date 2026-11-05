@@ -5,7 +5,7 @@
   "description": "GuriKaabe \u2014 Android shell (Capacitor) around the GuriKaabe PWAs.",
   "type": "module",
   "scripts": {
-    "build": "node build-www.mjs && node configure-android.mjs",
+    "build": "node build-www.mjs && node configure-android.mjs && cap copy android",
     "sync": "node build-www.mjs && node configure-android.mjs && cap sync android",
     "open": "cap open android",
     "run:device": "node build-www.mjs && node configure-android.mjs && cap sync android && cap run android",

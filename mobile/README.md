@@ -155,6 +155,14 @@ cd android && ./gradlew bundleRelease
 Bump `versionCode` in `android/app/build.gradle` for **every** upload — Play rejects a
 duplicate.
 
+`npm run build` ends with `cap copy android`, which puts the web app INTO the Android project.
+Without that step Gradle packages whatever copy was there before — this shipped an August build
+for a whole session once. Before uploading, check the bundle holds today's app:
+```bash
+unzip -p app/build/outputs/bundle/release/app-release.aab base/assets/public/shared/env.js   # your API base
+unzip -p app/build/outputs/bundle/release/app-release.aab base/assets/public/index.html | wc -c  # ≈ frontend/user/index.html
+```
+
 ### 3. Before you submit
 - [ ] Backend deployed on a real domain with a valid certificate (see the root `README.md`)
 - [ ] `OTP_TRANSPORT=twilio` with a real code received on a handset

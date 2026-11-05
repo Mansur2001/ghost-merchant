@@ -605,6 +605,11 @@ configured yet: no wallet is offered until they are (`domain/wallets.js`).
 
 Not started: push notifications.
 
+**Android release:** `cd mobile && GM_API_BASE=https://app.gurikaabe.com npm run build` (now ends
+with `cap copy android` — before 2026-11-06 it didn't, and every bundle silently carried the
+August web app), then `./gradlew bundleRelease`. Check inside the `.aab` before uploading
+(`mobile/README.md`).
+
 **Session history** (`docs/history/`): one dated file per working session — what changed, why,
 what was decided, and what was left open. Read the latest before picking work back up. Public
 repo: never put secrets, passwords or customer data in it.
