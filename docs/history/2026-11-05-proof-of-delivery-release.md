@@ -21,6 +21,21 @@
 - The live verify suites were stale (no `phone` at checkout since `97ef273`; error `ref` in compared bodies). Fixed; all 247 checks pass.
 - Tests: 397 unit, 17 Playwright (two new: the code path and the photo-no-code path).
 
+## Later the same day
+
+- **SendGrid**: the key is valid with `mail.send`; a real send from `gurikaabe@gmail.com` was accepted (202). It is a restricted key, so it can't list senders.
+- **Server 80.240.16.128 is unusable.** Every large inbound transfer dies after 30–290 KB (curl 56, apt "Hash Sum mismatch", git "decryption failed"). Ping is clean and local memory is fine, so it's the host's network. It also runs Ubuntu 26.10, an interim release. Replace it with Ubuntu 24.04 LTS.
+- **npm**:
+  - Fixed `proxy-addr` (critical: IP spoofing under trust proxy), `body-parser` (high) and `qs` (moderate, via an override).
+  - Left `deepmerge-ts`: it sits inside the Prisma CLI and no request reaches it.
+  - The lockfiles pointed at `registry.npmmirror.com`, so production would have installed from a third-party mirror. They now point at the official registry, pinned by a `.npmrc` in each package.
+- **`./scripts/staging.sh simulate`** plays out 5 scenarios (40 steps, all passing) across the three apps:
+  - a normal order;
+  - no code at the door, then a dispute;
+  - a delivery from a dead zone;
+  - cheating attempts;
+  - a failure after payment.
+
 ## Decisions
 
 - **GPS is evidence, not a gate.** Refusing a delivery because a cheap handset has no fix would strand a driver who did the job. It is flagged instead.

@@ -13,6 +13,7 @@ Your working copy, with its own fake data. It never sends real texts or emails: 
 ./scripts/staging.sh test     # run the browser tests (add --headed to watch)
 ./scripts/staging.sh open     # open the three apps
 ./scripts/staging.sh shots    # Play Store images -> play-screenshots/
+./scripts/staging.sh simulate # play out 5 real scenarios in all 3 apps -> e2e/simulation/report.html
 ./scripts/staging.sh seed     # reset to seed data
 ./scripts/staging.sh logs     # backend log
 ./scripts/staging.sh down     # stop
@@ -30,6 +31,7 @@ Your working copy, with its own fake data. It never sends real texts or emails: 
 ```bash
 cd backend && npm test && cd ..
 ./scripts/staging.sh test
+./scripts/staging.sh simulate   # look at the report before sending a build to anyone
 ```
 
 ## Commit

@@ -8,6 +8,7 @@
 #   ./scripts/staging.sh test      run the Playwright workflows (args pass through to Playwright)
 #   ./scripts/staging.sh seed      reset staging data to the seed
 #   ./scripts/staging.sh shots     Play Store screenshots + feature graphic -> play-screenshots/
+#   ./scripts/staging.sh simulate  play out real orders in all three apps -> e2e/simulation/report.html
 #   ./scripts/staging.sh logs      follow the backend log (login codes appear here too)
 #   ./scripts/staging.sh status    what's running
 #   ./scripts/staging.sh psql "SQL"  one query against the staging database
@@ -123,6 +124,13 @@ case "${1:-}" in
     cd e2e
     [ -d node_modules ] || { npm install; npx playwright install chromium; }
     STAGING_URL="$URL" node play-assets.mjs
+    ;;
+  simulate)
+    wait_healthy
+    dc exec -T redis sh -c 'redis-cli --scan --pattern "rl:*" | xargs -r redis-cli DEL' >/dev/null || true
+    cd e2e
+    [ -d node_modules ] || { npm install; npx playwright install chromium; }
+    STAGING_URL="$URL" node simulate.mjs && open simulation/report.html
     ;;
   *) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

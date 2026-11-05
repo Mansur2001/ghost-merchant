@@ -44,3 +44,4 @@ e2e/test-results/
 e2e/playwright-report/
 .env.production
 sendgrid.env
+e2e/simulation/
