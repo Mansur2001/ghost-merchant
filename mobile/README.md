@@ -8,7 +8,7 @@ the customer flow ships to web and Android from the same file.
 |---|---|
 | App name | **GuriKaabe** |
 | Application ID | `com.gurikaabe.app` — permanent; changing it means a new Play listing |
-| Version | `versionName 0.2.0`, `versionCode 4` |
+| Version | `versionName 0.2.0`, `versionCode 5` |
 | Min / target / compile SDK | 24 (Android 7.0) / 36 (Android 16) / 36 |
 
 `minSdk 24` is the lowest Play accepts with automatic protection turned on (it refused 22).
@@ -154,7 +154,8 @@ cd android && ./gradlew bundleRelease
 ```
 
 Bump `versionCode` in `android/app/build.gradle` for **every** upload — Play rejects a
-duplicate. Write that upload's Play release notes in `release-notes/<versionName>-vc<versionCode>.txt`
+duplicate, and a code is used up the moment Play sees it, even if you delete that upload or
+discard the release. Write that upload's Play release notes in `release-notes/<versionName>-vc<versionCode>.txt`
 (`<en-US>` and `<so>` blocks, each under Play's 500-character limit, plain everyday Somali).
 
 `npm run build` ends with `cap copy android`, which puts the web app INTO the Android project.

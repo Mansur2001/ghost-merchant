@@ -611,7 +611,8 @@ August web app), then `./gradlew bundleRelease`. Check inside the `.aab` before 
 (`mobile/README.md`). Package **`com.gurikaabe.app`** (what the Play Console listing is bound to —
 permanent once published), **minSdk 24** (Play automatic protection refuses lower), **targetSdk/compileSdk 36** (Play's
 current floor — it moves up yearly; AGP 8.2.1 warns but builds), and `versionCode` must go up on
-every upload (4 = the first bundle Play's checks should accept).
+every upload — a code is burned once Play has seen it, even if the upload is deleted (1–4 are
+gone; 5 is the first upload that passes every check).
 
 **Session history** (`docs/history/`): one dated file per working session — what changed, why,
 what was decided, and what was left open. Read the latest before picking work back up. Public
