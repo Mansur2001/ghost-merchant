@@ -11,7 +11,7 @@ test('customer: a server failure shows the reason and the reference', async ({ b
     body: JSON.stringify({ error: 'could not send code', cause: 'SMS-21408', ref: '1a2b3c4d' }),
   }));
   await page.goto('/');
-  await page.getByRole('button', { name: /I'm a customer/ }).click();
+  await page.locator('#asCustomer').click();
   await page.fill('#phone', somaliNumber());
   await page.click('#sendCodeBtn');
   await expect(page.locator('#otpStatus')).toHaveText(
@@ -26,7 +26,7 @@ test('customer: the reference survives translation to Somali', async ({ browser 
     body: JSON.stringify({ error: 'database unavailable', cause: 'DB-P1001', ref: '1a2b3c4d' }),
   }));
   await page.goto('/');
-  await page.getByRole('button', { name: /I'm a customer/ }).click();
+  await page.locator('#asCustomer').click();
   await page.click('#langToggle');
   await page.fill('#phone', somaliNumber());
   await page.click('#sendCodeBtn');

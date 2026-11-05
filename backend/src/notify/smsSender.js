@@ -82,6 +82,13 @@ function twilioConfigured() {
   return Boolean(t.accountSid && t.authToken && (t.messagingServiceSid || t.from));
 }
 
+// Can this server text a code at all? Outside production yes (the code shows on screen). In
+// production only with Twilio set up — without it the app runs on email codes alone, and the
+// apps hide "sign in by text" rather than offering a button that always fails.
+export function smsAvailable() {
+  return config.env !== 'production' || twilioConfigured();
+}
+
 // Which transport to use. `auto` is Twilio; an explicit `log` keeps a dev box offline.
 export function transportFor() {
   return config.otp.transport === 'auto' ? 'twilio' : config.otp.transport;

@@ -16,6 +16,66 @@ const STATUS_LABEL = {
   DISPATCHED: 'driver dispatched', IN_TRANSIT: 'in transit',
   DELIVERED: 'delivered', FAILED_REFUND: 'failed / refund',
 };
+// Card chips: what the order needs from someone, not the enum.
+const STATUS_CHIP = {
+  PENDING_PAYMENT: ['Awaiting payment', 'pending'], PAID_UNASSIGNED: ['Needs a driver', 'gold'],
+  DISPATCHED: ['Driver at market', 'info'], IN_TRANSIT: ['On the way', 'info'],
+  DELIVERED: ['Delivered', 'ok'], FAILED_REFUND: ['Failed', 'fail'],
+};
+
+// ── Sections ──
+// One nav, drawn twice: a sidebar on a desk, pills across the top on a phone.
+const ICON = {
+  orders: '<path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h4"/>',
+  deliveries: '<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>',
+  refunds: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v10M9.5 9.5c0-1 1-1.5 2.5-1.5s2.5.6 2.5 1.8c0 2.7-5 1.4-5 4.2 0 1.2 1 1.8 2.5 1.8s2.5-.5 2.5-1.5"/>',
+  drivers: '<circle cx="5.5" cy="17.5" r="2.5"/><circle cx="18.5" cy="17.5" r="2.5"/><path d="M8 17.5h7l2-6h-4l-2-4H7"/><path d="M15 6h3l1.5 5.5"/>',
+  team: '<circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6s7 2 7 6"/><path d="M17 4a4 4 0 0 1 0 8M22 21c0-3-1.5-5-4-5.7"/>',
+  account: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/>',
+};
+const SECTIONS = [
+  ['orders', 'Orders'], ['deliveries', 'Deliveries'], ['refunds', 'Refunds'],
+  ['drivers', 'Drivers'], ['team', 'Team', 'admin'], ['account', 'Account'],
+];
+let panel = 'orders';
+const counts = {};
+function renderNav() {
+  const html = SECTIONS.filter(([, , who]) => who !== 'admin' || me?.is_admin).map(([id, name]) => `
+    <button class="navitem" type="button" data-nav="${id}" ${id === panel ? 'aria-current="page"' : ''}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[id]}</svg>
+      <span>${name}</span>${counts[id] ? `<span class="count">${counts[id]}</span>` : ''}
+    </button>`).join('');
+  $('sidenav').innerHTML = html;
+  $('topnav').innerHTML = html;
+  document.querySelectorAll('[data-nav]').forEach((b) => b.addEventListener('click', () => setPanel(b.dataset.nav)));
+}
+function setPanel(id) {
+  if (id === 'deliveries' && panel !== id) setTimeout(loadDeliveries, 0);
+  panel = id;
+  document.querySelectorAll('[data-panel]').forEach((el) => el.classList.toggle('hidden', el.dataset.panel !== id));
+  renderNav();
+  window.scrollTo(0, 0);
+}
+function setCount(id, n) {
+  if ((counts[id] || 0) === n) return;
+  counts[id] = n;
+  renderNav();
+}
+
+// Order filter chips.
+let orderFilter = 'all';
+const FILTERS = {
+  all: () => true,
+  pay: (o) => o.status === 'PENDING_PAYMENT',
+  dispatch: (o) => o.status === 'PAID_UNASSIGNED',
+  road: (o) => o.status === 'DISPATCHED' || o.status === 'IN_TRANSIT',
+};
+$('orderFilter').querySelectorAll('[data-filter]').forEach((b) => b.addEventListener('click', () => {
+  orderFilter = b.dataset.filter;
+  $('orderFilter').querySelectorAll('[data-filter]').forEach((x) =>
+    x.setAttribute('aria-pressed', String(x === b)));
+  loadOrders();
+}));
 
 // Live phone-number hints on every number field.
 if (window.SomPhone) {
@@ -119,7 +179,12 @@ async function showDash() {
   $('loginView').classList.add('hidden');
   $('dash').classList.remove('hidden');
   $('logoutBtn').classList.remove('hidden');
+  $('sidenav').classList.remove('hidden');
+  $('topnav').classList.remove('hidden');
   await loadMe();
+  setPanel('orders');
+  $('whoami').textContent = me ? me.display_name : '';
+  $('whoami').classList.toggle('hidden', !me);
   setStatus(
     me ? `Signed in as ${me.display_name} (${me.username}) — monitoring live.`
        : 'Monitoring live — waiting for activity.',
@@ -144,6 +209,7 @@ async function loadMe() {
   $('pwNag').classList.toggle('hidden', !me.must_change_password);
   // Staff management is admin-only on the server; hiding it here just keeps the screen honest.
   document.querySelectorAll('.admin-only').forEach((el) => el.classList.toggle('hidden', !me.is_admin));
+  renderNav(); // the Team section comes and goes with admin rights
 }
 
 // Shown only while the system is genuinely new. Disappears on its own as each step is done,
@@ -175,7 +241,7 @@ let drivers = []; // roster with workload stats, kept fresh for the assign picke
 async function refreshAll() {
   await loadDrivers();                       // load first so order cards can build the picker
   const [orderCount] = await Promise.all([
-    loadOrders(), loadRefunds(),
+    loadOrders(), loadRefunds(), loadDeliveries(),
     ...(me?.is_admin ? [loadOperators(), loadAccessRequests()] : []),
   ]);
   renderFirstRun({ drivers: drivers.length, orders: orderCount ?? 0 });
@@ -190,7 +256,7 @@ async function loadOperators() {
     ? list.map((o) => {
         const self = o.id === me?.id;
         return `
-        <div class="card" style="background:var(--panel-2);">
+        <div class="card">
           <div class="row" style="align-items:center;">
             <div>
               <strong>${escapeHtml(o.display_name)}</strong>
@@ -305,10 +371,11 @@ async function loadRefunds() {
   const badge = $('refundTotal');
   badge.textContent = `$${res.total} owed`;
   badge.classList.toggle('hidden', list.length === 0);
+  setCount('refunds', list.length);
 
   $('refunds').innerHTML = list.length
     ? list.map((r) => `
-        <div class="card" style="background:var(--panel-2);">
+        <div class="card">
           <div class="row" style="align-items:center;">
             <div><strong>$${Number(r.amount).toFixed(2)}</strong>
               <span class="muted"> · order #${GMIds.shortId(r.order?.id)}</span></div>
@@ -325,7 +392,7 @@ async function loadRefunds() {
         </div>`).join('')
     // Careful with the wording: on day one nothing has EVER been settled, so claiming
     // everything has been is simply false.
-    : `<p class="muted">${res.settled?.length
+    : `<p class="muted card">${res.settled?.length
         ? 'Nothing outstanding — every refund has been settled.'
         : 'No refunds owed. This fills up when you fail an order that was already paid for.'}</p>`;
 
@@ -380,10 +447,11 @@ async function loadAccessRequests() {
   const fresh = list.filter((r) => r.status === 'new').length;
   badge.textContent = `${fresh} new`;
   badge.classList.toggle('hidden', fresh === 0);
+  setCount('team', fresh);
 
   $('accessRequests').innerHTML = list.length
     ? list.map((r) => `
-        <div class="card" style="background:var(--panel-2);">
+        <div class="card">
           <div class="row" style="align-items:center;">
             <div><strong>${escapeHtml(r.name)}</strong>
               <span class="muted"> wants to be a ${escapeHtml(r.role)}</span></div>
@@ -418,7 +486,7 @@ async function loadAccessRequests() {
             <button class="danger" data-req="${r.id}" data-status="declined">Decline</button>
           </div>`}
         </div>`).join('')
-    : '<p class="muted">No open requests. People who ask to drive or help run deliveries '
+    : '<p class="muted card">No open requests. People who ask to drive or help run deliveries '
       + 'appear here for you to approve.</p>';
 
   // The ID is fetched on demand, not with the list: it is the most sensitive thing here, and
@@ -499,7 +567,7 @@ async function loadDrivers() {
   // Names come from the public request form now — escape everything.
   $('drivers').innerHTML = drivers.length
     ? drivers.map((d) => `
-      <div class="card" style="background:var(--panel-2);">
+      <div class="card">
         <div class="row" style="align-items:center;">
           <div><strong>${escapeHtml(d.name)}</strong> · ${escapeHtml(d.msisdn)}</div>
           <span style="margin-left:auto;">
@@ -548,13 +616,19 @@ function driverOptions() {
 async function loadOrders() {
   const res = await api('/operator/orders');
   if (res.error) { logout(); return 0; }
+  const all = res.orders || [];
   // Customers who said "I've paid" first (oldest claim first): that's money waiting on you.
-  const orders = (res.orders || []).slice().sort((a, b) => {
+  const sorted = all.slice().sort((a, b) => {
     const ca = a.status === 'PENDING_PAYMENT' && a.payment_claimed_at;
     const cb = b.status === 'PENDING_PAYMENT' && b.payment_claimed_at;
     if (ca && cb) return new Date(a.payment_claimed_at) - new Date(b.payment_claimed_at);
     return ca ? -1 : cb ? 1 : 0;
   });
+  const orders = sorted.filter(FILTERS[orderFilter]);
+  renderKpis(all);
+  setCount('orders', all.filter((o) => o.status === 'PENDING_PAYMENT' && o.payment_claimed_at).length
+    + all.filter((o) => o.status === 'PAID_UNASSIGNED').length);
+
   // Every live event redraws the list. Carry over what the operator was in the middle of — a
   // driver picked but not yet assigned, a transaction number being typed — or another order's
   // update silently wipes it.
@@ -563,35 +637,41 @@ async function loadOrders() {
   $('orders').innerHTML = orders.length
     ? orders.map((o) => {
         const claimed = o.status === 'PENDING_PAYMENT' && o.payment_claimed_at;
+        const [chip, tone] = STATUS_CHIP[o.status] || [o.status, ''];
         return `
-      <div class="card" style="background:var(--panel-2);${claimed ? 'border-color:var(--accent);' : ''}">
-        <div class="row" style="align-items:center;">
-          <div><strong>#${GMIds.shortId(o.id)}</strong> · $${Number(o.total_amount).toFixed(2)} · ${escapeHtml(o.user_phone)}</div>
-          <span class="badge ${badgeClass(o.status)}">${o.status}</span>
+      <div class="card ocard${claimed ? ' claimed' : ''}">
+        <div class="o-head">
+          <span class="o-id mono">#${GMIds.shortId(o.id)}</span>
+          <span class="badge ${tone}">${chip}</span>
+          <span class="o-amt">$${Number(o.total_amount).toFixed(2)}</span>
         </div>
-        <div class="muted">${escapeHtml(o.landmark_text || '')} ${o.driver_name ? '· driver: ' + escapeHtml(o.driver_name) : ''}</div>
-        ${claimed ? `<div style="margin-top:6px;"><strong>💰 Customer says they paid${o.claim_wallet
+        <div class="o-meta">
+          <span>📍 ${escapeHtml(o.landmark_text || '—')}</span>
+          <span>📞 <a href="tel:${escapeHtml(o.user_phone)}" style="color:inherit;">${escapeHtml(o.user_phone)}</a>
+            · ${timeAgo(o.created_at)}</span>
+          ${o.driver_name ? `<span>🛵 ${escapeHtml(o.driver_name)}${o.status === 'IN_TRANSIT' ? ' · items photographed ✓' : ''}</span>` : ''}
+        </div>
+        ${claimed ? `<div class="callout"><strong>💰 Customer says they paid${o.claim_wallet
             ? ` with ${escapeHtml(o.claim_wallet.name)} — check ${escapeHtml(o.claim_wallet.merchant)}` : ''}</strong>
           <span class="muted">${o.payment_claim_ref ? `· ref ${escapeHtml(o.payment_claim_ref)} ` : ''}· ${timeAgo(o.payment_claimed_at)}</span></div>` : ''}
-        <div class="photos" id="opPhotos-${o.id}"></div>
+        <div class="photos" id="opPhotos-${o.id}" style="margin-top:10px;"></div>
         ${o.status === 'PAID_UNASSIGNED' ? `
-        <div class="row" style="margin-top:8px;">
+        <div class="row" style="margin-top:10px;align-items:center;">
           <select data-assign="${o.id}">${driverOptions()}</select>
-          <button data-assignbtn="${o.id}" style="max-width:110px;">Assign</button>
+          <button data-assignbtn="${o.id}" class="small" style="min-height:48px;flex:0 0 120px;">Assign</button>
         </div>` : ''}
         ${o.status === 'PENDING_PAYMENT' ? `
-        <div style="margin-top:8px;">
+        <div style="margin-top:10px;">
           <input data-payref="${o.id}" placeholder="Transaction number from the merchant phone"
                  value="${escapeHtml(o.payment_claim_ref || '')}" autocapitalize="characters" spellcheck="false" />
-          <button data-confirm="${o.id}" style="margin-top:6px;">Confirm payment — $${Number(o.total_amount).toFixed(2)} received</button>
+          <button data-confirm="${o.id}">Confirm payment — $${Number(o.total_amount).toFixed(2)} received</button>
         </div>` : ''}
-        <div class="row" style="margin-top:8px;">
-          ${o.status !== 'FAILED_REFUND' ? `<button class="danger" data-act="refund" data-id="${o.id}">Refund / fail</button>` : ''}
-        </div>
+        ${o.status !== 'FAILED_REFUND' ? `<button class="danger-ghost small" style="margin-top:10px;" data-act="refund" data-id="${o.id}">Refund / fail</button>` : ''}
       </div>`;
       }).join('')
-    : '<p class="muted">No active orders. Orders appear here the moment a customer places one — '
-      + 'you don\'t need to refresh.</p>';
+    : `<div class="card empty"><div class="big">📭</div>${all.length
+        ? 'Nothing in this filter.'
+        : 'No active orders. Orders appear here the moment a customer places one — you don\'t need to refresh.'}</div>`;
   for (const [key, value] of inProgress) {
     const [kind, id] = key.split(':');
     const el = $('orders').querySelector(kind === 'assign' ? `[data-assign="${id}"]` : `[data-payref="${id}"]`);
@@ -599,7 +679,71 @@ async function loadOrders() {
   }
   bindOrderButtons();
   orders.forEach((o) => loadCardPhotos(o.id));
-  return orders.length;
+  return all.length;
+}
+
+function renderKpis(all) {
+  const n = (f) => all.filter(f).length;
+  const tiles = [
+    ['Payment to check', n((o) => o.status === 'PENDING_PAYMENT' && o.payment_claimed_at), 'warn'],
+    ['Awaiting payment', n((o) => o.status === 'PENDING_PAYMENT'), ''],
+    ['Needs a driver', n((o) => o.status === 'PAID_UNASSIGNED'), 'gold'],
+    ['On the road', n((o) => o.status === 'DISPATCHED' || o.status === 'IN_TRANSIT'), ''],
+  ];
+  $('kpis').innerHTML = tiles.map(([k, v, tone]) =>
+    `<div class="kpi ${v ? tone : ''}"><div class="k-label">${k}</div><div class="k-value">${v}</div></div>`).join('');
+}
+
+// ── Deliveries: the proof behind each one ──
+// The customer's code is the proof. A delivery without it, without a GPS fix, or far from the
+// customer's pin is flagged; an operator looks at the photos and the reason, then marks it
+// checked — which records who vouched for it.
+const FLAG_TEXT = {
+  no_code: 'No customer code', no_gps: 'No GPS fix', far_from_pin: 'Far from the pin',
+  customer_disputed: '⚠ Customer says not received — call them',
+};
+async function loadDeliveries() {
+  const res = await api('/operator/deliveries');
+  if (res.error) return;
+  const list = res.deliveries || [];
+  const open = list.filter((d) => d.flags.length && !d.reviewed_at);
+  setCount('deliveries', open.length);
+  $('deliveries').innerHTML = list.length
+    ? list.map((d) => {
+        const needs = d.flags.length && !d.reviewed_at;
+        const how = d.method === 'code' ? '✓ Customer gave the code' : `📷 Photo, no code — “${escapeHtml(d.note || '')}”`;
+        const where = d.distance_m != null ? `${d.distance_m} m from the customer’s pin`
+          : d.flags.includes('no_gps') ? 'No GPS fix from the driver' : 'No pin to compare with';
+        return `
+        <div class="card ocard${needs ? ' claimed' : ''}">
+          <div class="o-head">
+            <span class="o-id mono">#${GMIds.shortId(d.order.id)}</span>
+            <span class="badge ${needs ? 'pending' : 'ok'}">${needs ? 'Check' : d.reviewed_at ? 'Checked' : 'Proven'}</span>
+            <span class="o-amt">$${Number(d.order.total_amount).toFixed(2)}</span>
+          </div>
+          <div class="o-meta">
+            <span>${how}</span>
+            <span>📍 ${escapeHtml(where)}</span>
+            <span>🛵 ${escapeHtml(d.order.driver_name || '—')} · ${timeAgo(d.created_at)}</span>
+            <span>🏠 ${escapeHtml(d.order.landmark_text || '')} · ${escapeHtml(d.order.user_phone || '')}</span>
+          </div>
+          ${d.flags.length ? `<div class="chips" style="margin-top:8px;">${d.flags.map((f) =>
+            `<span class="badge pending plain">${FLAG_TEXT[f] || escapeHtml(f)}</span>`).join('')}</div>` : ''}
+          <div class="photos" id="opPhotos-${d.order.id}" style="margin-top:10px;"></div>
+          ${needs ? `<button class="small" style="margin-top:10px;" data-review="${d.order.id}">Mark checked</button>`
+            : d.reviewed_at ? `<div class="muted" style="margin-top:8px;">Checked by ${escapeHtml(d.reviewed_by || '')} · ${timeAgo(d.reviewed_at)}</div>` : ''}
+        </div>`;
+      }).join('')
+    : '<div class="card empty"><div class="big">📦</div>No deliveries in the last 7 days.</div>';
+  if (panel === 'deliveries') list.forEach((d) => loadCardPhotos(d.order.id));
+  $('deliveries').querySelectorAll('[data-review]').forEach((b) => b.addEventListener('click', async () => {
+    b.disabled = true;
+    const out = await api(`/operator/orders/${b.dataset.review}/proofs/review`, { method: 'POST', body: '{}' });
+    b.disabled = false;
+    if (out.error) return toast(out.error);
+    toast('Marked checked ✓');
+    loadDeliveries();
+  }));
 }
 
 function timeAgo(when) {
@@ -621,7 +765,7 @@ async function loadCardPhotos(orderId) {
     el.innerHTML = photos.map((p) => `
       <figure class="photo">
         <img data-src="${p.url}" alt="${p.kind}" loading="lazy" />
-        <figcaption class="muted">${p.kind === 'delivery_proof' ? 'Proof' : 'Reference'}</figcaption>
+        <figcaption class="muted">${{ delivery_proof: 'At the door', pickup_proof: 'Pickup', order_ref: 'Reference' }[p.kind] || p.kind}</figcaption>
       </figure>`).join('');
     el.querySelectorAll('img[data-src]').forEach(async (img) => {
       try {

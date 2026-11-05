@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#000000" />
+  <meta name="theme-color" content="#0b0b0c" />
   <link rel="manifest" href="/manifest.json" />
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
@@ -12,247 +12,313 @@
   <title>GuriKaabe</title>
 </head>
 <body>
-  <div class="app">
+  <div class="app has-tabbar">
     <header>
-      <img src="/icon-192.png" alt="" width="30" height="30" style="border-radius:7px;flex:0 0 auto;" />
-      <h1>GuriKaabe</h1>
+      <a class="brand" href="#" id="brandHome">
+        <img src="/icon-192.png" alt="" width="32" height="32" />
+        <h1>GuriKaabe</h1>
+      </a>
       <span class="sync-state hidden" id="syncState"></span>
-      <button class="linkbtn" id="navHome" type="button" style="margin-left:auto;" data-i18n="nav.home">Home</button>
-      <button class="linkbtn" id="faqBtn" type="button" data-i18n="nav.faq">FAQ</button>
-      <button class="linkbtn" id="langToggle" type="button">SO</button>
-      <button class="linkbtn" id="themeToggle" type="button" title="Toggle theme">☀️</button>
+      <button class="iconbtn" id="langToggle" type="button">SO</button>
+      <button class="iconbtn" id="themeToggle" type="button" title="Toggle theme">☀️</button>
     </header>
     <main>
-      <!-- Home: what GuriKaabe is + role entry points ("sign up" tabs). Shown first;
-           auto-hidden when we resume an existing order. -->
-      <section id="landingView" class="card landing">
+      <!-- Home (signed out): what GuriKaabe is + role entry points. -->
+      <section id="landingView" class="landing">
         <div class="hero">
+          <div class="eyebrow" data-i18n="hero.eyebrow">Market delivery</div>
           <h2 data-i18n="hero.title">Order from the market. Pay from your phone.</h2>
-          <p class="muted" data-i18n="hero.sub">Pay the merchant from your mobile money. We never hold your money. All you need is a phone number and a nearby landmark.</p>
+          <p data-i18n="hero.sub">Pay the merchant from your mobile money. We never hold your money. All you need is a phone number and a nearby landmark.</p>
+          <button id="asCustomer" type="button" style="margin-top:18px;" data-i18n="role.customer.cta">Start an order</button>
         </div>
 
+        <div class="section-title" data-i18n="how.title">How it works</div>
+        <div class="card">
+          <ol class="steps">
+            <li><span class="num">1</span><span data-i18n="how.1">Tell us what you need and your nearest landmark.</span></li>
+            <li><span class="num">2</span><span data-i18n="how.2">Tap Pay — your phone's dialer opens with the code filled in.</span></li>
+            <li><span class="num">3</span><span data-i18n="how.3">Follow your order live until it arrives.</span></li>
+            <li><span class="num">4</span><span data-i18n="how.4">Give the driver your 4-digit code when you have your items.</span></li>
+          </ol>
+        </div>
+
+        <div class="section-title" data-i18n="role.staff">For our team</div>
         <div class="roles">
-          <button class="role" id="asCustomer" type="button">
-            <span class="role-icon">🛒</span>
-            <span class="role-title" data-i18n="role.customer">I'm a customer</span>
-            <span class="role-sub muted" data-i18n="role.customer.sub">Order and track it live</span>
+          <a class="tile" href="/driver/">
+            <span class="tile-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="17.5" r="2.5"/><circle cx="18.5" cy="17.5" r="2.5"/><path d="M8 17.5h7l2-6h-4l-2-4H7"/><path d="M15 6h3l1.5 5.5"/></svg></span>
+            <span class="tile-body"><span class="tile-title" data-i18n="role.driver">I'm a driver</span>
+              <span class="tile-sub" data-i18n="role.driver.sub">See the deliveries assigned to you</span></span>
+            <span class="chev">›</span>
+          </a>
+          <a class="tile" href="/operator/">
+            <span class="tile-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span>
+            <span class="tile-body"><span class="tile-title" data-i18n="role.operator">I'm an operator</span>
+              <span class="tile-sub" data-i18n="role.operator.sub">Coordinate orders and payments</span></span>
+            <span class="chev">›</span>
+          </a>
+          <button class="tile" id="joinBtn" type="button">
+            <span class="tile-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6s7 2 7 6"/><path d="M19 8v6M16 11h6"/></svg></span>
+            <span class="tile-body"><span class="tile-title" data-i18n="join.prompt">Want to drive or work with us?</span>
+              <span class="tile-sub" data-i18n="join.link">Ask to join →</span></span>
+            <span class="chev">›</span>
           </button>
-          <a class="role" href="/driver/">
-            <span class="role-icon">🏍️</span>
-            <span class="role-title" data-i18n="role.driver">I'm a driver</span>
-            <span class="role-sub muted" data-i18n="role.driver.sub">See the deliveries assigned to you</span>
-          </a>
-          <a class="role" href="/operator/">
-            <span class="role-icon">🛡️</span>
-            <span class="role-title" data-i18n="role.operator">I'm an operator</span>
-            <span class="role-sub muted" data-i18n="role.operator.sub">Coordinate orders and payments</span>
-          </a>
         </div>
 
-        <p class="muted" style="margin-top:14px;">
-          <span data-i18n="join.prompt">Want to drive or work with us?</span>
-          <button class="linkbtn" id="joinBtn" type="button" data-i18n="join.link">Ask to join →</button>
-        </p>
-
-        <ul class="how muted">
-          <li><strong>1.</strong> <span data-i18n="how.1">Tell us what you need and your nearest landmark.</span></li>
-          <li><strong>2.</strong> <span data-i18n="how.2">Tap Pay — your phone's dialer opens with the code filled in.</span></li>
-          <li><strong>3.</strong> <span data-i18n="how.3">Follow your order live until it arrives.</span></li>
-        </ul>
-        <p class="muted" style="font-size:13px;margin-top:14px;">
+        <p class="muted legal">
           <a href="/terms.html" data-i18n="legal.terms">Terms</a> ·
           <a href="/privacy.html" data-i18n="legal.privacy">Privacy Policy</a>
         </p>
       </section>
 
-      <!-- Ask to be given a driver or operator account.
-           This is a REQUEST, not a registration: submitting it creates no account and grants
-           nothing. An operator reads it, calls the number, and decides. Anyone who could
-           create their own operator account could read every customer's address and chat. -->
-      <section id="joinView" class="card hidden">
-        <button class="secondary" id="joinHome" type="button" style="max-width:130px;margin:0 0 12px;" data-i18n="nav.back">← Back</button>
-        <h2 style="margin:0 0 6px;" data-i18n="join.title">Join the GuriKaabe team</h2>
-        <p class="muted" style="margin:0 0 16px;" data-i18n="join.intro">Send a request and we'll call you. Accounts are only created after we talk.</p>
+      <!-- Ask to be given a driver or operator account. A REQUEST, not a registration:
+           submitting it creates no account and grants nothing. -->
+      <section id="joinView" class="hidden">
+        <button class="linkbtn" id="joinHome" type="button" style="margin-bottom:12px;" data-i18n="nav.back">← Back</button>
+        <div class="screen-head">
+          <h2 data-i18n="join.title">Join the GuriKaabe team</h2>
+          <p class="muted" data-i18n="join.intro">Send a request and we'll call you. Accounts are only created after we talk.</p>
+        </div>
+        <div class="card">
+          <label for="joinRole" data-i18n="join.role">What would you like to do?</label>
+          <select id="joinRole">
+            <option value="driver" data-i18n="join.role.driver">Deliver orders</option>
+            <option value="operator" data-i18n="join.role.operator">Coordinate orders and payments</option>
+          </select>
 
-        <label for="joinRole" data-i18n="join.role">What would you like to do?</label>
-        <select id="joinRole">
-          <option value="driver" data-i18n="join.role.driver">Deliver orders</option>
-          <option value="operator" data-i18n="join.role.operator">Coordinate orders and payments</option>
-        </select>
+          <label for="joinName" data-i18n="join.name">Your name</label>
+          <input id="joinName" type="text" autocomplete="name" placeholder="Amina Yusuf" />
 
-        <label for="joinName" data-i18n="join.name">Your name</label>
-        <input id="joinName" type="text" autocomplete="name" placeholder="Amina Yusuf" />
+          <label for="joinPhone" data-i18n="join.phone">Your phone number</label>
+          <input id="joinPhone" type="tel" inputmode="tel" autocomplete="tel" placeholder="61 234 5678" />
+          <div class="phone-hint muted" id="joinPhoneHint" data-i18n="join.phoneHint">We'll call you on this number</div>
 
-        <label for="joinPhone" data-i18n="join.phone">Your phone number</label>
-        <input id="joinPhone" type="tel" inputmode="tel" autocomplete="tel" placeholder="61 234 5678" />
-        <div class="phone-hint muted" id="joinPhoneHint" data-i18n="join.phoneHint">We'll call you on this number</div>
-
-        <label for="joinMessage" data-i18n="join.msg">Anything we should know? (optional)</label>
-        <textarea id="joinMessage" data-i18n-ph="join.msg.ph" placeholder="Your area, whether you have a motorbike, when you're free…"></textarea>
-
-        <label data-i18n="join.id">Photo of your ID — both sides</label>
-        <p class="muted" style="margin:0 0 8px;font-size:13px;" data-i18n-html="join.id.note">Any government ID. Only the reviewer sees it, and it's <strong>deleted once they decide</strong>.</p>
-        <label for="joinIdFront" class="muted" style="font-size:13px;" data-i18n="join.front">Front</label>
-        <input id="joinIdFront" type="file" accept="image/*" capture="environment" />
-        <label for="joinIdBack" class="muted" style="font-size:13px;margin-top:8px;" data-i18n="join.back">Back</label>
-        <input id="joinIdBack" type="file" accept="image/*" capture="environment" />
-        <div class="muted" id="joinIdHint" style="font-size:13px;margin-top:6px;"></div>
-
+          <label for="joinMessage" data-i18n="join.msg">Anything we should know? (optional)</label>
+          <textarea id="joinMessage" data-i18n-ph="join.msg.ph" placeholder="Your area, whether you have a motorbike, when you're free…"></textarea>
+        </div>
+        <div class="card">
+          <label style="margin-top:0;" data-i18n="join.id">Photo of your ID — both sides</label>
+          <p class="muted" style="margin:0 0 10px;" data-i18n-html="join.id.note">Any government ID. Only the reviewer sees it, and it's <strong>deleted once they decide</strong>.</p>
+          <label for="joinIdFront" data-i18n="join.front">Front</label>
+          <input id="joinIdFront" type="file" accept="image/*" capture="environment" />
+          <label for="joinIdBack" data-i18n="join.back">Back</label>
+          <input id="joinIdBack" type="file" accept="image/*" capture="environment" />
+          <div class="muted" id="joinIdHint" style="margin-top:6px;"></div>
+        </div>
         <button id="joinSubmit" type="button" data-i18n="join.submit">Send request</button>
         <div class="muted" id="joinStatus" style="margin-top:10px;"></div>
 
-        <hr style="margin:20px 0;border:none;border-top:1px solid var(--border,#333);" />
-        <h3 style="margin:0 0 6px;" data-i18n="join.direct">Or contact us directly</h3>
-        <p class="muted" style="margin:0 0 10px;" data-i18n="join.direct.sub">Contact the owner:</p>
-        <div id="ownerContact" class="muted"></div>
+        <div class="section-title" data-i18n="join.direct">Or contact us directly</div>
+        <div class="card">
+          <p class="muted" style="margin:0 0 8px;" data-i18n="join.direct.sub">Contact the owner:</p>
+          <div id="ownerContact" class="muted"></div>
+        </div>
       </section>
 
-      <!-- Step 1: prove you hold the phone number. It is the identity every order,
-           chat thread and photo is authorized against, so it has to be verified once. -->
-      <section id="authView" class="card hidden">
-        <button class="secondary" id="authHome" type="button" style="max-width:130px;margin:0 0 12px;" data-i18n="nav.back">← Back</button>
-        <!-- Phone or email: the switch swaps which box you fill in. Either one alone signs you in,
-             or up the first time — email is for when a text can't reach you. Shown when the
-             server offers email at all (GET /api/auth/channels). -->
-        <div id="channelPick" class="cc-switch channel-pick hidden" role="group" aria-label="Sign in with">
-          <button type="button" data-channel="sms" aria-pressed="true" data-i18n="auth.viaSms">Phone</button>
-          <button type="button" data-channel="email" aria-pressed="false" data-i18n="auth.viaEmail">Email</button>
+      <!-- Sign in (or up) with a phone or an email code. -->
+      <section id="authView" class="hidden">
+        <button class="linkbtn" id="authHome" type="button" style="margin-bottom:12px;" data-i18n="nav.back">← Back</button>
+        <div class="screen-head">
+          <h2 data-i18n="auth.title">Sign in</h2>
+          <p class="muted" data-i18n="auth.intro">New here? The same code creates your account.</p>
         </div>
-        <div id="phoneSignin">
-          <label for="phone" data-i18n="auth.phone">Your phone number</label>
-          <input id="phone" type="tel" inputmode="tel" placeholder="61 234 5678" autocomplete="tel" />
-          <div class="phone-hint muted" id="phoneHint">Enter your mobile number</div>
-        </div>
-        <div id="emailSignin" class="hidden">
-          <label for="signinEmail" data-i18n="auth.email">Your email</label>
-          <input id="signinEmail" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" />
-          <div class="phone-hint muted" data-i18n="auth.emailNote">We email you a code. New here? This works too.</div>
-        </div>
-        <button id="sendCodeBtn" type="button" data-i18n="auth.send">Text me a code</button>
-        <!-- Consent shown where the number is collected: US carriers (10DLC) check for exactly
-             this — what we text, rates, STOP/HELP, and links to the terms and privacy policy. -->
-        <p class="muted" id="consentNote" style="font-size:13px;" data-i18n-html="auth.consent">We text you a one-time code each time you sign in. Message and data rates may apply. Reply STOP to opt out, HELP for help. By continuing you agree to our <a href="/terms.html">Terms</a> and <a href="/privacy.html">Privacy Policy</a>.</p>
-
-        <div id="codeStep" class="hidden">
-          <label for="codeInput" data-i18n="auth.code">Enter the 6-digit code</label>
-          <input id="codeInput" type="text" inputmode="numeric" autocomplete="one-time-code"
-                 maxlength="6" placeholder="123456" />
-          <button id="verifyBtn" type="button" data-i18n="auth.verify">Verify</button>
-          <button class="secondary" id="resendBtn" type="button" data-i18n="auth.resend">Send a new code</button>
-        </div>
-        <div id="otpStatus" class="muted"></div>
-      </section>
-
-      <!-- Step 2: describe the need (chat-first coordination) -->
-      <section id="startView" class="card hidden">
-        <button class="secondary" id="homeBtn" type="button" style="max-width:130px;margin:0 0 12px;" data-i18n="nav.back">← Back</button>
-        <div class="row" style="align-items:center;">
-          <div class="muted"><span data-i18n="start.as">Signed in as</span> <strong id="signedInAs"></strong></div>
-          <button class="linkbtn" id="signOutBtn" type="button" style="margin-left:auto;" data-i18n="start.signout">Sign out</button>
-        </div>
-        <button class="secondary" id="resumeBtn" type="button" data-i18n="start.resume">My orders</button>
-
-        <!-- Phone accounts only: an email that can also sign in to this account. Confirmed with a
-             code while signed in — the session proves the account, the code proves the email. -->
-        <details id="emailBox" class="hidden" style="margin-top:12px;">
-          <summary data-i18n="email.title">Get sign-in codes by email</summary>
-          <p class="muted" id="emailCurrent" style="margin:8px 0;"></p>
-          <div id="emailAdd">
-            <input id="emailInput" type="email" autocomplete="email" placeholder="you@example.com" />
-            <button class="secondary" id="emailSend" type="button" data-i18n="email.send">Send me a code</button>
-            <div id="emailCodeStep" class="hidden">
-              <input id="emailCode" type="text" inputmode="numeric" autocomplete="one-time-code"
-                     maxlength="6" placeholder="123456" style="margin-top:10px;" />
-              <button id="emailVerify" type="button" data-i18n="email.verify">Confirm email</button>
-            </div>
+        <div class="card">
+          <div id="channelPick" class="cc-switch channel-pick hidden" role="group" aria-label="Sign in with">
+            <button type="button" data-channel="sms" aria-pressed="true" data-i18n="auth.viaSms">Phone</button>
+            <button type="button" data-channel="email" aria-pressed="false" data-i18n="auth.viaEmail">Email</button>
           </div>
-          <button class="secondary hidden" id="emailRemove" type="button" data-i18n="email.remove">Stop using this email</button>
-          <div class="muted" id="emailStatus" style="margin-top:8px;"></div>
-        </details>
+          <div id="phoneSignin">
+            <label for="phone" data-i18n="auth.phone">Your phone number</label>
+            <input id="phone" type="tel" inputmode="tel" placeholder="61 234 5678" autocomplete="tel" />
+            <div class="phone-hint muted" id="phoneHint">Enter your mobile number</div>
+          </div>
+          <div id="emailSignin" class="hidden">
+            <label for="signinEmail" data-i18n="auth.email">Your email</label>
+            <input id="signinEmail" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" />
+            <div class="phone-hint muted" data-i18n="auth.emailNote">We email you a code. New here? This works too.</div>
+          </div>
+          <button id="sendCodeBtn" type="button" data-i18n="auth.send">Text me a code</button>
 
-        <label for="request" data-i18n="start.request">What do you need?</label>
-        <textarea id="request" data-i18n-ph="start.request.ph" placeholder="e.g. 2kg rice, cooking oil, 6 eggs"></textarea>
-
-        <label for="amount" data-i18n="start.amount">Agreed total (USD)</label>
-        <input id="amount" type="number" step="0.01" min="0" placeholder="5.50" />
-
-        <div id="locStatus" class="muted" data-i18n="loc.none">Location not set.</div>
-        <button class="secondary" id="locBtn" type="button" data-i18n="loc.btn">Use my location</button>
-
-        <!-- Not who you are (that's the account): the number the driver calls for this order. -->
-        <label for="orderPhone" data-i18n="start.phone">Phone for the driver</label>
-        <input id="orderPhone" type="tel" inputmode="tel" placeholder="61 234 5678" autocomplete="tel" />
-        <div class="phone-hint muted" id="orderPhoneHint"></div>
-
-        <label for="landmark" data-i18n="start.landmark">Nearest landmark (required)</label>
-        <input id="landmark" type="text" data-i18n-ph="start.landmark.ph" placeholder="Green house next to the yellow pharmacy" />
-
-        <label for="refPhoto" data-i18n="start.photo">Photo of the item (optional)</label>
-        <input id="refPhoto" type="file" accept="image/*" capture="environment" />
-
-        <button id="submitBtn" type="button" data-i18n="start.submit">Place order</button>
+          <div id="codeStep" class="hidden">
+            <hr class="sep" />
+            <label for="codeInput" data-i18n="auth.code">Enter the 6-digit code</label>
+            <input id="codeInput" class="code-input" type="text" inputmode="numeric" autocomplete="one-time-code"
+                   maxlength="6" placeholder="••••••" />
+            <button id="verifyBtn" type="button" data-i18n="auth.verify">Verify</button>
+            <button class="ghost" id="resendBtn" type="button" data-i18n="auth.resend">Send a new code</button>
+          </div>
+          <div id="otpStatus" class="muted" style="margin-top:10px;"></div>
+        </div>
+        <!-- Consent shown where the number is collected (10DLC). -->
+        <p class="muted" id="consentNote" style="font-size:12px;padding:0 4px;" data-i18n-html="auth.consent">We text you a one-time code each time you sign in. Message and data rates may apply. Reply STOP to opt out, HELP for help. By continuing you agree to our <a href="/terms.html">Terms</a> and <a href="/privacy.html">Privacy Policy</a>.</p>
       </section>
 
-      <!-- Step 2: pay + track -->
-      <section id="orderView" class="card hidden">
-        <div class="row" style="align-items:center;">
-          <div>
-            <div class="muted"><span data-i18n="order.num">Order #</span><span id="orderId"></span></div>
-            <div><span data-i18n="order.total">Total: $</span><span id="orderTotal"></span></div>
-          </div>
-          <div style="text-align:right;">
+      <!-- New order (checkout). -->
+      <section id="startView" class="hidden">
+        <div class="screen-head">
+          <h2 data-i18n="start.title">New order</h2>
+          <p class="muted"><span data-i18n="start.as">Signed in as</span> <strong id="signedInAs"></strong></p>
+        </div>
+
+        <div class="section-title" data-i18n="start.what">What do you need?</div>
+        <div class="card">
+          <label for="request" style="margin-top:0;" data-i18n="start.request">Your list</label>
+          <textarea id="request" data-i18n-ph="start.request.ph" placeholder="e.g. 2kg rice, cooking oil, 6 eggs"></textarea>
+          <label for="amount" data-i18n="start.amount">Agreed total (USD)</label>
+          <input id="amount" type="number" inputmode="decimal" step="0.01" min="0" placeholder="5.50" />
+          <label for="refPhoto" data-i18n="start.photo">Photo of the item (optional)</label>
+          <label class="capture" id="refCapture" style="margin-top:0;">
+            <input id="refPhoto" type="file" accept="image/*" capture="environment" />
+            <span class="thumb" id="refThumb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span>
+            <span><span data-i18n="start.photo.add">Add a photo</span><span class="cap-sub" data-i18n="start.photo.sub">Helps the driver buy the right thing</span></span>
+          </label>
+        </div>
+
+        <div class="section-title" data-i18n="start.where">Where to?</div>
+        <div class="card">
+          <button class="secondary" id="locBtn" type="button" style="margin-top:0;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/></svg>
+            <span data-i18n="loc.btn">Use my location</span>
+          </button>
+          <div id="locStatus" class="muted" style="margin-top:8px;" data-i18n="loc.none">Location not set.</div>
+          <label for="landmark" data-i18n="start.landmark">Nearest landmark (required)</label>
+          <input id="landmark" type="text" data-i18n-ph="start.landmark.ph" placeholder="Green house next to the yellow pharmacy" />
+          <!-- Not who you are (that's the account): the number the driver calls for this order. -->
+          <label for="orderPhone" data-i18n="start.phone">Phone for the driver</label>
+          <input id="orderPhone" type="tel" inputmode="tel" placeholder="61 234 5678" autocomplete="tel" />
+          <div class="phone-hint muted" id="orderPhoneHint"></div>
+        </div>
+
+        <div class="action-bar">
+          <button id="submitBtn" type="button" data-i18n="start.submit">Place order</button>
+        </div>
+      </section>
+
+      <!-- Track one order: status, code, pay, proof, chat. -->
+      <section id="orderView" class="hidden">
+        <button class="linkbtn" id="orderBack" type="button" style="margin-bottom:12px;" data-i18n="nav.orders">← My orders</button>
+
+        <div class="card status-hero raised">
+          <div class="between">
             <span class="badge pending" id="statusBadge"></span>
+            <span class="muted mono"><span data-i18n="order.num">Order #</span><span id="orderId"></span></span>
+          </div>
+          <div class="status-title" id="statusTitle"></div>
+          <p class="status-sub" id="statusSub"></p>
+          <div class="track" id="track"></div>
+        </div>
+
+        <!-- The delivery code: the customer gives it to the driver at the door, and only then. -->
+        <div class="card accent code-card hidden" id="handoffCard">
+          <div class="section-title" style="text-align:center;" data-i18n="code.title">Your delivery code</div>
+          <div class="code-digits" id="handoffCode"></div>
+          <p class="muted" style="margin:0;" data-i18n="code.help">Give this code to the driver only when you have your items.</p>
+        </div>
+
+        <!-- Pay: one button per configured wallet; then "I've paid". -->
+        <div class="card" id="payCard">
+          <div class="section-title" data-i18n="pay.title">Payment</div>
+          <div class="between" style="margin-bottom:4px;">
+            <span class="muted" data-i18n="pay.amount">Amount</span>
+            <strong class="mono" style="font-size:20px;">$<span id="orderTotal"></span></strong>
+          </div>
+          <div id="payWallets" class="hidden"></div>
+          <p class="muted" id="payNote" style="margin:10px 0 0;"></p>
+          <div id="paidBox" class="hidden">
+            <hr class="sep" />
+            <label for="payRef" style="margin-top:0;" data-i18n="paid.refLabel">Transaction number (optional)</label>
+            <input id="payRef" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false"
+                   data-i18n-ph="paid.refPh" placeholder="From your payment text message" />
+            <button class="secondary" id="paidBtn" type="button" data-i18n="paid.btn">I've paid</button>
+          </div>
+          <p class="callout hidden" id="paidNote"></p>
+        </div>
+
+        <!-- How the delivery was proven: shown once the driver has picked up. -->
+        <div class="card hidden" id="proofCard">
+          <div class="section-title" data-i18n="proof.title">Delivery proof</div>
+          <ul class="proof-list" id="proofList"></ul>
+          <!-- After delivery: the customer's own check on it. -->
+          <div id="disputeBox" class="hidden">
+            <hr class="sep" />
+            <button class="danger-ghost" id="disputeBtn" type="button" data-i18n="dispute.btn">I didn't get my order</button>
+          </div>
+          <p class="callout warn hidden" id="disputeNote" data-i18n="dispute.sent">Thanks — we are checking this and will call you.</p>
+        </div>
+
+        <div class="card">
+          <div class="section-title" data-i18n="order.details">Order details</div>
+          <dl class="kv">
+            <dt data-i18n="order.items">Items</dt><dd id="orderItems"></dd>
+            <dt data-i18n="order.landmark">Landmark</dt><dd id="orderLandmark"></dd>
+          </dl>
+          <div class="photos" id="photos" style="margin-top:12px;"></div>
+        </div>
+
+        <div class="card">
+          <div class="section-title" data-i18n="order.progress">Progress</div>
+          <ul class="timeline" id="timeline"></ul>
+        </div>
+
+        <div class="card">
+          <div class="section-title" data-i18n="order.chat">Chat</div>
+          <div class="thread" id="thread"></div>
+          <div class="composer">
+            <input id="chatInput" type="text" data-i18n-ph="chat.ph" placeholder="Message the driver or operator…" />
+            <button id="chatSend" type="button" aria-label="Send">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </button>
           </div>
         </div>
-
-        <!-- One button per wallet the owner configured (EVC Plus / eDahab / Zaad / Sahal). Each
-             opens the dialer with that network's code and merchant number filled in. -->
-        <div id="payWallets" class="hidden"></div>
-        <p class="muted" id="payNote"></p>
-
-        <!-- No device reads the merchant's receipts: the customer says "I've paid" and an
-             operator checks the merchant phone. This only tells them which order to check —
-             the order becomes paid when THEY confirm it. -->
-        <div id="paidBox" class="hidden">
-          <label for="payRef" data-i18n="paid.refLabel">Transaction number (optional)</label>
-          <input id="payRef" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false"
-                 data-i18n-ph="paid.refPh" placeholder="From your payment text message" />
-          <button id="paidBtn" type="button" data-i18n="paid.btn">I've paid</button>
-        </div>
-        <p class="muted hidden" id="paidNote"></p>
-
-        <h3 style="margin:18px 0 8px;" data-i18n="order.progress">Progress</h3>
-        <ul class="timeline" id="timeline"></ul>
-
-        <h3 style="margin:18px 0 8px;" data-i18n="order.photos">Photos</h3>
-        <div class="photos" id="photos"></div>
-
-        <h3 style="margin:18px 0 8px;" data-i18n="order.chat">Chat</h3>
-        <div class="thread" id="thread"></div>
-        <div class="row" style="margin-top:10px;">
-          <input id="chatInput" type="text" data-i18n-ph="chat.ph" placeholder="Message the driver or operator…" />
-          <button id="chatSend" type="button" style="max-width:96px;margin-top:0;" data-i18n="chat.send">Send</button>
-        </div>
-      </section>
-      <!-- Resume: list of the customer's orders looked up by phone -->
-      <section id="resumeView" class="card hidden">
-        <div class="row" style="align-items:center;">
-          <h3 style="margin:0;" data-i18n="resume.title">Your orders</h3>
-          <button class="secondary" id="resumeBack" type="button" style="max-width:110px;margin:0;" data-i18n="nav.back">← Back</button>
-        </div>
-        <div id="resumeList" class="scroll-list"></div>
       </section>
 
-      <!-- FAQ: how the service works, in plain language. -->
-      <section id="faqView" class="card hidden">
-        <div class="row" style="align-items:center;">
-          <h3 style="margin:0;" data-i18n="faq.title">FAQ</h3>
-          <button class="secondary" id="faqBack" type="button" style="max-width:110px;margin:0;" data-i18n="nav.back">← Back</button>
+      <!-- My orders -->
+      <section id="resumeView" class="hidden">
+        <div class="screen-head"><h2 data-i18n="resume.title">Your orders</h2></div>
+        <div id="resumeList"></div>
+      </section>
+
+      <!-- Account -->
+      <section id="accountView" class="hidden">
+        <div class="screen-head"><h2 data-i18n="acct.title">Account</h2></div>
+        <div class="card">
+          <div class="muted" data-i18n="start.as">Signed in as</div>
+          <div style="font-weight:700;font-size:17px;" id="acctLogin"></div>
+          <!-- Phone accounts only: an email that can also sign in to this account. -->
+          <details id="emailBox" class="hidden bare" style="margin-top:12px;">
+            <summary data-i18n="email.title">Get sign-in codes by email</summary>
+            <p class="muted" id="emailCurrent" style="margin:8px 0;"></p>
+            <div id="emailAdd">
+              <input id="emailInput" type="email" autocomplete="email" placeholder="you@example.com" />
+              <button class="secondary" id="emailSend" type="button" data-i18n="email.send">Send me a code</button>
+              <div id="emailCodeStep" class="hidden">
+                <input id="emailCode" type="text" inputmode="numeric" autocomplete="one-time-code"
+                       maxlength="6" placeholder="123456" style="margin-top:10px;" />
+                <button id="emailVerify" type="button" data-i18n="email.verify">Confirm email</button>
+              </div>
+            </div>
+            <button class="secondary hidden" id="emailRemove" type="button" data-i18n="email.remove">Stop using this email</button>
+            <div class="muted" id="emailStatus" style="margin-top:8px;"></div>
+          </details>
+          <button class="danger-ghost" id="signOutBtn" type="button" data-i18n="start.signout">Sign out</button>
         </div>
+        <div class="section-title" data-i18n="role.staff">For our team</div>
+        <a class="tile" href="/driver/"><span class="tile-body"><span class="tile-title" data-i18n="role.driver">I'm a driver</span></span><span class="chev">›</span></a>
+        <a class="tile" href="/operator/"><span class="tile-body"><span class="tile-title" data-i18n="role.operator">I'm an operator</span></span><span class="chev">›</span></a>
+        <p class="muted legal">
+          <a href="/terms.html" data-i18n="legal.terms">Terms</a> ·
+          <a href="/privacy.html" data-i18n="legal.privacy">Privacy Policy</a>
+        </p>
+      </section>
+
+      <!-- Help -->
+      <section id="faqView" class="hidden">
+        <div class="screen-head"><h2 data-i18n="faq.title">FAQ</h2></div>
         <details open><summary data-i18n="faq.what.q"></summary>
           <p class="muted" data-i18n-html="faq.what.a"></p></details>
         <details><summary data-i18n="faq.pay.q"></summary>
           <p class="muted" data-i18n-html="faq.pay.a"></p></details>
+        <details><summary data-i18n="faq.code.q"></summary>
+          <p class="muted" data-i18n-html="faq.code.a"></p></details>
         <details><summary data-i18n="faq.privacy.q"></summary>
           <p class="muted" data-i18n-html="faq.privacy.a"></p></details>
         <details><summary data-i18n="faq.landmark.q"></summary>
@@ -261,6 +327,27 @@
           <p class="muted" data-i18n-html="faq.track.a"></p></details>
       </section>
     </main>
+
+    <nav class="tabbar" aria-label="Main">
+      <div class="tabbar-inner">
+        <button class="tab" type="button" data-tab="home" aria-current="page">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+          <span data-i18n="nav.home">Home</span>
+        </button>
+        <button class="tab" type="button" data-tab="orders">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg>
+          <span data-i18n="nav.orders.tab">Orders</span>
+        </button>
+        <button class="tab" type="button" data-tab="help">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14"/><path d="M12 17.5h.01"/></svg>
+          <span data-i18n="nav.faq">Help</span>
+        </button>
+        <button class="tab" type="button" data-tab="account">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></svg>
+          <span data-i18n="nav.account">Account</span>
+        </button>
+      </div>
+    </nav>
   </div>
 
   <script src="/shared/config.js"></script>

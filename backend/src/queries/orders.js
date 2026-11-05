@@ -23,6 +23,51 @@ export async function getMessages(orderId) {
   });
 }
 
+// The customer's delivery code. Only ever called for the order's own customer (the route is
+// customerOnly + requireOrderAccess): the driver must hear it from them, not read it.
+export async function getHandoff(orderId) {
+  return prisma.deliveryHandoff.findUnique({
+    where: { order_id: orderId },
+    select: { code: true, verified_at: true },
+  });
+}
+
+// The evidence behind an order's driver steps. No handoff code in here — only how the step
+// was proven — so it is safe for everyone who may see the order.
+export async function getProofs(orderId) {
+  return prisma.orderProof.findMany({
+    where: { order_id: orderId },
+    select: {
+      step: true, method: true, note: true, distance_m: true, accuracy_m: true, flags: true,
+      created_at: true, reviewed_by: true, reviewed_at: true,
+    },
+    orderBy: { created_at: 'asc' },
+  });
+}
+
+// Recent deliveries for the operator's review screen, flagged and unchecked ones first.
+// Seven days is the window a customer realistically disputes in.
+export async function getRecentDeliveries({ days = 7, limit = 100 } = {}) {
+  const since = new Date(Date.now() - days * 24 * 3600 * 1000);
+  const proofs = await prisma.orderProof.findMany({
+    where: { step: 'delivery', created_at: { gte: since } },
+    orderBy: { created_at: 'desc' },
+    take: limit,
+    include: {
+      order: {
+        select: {
+          id: true, total_amount: true, landmark_text: true, user_phone: true, lat: true, lng: true,
+          driver: { select: { name: true } },
+        },
+      },
+    },
+  });
+  const needsLook = (p) => p.flags.length > 0 && !p.reviewed_at;
+  return proofs
+    .map(({ order: { driver, ...order }, ...p }) => ({ ...p, order: { ...order, driver_name: driver?.name ?? null } }))
+    .sort((a, b) => needsLook(b) - needsLook(a));
+}
+
 // Driver's shopping list view for an order.
 export async function getShoppingList(orderId) {
   return prisma.order.findUnique({

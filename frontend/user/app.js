@@ -103,11 +103,7 @@ function prefillOrderPhone(phone) {
 // ── Home / role selection ──
 // The landing is the default first screen; "I'm a customer" reveals sign-in, or jumps
 // straight to the order form if this handset is already verified.
-$('asCustomer').addEventListener('click', () => {
-  showView(token ? 'startView' : 'authView');
-  if (token) { $('signedInAs').textContent = myPhone || ''; loadEmailBox(); }
-});
-$('homeBtn').addEventListener('click', () => showView('landingView'));
+$('asCustomer').addEventListener('click', () => goTab('home', { start: true }));
 $('authHome').addEventListener('click', () => showView('landingView'));
 
 // ── Sign-in: request a code, then verify it ──
@@ -143,8 +139,10 @@ $('channelPick').querySelectorAll('[data-channel]').forEach((b) =>
 (async function loadChannels() {
   const res = await api('/auth/channels');
   emailOffered = Boolean(res.email);
-  $('channelPick').classList.toggle('hidden', !emailOffered);
-  if (!emailOffered) otpChannel = 'sms';
+  // A server without texting (no Twilio) signs everyone in by email: no switch, no phone box.
+  const smsOffered = res.sms !== false;
+  $('channelPick').classList.toggle('hidden', !(emailOffered && smsOffered));
+  otpChannel = emailOffered && !smsOffered ? 'email' : emailOffered ? otpChannel : 'sms';
   renderChannel();
 })();
 
@@ -223,9 +221,10 @@ async function verifyCode() {
   $('otpStatus').textContent = '';
   $('codeStep').classList.add('hidden');
   codeFor = null;
-  $('signedInAs').textContent = res.phone || res.email;
-  showView('startView');
-  loadEmailBox();
+  showSignedIn();
+  // Where they were headed before sign-in (My orders, Account) — otherwise a new order.
+  goTab(afterSignIn || 'home');
+  afterSignIn = null;
   toast(t('auth.ok'));
 }
 
@@ -296,26 +295,13 @@ $('signOutBtn').addEventListener('click', () => {
   if (ws) { try { ws.close(); } catch { /* already closed */ } ws = null; }
   order = null;
   clearSession();
-  showView('landingView');
+  goTab('home');
   toast(t('signedOut'));
 });
 
-// Status bar was removed from the customer PWA (kept only for signed-in operator/driver).
-// Left as a guarded no-op so existing call sites stay harmless.
-function setStatus(text, kind) {
-  const sb = $('statusbar');
-  if (!sb) return;
-  $('sbText').textContent = text;
-  $('sbTime').textContent = new Date().toLocaleTimeString();
-  sb.className = 'statusbar ' + (kind || '');
-}
 function badgeClass(s) {
   return s === 'FAILED_REFUND' ? 'fail' : s === 'PENDING_PAYMENT' ? 'pending' : 'paid';
 }
-const STATUS_KIND = {
-  PENDING_PAYMENT: 'warn', PAID_UNASSIGNED: 'ok', DISPATCHED: 'info',
-  IN_TRANSIT: 'info', DELIVERED: 'ok', FAILED_REFUND: 'down',
-};
 
 // ── Geolocation (silent capture + landmark mask, per SRS 3.5) ──
 $('locBtn').addEventListener('click', () => {
@@ -370,6 +356,11 @@ $('submitBtn').addEventListener('click', async () => {
     localStorage.setItem(CONTACT_KEY, orderPhoneE164);
     localStorage.setItem('gm_last', JSON.stringify({ orderId: order.id }));
     enterOrderView(res);
+    const file = $('refPhoto').files[0];
+    // The form is done with: the next order starts clean.
+    $('request').value = '';
+    $('amount').value = '';
+    $('landmark').value = '';
     // Seed the thread with the user's request.
     await api(`/orders/${order.id}/messages`, {
       method: 'POST',
@@ -377,7 +368,8 @@ $('submitBtn').addEventListener('click', async () => {
       body: JSON.stringify({ body: request }),
     });
     // Optional reference photo → MinIO.
-    const file = $('refPhoto').files[0];
+    $('refPhoto').value = '';
+    $('refCapture').classList.remove('done');
     if (file) { try { await uploadPhoto(order.id, file); await loadPhotos(order.id); } catch { /* non-fatal */ } }
   } catch (e) {
     toast(GMI18n.err(e.message));
@@ -390,16 +382,105 @@ $('submitBtn').addEventListener('click', async () => {
 // has no mobile-money rail, so there may be no wallet at all — render what we're given rather than
 // assuming a pay link exists.
 function enterOrderView(payment) {
-  showView('orderView');
+  showView('orderView', 'orders');
   $('orderId').textContent = GMIds.shortId(order.id);
   $('orderTotal').textContent = Number(order.total_amount).toFixed(2);
+  $('orderItems').textContent = (order.items || []).map((it) => it.text || '').filter(Boolean).join(', ') || '—';
+  $('orderLandmark').textContent = order.landmark_text || '—';
   renderPayment(payment || {});
   renderTimeline(order.status);
   updateBadge(order.status);
-  setStatus(`#${GMIds.shortId(order.id)}: ${label(order.status)}`, STATUS_KIND[order.status]);
   loadThread();
   loadPhotos(order.id);
-  connectSocket();
+  refreshEvidence();
+  if (!ws) connectSocket();
+  else if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'subscribe', orderId: order.id }));
+}
+
+// ── Delivery code + proof ──
+// The code is the customer's half of the handoff: the driver can't finish the delivery
+// without hearing it, so it only ever shows here, on the customer's own screen.
+async function loadHandoff() {
+  const card = $('handoffCard');
+  if (!order || !['PAID_UNASSIGNED', 'DISPATCHED', 'IN_TRANSIT'].includes(order.status)) {
+    card.classList.add('hidden');
+    return;
+  }
+  const res = await api(`/orders/${order.id}/handoff`);
+  if (!res.code) { card.classList.add('hidden'); return; }
+  $('handoffCode').replaceChildren(...res.code.split('').map((d) => {
+    const span = document.createElement('span');
+    span.textContent = d;
+    return span;
+  }));
+  card.classList.remove('hidden');
+}
+
+const PROOF_TEXT = {
+  'pickup:photo': 'proof.pickup',
+  'delivery:code': 'proof.code',
+  'delivery:photo_no_code': 'proof.noCode',
+};
+async function loadProofs() {
+  if (!order) return;
+  const res = await api(`/orders/${order.id}/proofs`);
+  const proofs = res.proofs || [];
+  $('proofCard').classList.toggle('hidden', proofs.length === 0);
+  $('proofList').replaceChildren(...proofs.map((p) => {
+    const li = document.createElement('li');
+    const ic = document.createElement('span');
+    ic.className = 'ic' + (p.method === 'photo_no_code' ? ' warn' : '');
+    ic.textContent = p.method === 'photo_no_code' ? '!' : '✓';
+    const body = document.createElement('span');
+    const when = new Date(p.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    body.textContent = `${t(PROOF_TEXT[`${p.step}:${p.method}`] || 'proof.pickup')} · ${when}`;
+    li.append(ic, body);
+    return li;
+  }));
+  // "I didn't get my order": open for 3 days after delivery, once.
+  const delivery = proofs.find((p) => p.step === 'delivery');
+  const disputed = Boolean(delivery?.flags?.includes('customer_disputed'));
+  const recent = delivery && Date.now() - new Date(delivery.created_at).getTime() < 72 * 3600 * 1000;
+  $('disputeBox').classList.toggle('hidden', !delivery || disputed || !recent);
+  $('disputeNote').classList.toggle('hidden', !disputed);
+}
+
+// Two taps: it puts the delivery in front of an operator, so it shouldn't happen by accident.
+$('disputeBtn').addEventListener('click', async () => {
+  const b = $('disputeBtn');
+  if (b.dataset.armed !== '1') {
+    b.dataset.armed = '1';
+    b.textContent = t('dispute.confirm');
+    setTimeout(() => { b.dataset.armed = ''; b.textContent = t('dispute.btn'); }, 5000);
+    return;
+  }
+  b.dataset.armed = '';
+  b.disabled = true;
+  const res = await api(`/orders/${order.id}/dispute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  b.disabled = false;
+  b.textContent = t('dispute.btn');
+  if (res.error) return toast(GMI18n.err(res.error));
+  loadProofs();
+});
+
+// Timestamps for the progress list come from the audit log, so "Paid 14:02" is the moment it
+// really happened, not when this page happened to load.
+let lastTimeline = [];
+async function loadTimeline() {
+  if (!order) return;
+  const res = await api(`/orders/${order.id}/timeline`);
+  lastTimeline = res.timeline || [];
+  renderTimeline(order.status);
+}
+
+function refreshEvidence() {
+  loadHandoff();
+  loadProofs();
+  loadTimeline();
 }
 
 // One pay button per wallet the server offers. Show none when this order can't be paid that
@@ -537,15 +618,17 @@ function connectSocket() {
       clearSession();
       showView('authView');
     } else if (m.type === 'order_state') {
+      if (!order || String(m.orderId) !== String(order.id)) return;
       order.status = m.to;
       renderTimeline(m.to);
       updateBadge(m.to);
-      setStatus(`#${GMIds.shortId(order.id)}: ${label(m.to)}`, STATUS_KIND[m.to]);
+      refreshEvidence();
+      if (m.to === 'DELIVERED') loadPhotos(order.id);
     } else if (m.type === 'payment_confirmed') {
-      updateBadge('PAID_UNASSIGNED');
-      setStatus(`#${GMIds.shortId(order.id)}: ${t('pay.confirmed')}`, 'ok');
+      if (!order || String(m.orderId) !== String(order.id)) return;
       toast(t('pay.confirmed'));
     } else if (m.type === 'message') {
+      if (!order || String(m.orderId) !== String(order.id)) return;
       appendMessage(m.message);
       // A system line accompanies every photo upload → refresh the gallery live.
       if (m.message && m.message.sender === 'system') loadPhotos(order.id);
@@ -557,18 +640,41 @@ function connectSocket() {
 function renderTimeline(status) {
   const isFail = status === 'FAILED_REFUND';
   const idx = STATES.indexOf(status);
-  $('timeline').innerHTML = STATES.map((s, i) => {
+  const at = {};
+  lastTimeline.forEach((e) => { at[e.to_status] = e.created_at; });
+  const when = (s) => (at[s]
+    ? `<div class="when">${new Date(at[s]).toLocaleString([], { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}</div>`
+    : '');
+  const reached = isFail ? STATES.filter((s) => at[s]) : STATES;
+  $('timeline').innerHTML = reached.map((s, i) => {
     let cls = '';
-    if (!isFail && i < idx) cls = 'done';
-    else if (!isFail && i === idx) cls = 'active';
-    return `<li class="${cls}"><div class="label">${label(s)}</div></li>`;
-  }).join('') + (isFail ? `<li class="active"><div class="label">${label('FAILED_REFUND')}</div></li>` : '');
+    if (isFail || i < idx) cls = 'done';
+    else if (i === idx) cls = status === 'DELIVERED' ? 'done' : 'active';
+    return `<li class="${cls}"><div class="label">${label(s)}</div>${when(s)}</li>`;
+  }).join('') + (isFail ? `<li class="failed"><div class="label">${label('FAILED_REFUND')}</div>${when('FAILED_REFUND')}</li>` : '');
+}
+
+// The big status at the top of the tracking screen, and the five-segment progress track.
+function renderHero(status) {
+  const isFail = status === 'FAILED_REFUND';
+  const idx = STATES.indexOf(status);
+  $('statusTitle').textContent = label(status);
+  $('statusSub').textContent = t(`st.sub.${status}`);
+  const track = $('track');
+  track.className = 'track' + (isFail ? ' fail' : '');
+  track.innerHTML = STATES.map((s, i) => {
+    const cls = isFail ? '' : i < idx || status === 'DELIVERED' ? 'done' : i === idx ? 'now' : '';
+    return `<span class="${cls}"></span>`;
+  }).join('');
 }
 
 function updateBadge(status) {
   const b = $('statusBadge');
   b.textContent = label(status);
   b.className = 'badge ' + (status === 'FAILED_REFUND' ? 'fail' : status === 'PENDING_PAYMENT' ? 'pending' : 'paid');
+  renderHero(status);
+  // Nothing left to pay once paid (or failed): hide the whole card except while pending.
+  $('payCard').classList.toggle('hidden', status !== 'PENDING_PAYMENT');
   // Once paid (or failed), a live "Pay now" button invites paying twice. Runs after
   // renderPayment() and on every socket transition, so it always has the last word.
   if (status !== 'PENDING_PAYMENT') {
@@ -666,38 +772,84 @@ async function sendChat() {
   }
 }
 
-// ── Header navigation: Home (landing) + FAQ ──
-const VIEWS = ['landingView', 'joinView', 'authView', 'startView', 'orderView', 'resumeView', 'faqView'];
-function showView(id) {
+// ── Navigation: bottom tabs ──
+// Home = the new-order screen when signed in, the landing page when not. Orders and Account
+// need a session, so they send a signed-out visitor to sign-in first and come back after.
+const VIEWS = ['landingView', 'joinView', 'authView', 'startView', 'orderView', 'resumeView', 'faqView', 'accountView'];
+const TAB_OF = {
+  landingView: 'home', joinView: 'home', authView: null, startView: 'home',
+  orderView: 'orders', resumeView: 'orders', faqView: 'help', accountView: 'account',
+};
+let afterSignIn = null;
+function showView(id, tab) {
   VIEWS.forEach((v) => $(v).classList.add('hidden'));
   $(id).classList.remove('hidden');
+  const active = tab || TAB_OF[id];
+  document.querySelectorAll('.tabbar [data-tab]').forEach((b) => {
+    if (b.dataset.tab === active) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  });
+  window.scrollTo(0, 0);
 }
-$('navHome').addEventListener('click', () => showView('landingView'));
-$('faqBtn').addEventListener('click', () => showView('faqView'));
-$('faqBack').addEventListener('click', () => showView(order ? 'orderView' : 'landingView'));
+function goTab(tab, { start = false } = {}) {
+  if (tab === 'help') return showView('faqView');
+  if (!token) {
+    if (tab === 'home' && !start) return showView('landingView');
+    afterSignIn = tab;
+    return showView('authView', tab);
+  }
+  if (tab === 'home') {
+    $('signedInAs').textContent = myPhone || '';
+    return showView('startView');
+  }
+  if (tab === 'orders') return openOrders();
+  if (tab === 'account') {
+    showSignedIn();
+    loadEmailBox();
+    return showView('accountView');
+  }
+}
+function showSignedIn() {
+  $('signedInAs').textContent = myPhone || '';
+  $('acctLogin').textContent = myPhone || '';
+}
+document.querySelectorAll('.tabbar [data-tab]').forEach((b) =>
+  b.addEventListener('click', () => goTab(b.dataset.tab)));
+$('brandHome').addEventListener('click', (e) => { e.preventDefault(); goTab('home'); });
+$('orderBack').addEventListener('click', () => goTab('orders'));
 
-// ── Resume an order ──
+// ── My orders ──
 // Scoped to the verified session: the server answers with THIS account's orders. There is no
 // longer any way to list orders for a number you merely typed.
-$('resumeBtn').addEventListener('click', async () => {
-  if (!token) return showView('authView');
+async function openOrders() {
+  showView('resumeView');
   const res = await api('/orders/mine');
   if (res.error) return toast(GMI18n.err(res.error));
   showResumeList(res.orders || []);
-});
-$('resumeBack').addEventListener('click', () => showView('startView'));
+}
+const ORDER_ICON = {
+  PENDING_PAYMENT: '💳', PAID_UNASSIGNED: '✓', DISPATCHED: '🛍️', IN_TRANSIT: '🛵', DELIVERED: '📦', FAILED_REFUND: '✕',
+};
 function showResumeList(orders) {
-  showView('resumeView');
+  // Landmarks and item text are the customer's own words: escape before innerHTML.
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   $('resumeList').innerHTML = orders.length
     ? orders.map((o) => `
-        <div class="card" style="background:var(--panel-2);cursor:pointer" data-id="${o.id}">
-          <div class="row" style="align-items:center;">
-            <div><strong>#${GMIds.shortId(o.id)}</strong> · $${Number(o.total_amount).toFixed(2)}</div>
-            <span class="badge ${badgeClass(o.status)}">${label(o.status)}</span>
-          </div>
-          <div class="muted">${o.landmark_text || ''}</div>
-        </div>`).join('')
-    : `<p class="muted">${t('resume.none')}</p>`;
+        <button class="tile" type="button" data-id="${o.id}">
+          <span class="tile-icon">${ORDER_ICON[o.status] || '•'}</span>
+          <span class="tile-body">
+            <span class="tile-title">$${Number(o.total_amount).toFixed(2)}
+              <span class="badge ${badgeClass(o.status)}">${label(o.status)}</span></span>
+            <span class="tile-sub">${esc((o.items || [])[0]?.text || o.landmark_text || '')}</span>
+            <span class="tile-sub">#${GMIds.shortId(o.id)} · ${new Date(o.created_at).toLocaleDateString()}</span>
+          </span>
+          <span class="chev">›</span>
+        </button>`).join('')
+    : `<div class="empty"><div class="big">🛒</div><p>${t('resume.none')}</p>
+        <button type="button" id="emptyNew" style="max-width:260px;">${t('start.title')}</button></div>`;
+  const first = $('emptyNew');
+  if (first) first.addEventListener('click', () => goTab('home'));
   $('resumeList').querySelectorAll('[data-id]').forEach((el) =>
     el.addEventListener('click', () => resumeOrder(el.dataset.id))
   );
@@ -712,6 +864,10 @@ async function resumeOrder(id) {
 
 // Auto-resume the last active order on load (survives refresh, per the resume requirement).
 // Requires a live session — without one there is nothing to resume into.
+// A signed-in customer opens on the new-order screen, like any delivery app; the landing page
+// is for people who haven't started yet.
+if (token) { showSignedIn(); goTab('home'); }
+
 (async function autoResume() {
   try {
     if (!token) return;
@@ -720,7 +876,7 @@ async function resumeOrder(id) {
     const res = await api(`/orders/${saved.orderId}`);
     if (res.order && !['DELIVERED', 'FAILED_REFUND'].includes(res.order.status)) {
       order = res.order;
-      $('signedInAs').textContent = myPhone || '';
+      showSignedIn();
       enterOrderView(res);
     } else {
       localStorage.removeItem('gm_last');
@@ -737,6 +893,22 @@ $('joinBtn').addEventListener('click', async () => {
   loadOwnerContact();
 });
 $('joinHome').addEventListener('click', () => showView('landingView'));
+
+// Show the reference photo they picked, so they know it's attached.
+$('refPhoto').addEventListener('change', () => {
+  const file = $('refPhoto').files[0];
+  const thumb = $('refThumb');
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  const img = document.createElement('img');
+  img.className = 'thumb';
+  img.alt = '';
+  img.src = url;
+  img.addEventListener('load', () => URL.revokeObjectURL(url), { once: true });
+  thumb.replaceWith(img);
+  img.id = 'refThumb';
+  $('refCapture').classList.add('done');
+});
 
 // Live validation on the applicant's number — same rules as everywhere else, so we don't take
 // a request we can't call back.
@@ -848,12 +1020,13 @@ document.addEventListener('gm:lang', () => {
     renderTimeline(order.status);
     updateBadge(order.status);
     loadPhotos(order.id);
+    loadProofs();
   }
   if (resendLeft > 0 || !$('codeStep').classList.contains('hidden')) renderResend();
   if (lastSyncStats) renderSyncState(lastSyncStats);
   // Re-run the live phone hints in the new language.
   ['phone', 'joinPhone'].forEach((id) => $(id).dispatchEvent(new Event('input')));
-  if (!$('resumeView').classList.contains('hidden')) $('resumeBtn').click();
+  if (!$('resumeView').classList.contains('hidden')) openOrders();
   updateIdHint();
   $('otpStatus').textContent = '';
 });

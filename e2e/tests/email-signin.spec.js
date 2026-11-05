@@ -12,6 +12,7 @@ test('link an email, then sign in by email', async ({ browser }, testInfo) => {
 
   // Add and confirm an email.
   const email = `staging-${Date.now()}@example.com`;
+  await page.locator('.tabbar [data-tab="account"]').click();
   await page.locator('#emailBox summary').click();
   await page.fill('#emailInput', email);
   await page.click('#emailSend');
@@ -21,7 +22,7 @@ test('link an email, then sign in by email', async ({ browser }, testInfo) => {
   await page.fill('#emailCode', linkCode === '000000' ? '111111' : '000000');
   await page.click('#emailVerify');
   await expect(page.locator('#emailStatus')).not.toHaveText(/\d{6}/);
-  await expect(page.locator('#startView')).toBeVisible();
+  await expect(page.locator('#accountView')).toBeVisible();
 
   await page.fill('#emailCode', linkCode);
   await page.click('#emailVerify');
@@ -30,7 +31,7 @@ test('link an email, then sign in by email', async ({ browser }, testInfo) => {
   // Sign out, then back in with just the email: the switch swaps the phone box for an email box.
   await page.click('#signOutBtn');
   await page.goto('/');
-  await page.getByRole('button', { name: /I'm a customer/ }).click();
+  await page.locator('#asCustomer').click();
   await page.locator('#channelPick [data-channel="email"]').click();
   await expect(page.locator('#phone')).toBeHidden();
   await expect(page.locator('#signinEmail')).toBeVisible();
@@ -56,7 +57,7 @@ test('link an email, then sign in by email', async ({ browser }, testInfo) => {
 test('the Phone | Email switch swaps the box, both ways', async ({ browser }, testInfo) => {
   const page = await openApp(browser, testInfo);
   await page.goto('/');
-  await page.getByRole('button', { name: /I'm a customer/ }).click();
+  await page.locator('#asCustomer').click();
   await expect(page.locator('#phone')).toBeVisible();
   await expect(page.locator('#signinEmail')).toBeHidden();
   await page.locator('#channelPick [data-channel="email"]').click();
@@ -71,7 +72,7 @@ test('the Phone | Email switch swaps the box, both ways', async ({ browser }, te
 test('a new customer signs up with only an email, then orders with a phone for the driver', async ({ browser }, testInfo) => {
   const page = await openApp(browser, testInfo);
   await page.goto('/');
-  await page.getByRole('button', { name: /I'm a customer/ }).click();
+  await page.locator('#asCustomer').click();
   await page.locator('#channelPick [data-channel="email"]').click();
   const email = `new-${Date.now()}@example.com`;
   await page.fill('#signinEmail', email);

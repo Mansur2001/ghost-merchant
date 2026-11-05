@@ -12,12 +12,16 @@ export const SEED = {
 const digits = (n) => Array.from({ length: n }, () => Math.floor(Math.random() * 10)).join('');
 // Fresh numbers per run, so per-number rate limits and cooldowns never carry over.
 export const somaliNumber = (prefix = '61') => prefix + digits(7);
+// A driver's phone with location on, somewhere in Mogadishu.
+export const DRIVER_PHONE = { permissions: ['geolocation'], geolocation: { latitude: 2.0469, longitude: 45.3182 } };
+
 export const usNumber = () => '2065' + digits(6);
 
 // Each app gets its own browser context: separate storage, like separate handsets.
-export async function openApp(browser, testInfo) {
+// `extra` passes context options through — a driver gets a GPS fix, like a real phone.
+export async function openApp(browser, testInfo, extra = {}) {
   const { baseURL, ignoreHTTPSErrors } = testInfo.project.use;
-  const context = await browser.newContext({ baseURL, ignoreHTTPSErrors, locale: 'en-US' });
+  const context = await browser.newContext({ baseURL, ignoreHTTPSErrors, locale: 'en-US', ...extra });
   // English, whatever the machine's language: the assertions read English text.
   await context.addInitScript(() => { try { localStorage.setItem('gm_lang', 'en'); } catch {} });
   return context.newPage();
@@ -33,7 +37,7 @@ export async function codeIn(locator, length = 6) {
 // Customer sign-in by text. `country` picks the +252 / +1 switch.
 export async function signInCustomer(page, national, country = 'SO') {
   await page.goto('/');
-  await page.getByRole('button', { name: /I'm a customer/ }).click();
+  await page.locator('#asCustomer').click();
   await page.locator('#authView .phone-field .cc-switch button', { hasText: country === 'US' ? '+1' : '+252' }).click();
   await page.fill('#phone', national);
   await page.click('#sendCodeBtn');
@@ -57,4 +61,9 @@ export async function signInDriver(page, { msisdn, pin }) {
   await page.fill('#pin', pin);
   await page.click('#loginBtn');
   await expect(page.locator('#queueView')).toBeVisible();
+}
+
+// Operator console sections: a sidebar on a desk, pills on a phone — click whichever shows.
+export async function goSection(page, id) {
+  await page.locator(`[data-nav="${id}"]:visible`).first().click();
 }

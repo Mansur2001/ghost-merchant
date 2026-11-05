@@ -40,7 +40,13 @@ git add -A && git commit -m "What changed" && git push origin main
 
 ## Deploy (server)
 
-⚠️ **No server right now** (deleted 2026-10-22 to save cost). On a new one, put its IP where `SERVER_IP` is, and copy `.env` and `minio.license` across first.
+**New server** (one time): point `app.gurikaabe.com` at its IP in Cloudflare (DNS only), then:
+```bash
+./scripts/new-server.sh env              # only if .env.production doesn't exist yet
+# fill in the Twilio and/or SendGrid lines in .env.production
+./scripts/new-server.sh setup SERVER_IP  # Docker, firewall, nightly backups, start, health check
+```
+After that, deploys are the steps below. Current server: `80.240.16.128`.
 
 ```bash
 ssh root@SERVER_IP

@@ -18,6 +18,7 @@ import { EVENTS } from '../events/bus.js';
 import { isUuid, newOrderId } from '../domain/ids.js';
 import { enqueue, wakeOutbox } from '../events/outbox.js';
 import { openRefundIfOwed } from './refunds.js';
+import { newHandoffCode } from '../domain/proof.js';
 
 // Create an order in the signed-in account. Returns { order, created }.
 //
@@ -69,6 +70,10 @@ export async function createOrder({ id, userId, contactPhone, items, totalAmount
         note: 'order created',
       },
     });
+    // The code the customer gives the driver at the door (domain/proof.js). Same commit as
+    // the order: an order that can't be delivered by code would push every driver to the
+    // weaker photo path.
+    await tx.deliveryHandoff.create({ data: { order_id: created.id, code: newHandoffCode() } });
     await enqueue(tx, EVENTS.ORDER_CREATED, { orderId: created.id, order: created });
     return { order: created, created: true };
   });

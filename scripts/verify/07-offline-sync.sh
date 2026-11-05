@@ -52,7 +52,7 @@ chk "a bad clientId is rejected    " 400 "$(code -X POST -H "Authorization: Bear
 echo
 echo "── 3. A replayed order creation lands exactly once ──"
 NID=$(python3 -c "import uuid;print(uuid.uuid4())")
-BODY=$(printf '{"id":"%s","items":[{"text":"offline order"}],"totalAmount":5.00,"landmark":"Queued landmark"}' "$NID")
+BODY=$(printf '{"id":"%s","phone":"+252612345678","items":[{"text":"offline order"}],"totalAmount":5.00,"landmark":"Queued landmark"}' "$NID")
 C1=$(curl -sk -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d "$BODY" $B/orders)
 C2=$(curl -sk -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d "$BODY" $B/orders)
 chk "first create                  " 201 "$C1"
@@ -67,6 +67,9 @@ echo "── 4. A replayed transition is distinguishable from a real conflict �
 DTOK=$(curl -sk -X POST -H 'Content-Type: application/json' -d '{"msisdn":"+252619876543","pin":"1234"}' $B/driver/login | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 DID=$(psql "SELECT id FROM orders WHERE status='DISPATCHED' LIMIT 1;")
 chk "driver signed in              " "yes" "$([ -n "$DTOK" ] && echo yes || echo no)"
+# Pickup needs its photo first (domain/proof.js): refused without, accepted after.
+chk "'secured' without a photo     " 422 "$(code -X POST -H "Authorization: Bearer $DTOK" $B/driver/orders/$DID/secured)"
+chk "pickup photo uploaded         " 201 "$(code -X POST -H "Authorization: Bearer $DTOK" -H 'Content-Type: image/png' --data-binary 'verify-photo' $B/driver/orders/$DID/pickup-proof)"
 chk "first 'secured' accepted      " 200 "$(code -X POST -H "Authorization: Bearer $DTOK" $B/driver/orders/$DID/secured)"
 chk "replay is refused with 409    " 409 "$(code -X POST -H "Authorization: Bearer $DTOK" $B/driver/orders/$DID/secured)"
 chk "  ...and the order IS in the target state (so the client treats it as applied)" \

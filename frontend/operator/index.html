@@ -3,149 +3,208 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#000000" />
+  <meta name="theme-color" content="#0b0b0c" />
   <link rel="stylesheet" href="/shared/styles.css" />
   <script src="/shared/theme.js"></script>
-  <title>GuriKaabe — Operator</title>
+  <title>GuriKaabe — Dispatch</title>
 </head>
 <body>
-  <div class="app">
+  <div class="app wide">
     <header>
-      <img src="/icon-192.png" alt="" width="30" height="30" style="border-radius:7px;flex:0 0 auto;" />
-      <h1>Operator / Dispatch</h1>
+      <a class="brand" href="/" title="Go to the home page">
+        <img src="/icon-192.png" alt="" width="32" height="32" />
+        <h1><small>GuriKaabe</small>Dispatch</h1>
+      </a>
       <!-- Event-relay backlog. Hidden while healthy; if it appears, committed state is not
            reaching clients and the apps look frozen even though the data is fine. -->
-      <span class="badge fail hidden" id="outboxBadge" style="margin-left:auto;">Events: ?</span>
-      <a class="linkbtn" href="/" title="Go to the home page" style="margin-left:8px;">Home</a>
-      <button class="linkbtn" id="themeToggle" type="button" title="Toggle theme" style="margin-left:8px;">☀️</button>
-      <button class="linkbtn hidden" id="logoutBtn" type="button" style="margin-left:8px;">Log out</button>
+      <span class="badge fail hidden" id="outboxBadge">Events: ?</span>
+      <span class="muted hidden" id="whoami" style="white-space:nowrap;"></span>
+      <button class="iconbtn" id="themeToggle" type="button" title="Toggle theme">☀️</button>
+      <button class="iconbtn hidden" id="logoutBtn" type="button" aria-label="Log out" title="Log out">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h4v16h-4"/><path d="M10 8l-4 4 4 4M6 12h10"/></svg>
+      </button>
     </header>
-    <!-- Status bar shown once the operator is signed in: live feed of system updates. -->
+    <!-- Live feed of the latest system update, once signed in. -->
     <div class="statusbar hidden" id="statusbar">
       <span class="sb-dot"></span>
       <span class="sb-text" id="sbText">Log in to begin monitoring.</span>
       <span class="sb-time" id="sbTime"></span>
     </div>
-    <main>
-      <section id="loginView" class="card">
-        <label for="username">Operator username</label>
-        <input id="username" type="text" autocomplete="username" autocapitalize="none"
-               spellcheck="false" placeholder="amina" />
-        <label for="password">Password</label>
-        <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" />
-        <button id="loginBtn" type="button">Log in</button>
-        <div class="muted" id="loginHint"></div>
-        <p class="muted" style="margin:14px 0 0;">New here?
-          <button class="linkbtn" id="showSetup" type="button">Set up account →</button></p>
-      </section>
 
-      <!-- Claim an account an admin created: the setup code texted to you proves it's your
-           phone, and you choose your own password. Nobody else ever knows it. -->
-      <section id="setupView" class="card hidden">
-        <h3 style="margin:0 0 6px;">Set up your account</h3>
-        <p class="muted" style="margin:0 0 10px;">Enter the 8-digit code we sent you (by text or email) and choose a password.</p>
-        <label for="sPhone">Your phone number</label>
-        <input id="sPhone" type="tel" inputmode="tel" placeholder="61 234 5678" />
-        <div class="phone-hint muted" id="sPhoneHint"></div>
-        <label for="sCode">Setup code</label>
-        <input id="sCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="12345678" />
-        <label for="sPass">New password (at least 12 characters)</label>
-        <input id="sPass" type="password" autocomplete="new-password" />
-        <label for="sPass2">Repeat password</label>
-        <input id="sPass2" type="password" autocomplete="new-password" />
-        <button id="setupBtn" type="button">Set password &amp; log in</button>
-        <button class="secondary" id="setupBack" type="button">← Back to log in</button>
-        <div class="muted" id="setupHint"></div>
-      </section>
-
-      <section id="dash" class="hidden">
-        <!-- The bootstrap account is created from OPERATOR_PASSWORD, which lives in .env and
-             shell history — this nag stays until it's changed. -->
-        <div class="card hidden" id="pwNag" style="border-color:var(--warn,#e6c65c);">
-          <strong>Change your password.</strong>
-          <p class="muted" style="margin:6px 0 0;">This account still uses the bootstrap
-            password from the server environment. Anyone who has seen that file can sign in as you.</p>
-        </div>
-
-        <!-- Only while the system is new. Each line disappears as it's done. -->
-        <div class="card hidden" id="firstRun" style="border-color:var(--accent,#d4af37);"></div>
-
-        <div class="card">
-          <h3 style="margin:0 0 8px;">Active orders</h3>
-          <p class="muted" style="margin:0 0 8px;">Payments are confirmed by you: check the merchant
-            phone for the money, then tap <strong>Confirm payment</strong>. Orders whose customer
-            tapped “I’ve paid” are at the top.</p>
-          <div id="orders" class="scroll-list"></div>
-        </div>
-
-        <!-- Money we owe customers. The platform never holds funds, so settling a refund is
-             an operator sending money back from their own phone — this panel is the ledger
-             that stops that being forgotten. -->
-        <div class="card">
-          <div class="row" style="align-items:center;">
-            <h3 style="margin:0;">Refunds owed</h3>
-            <span class="badge fail hidden" id="refundTotal" style="margin-left:auto;"></span>
+    <nav class="topnav hidden" id="topnav" aria-label="Sections"></nav>
+    <div class="console">
+      <nav class="sidenav hidden" id="sidenav" aria-label="Sections"></nav>
+      <main>
+        <section id="loginView" style="max-width:420px;margin:24px auto 0;">
+          <div class="screen-head">
+            <h2>Operator sign-in</h2>
+            <p class="muted">Dispatch, payments and refunds.</p>
           </div>
-          <div id="refunds" class="scroll-list"></div>
-          <details style="margin-top:10px;">
-            <summary class="muted">Recently closed</summary>
-            <div id="refundsClosed" class="scroll-list" style="margin-top:8px;"></div>
-          </details>
-        </div>
-
-        <!-- ADMIN ONLY from here to the end of staff management. People asking for an account:
-             Approve records the decision; "Create account" is the separate step that texts
-             them a setup code. Nobody types another person's password or PIN. -->
-        <div class="card admin-only hidden">
-          <div class="row" style="align-items:center;">
-            <h3 style="margin:0;">Access requests</h3>
-            <span class="badge pending hidden" id="requestCount" style="margin-left:auto;"></span>
+          <div class="card">
+            <label for="username" style="margin-top:0;">Username</label>
+            <input id="username" type="text" autocomplete="username" autocapitalize="none"
+                   spellcheck="false" placeholder="amina" />
+            <label for="password">Password</label>
+            <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" />
+            <button id="loginBtn" type="button">Log in</button>
+            <div class="muted" id="loginHint" style="margin-top:8px;"></div>
           </div>
-          <div id="accessRequests" class="scroll-list"></div>
-        </div>
+          <button class="tile" id="showSetup" type="button">
+            <span class="tile-body"><span class="tile-title">New here?</span>
+              <span class="tile-sub">Set up your account with the code we sent you →</span></span>
+            <span class="chev">›</span>
+          </button>
+        </section>
 
-        <div class="card">
-          <h3 style="margin:0 0 8px;">Drivers</h3>
-          <div id="drivers" class="scroll-list"></div>
-        </div>
-
-        <div class="card admin-only hidden">
-          <h3 style="margin:0 0 8px;">Add driver</h3>
-          <p class="muted" style="margin:0 0 8px;">They get a setup code and choose their own PIN. Add an email to send the code there instead of by text.</p>
-          <div class="row"><input id="dName" placeholder="Name" /><input id="dMsisdn" placeholder="61 234 5678" /></div>
-          <div class="phone-hint muted" id="phoneHint"></div>
-          <input id="dEmail" type="email" placeholder="Email (optional — send the code by email)" style="margin-top:10px;" />
-          <button id="addDriver" type="button">Create &amp; send setup code</button>
-        </div>
-
-        <!-- Operator accounts (P0 #5). Named accounts are what makes order_events.actor
-             mean something in a dispute. -->
-        <div class="card admin-only hidden">
-          <h3 style="margin:0 0 8px;">Operators</h3>
-          <div id="operators" class="scroll-list"></div>
-        </div>
-
-        <div class="card admin-only hidden">
-          <h3 style="margin:0 0 8px;">Add operator</h3>
-          <p class="muted" style="margin:0 0 8px;">They get a setup code and choose their own password. Add an email to send the code there instead of by text.</p>
-          <div class="row">
-            <input id="oName" placeholder="Name" />
-            <input id="oUsername" placeholder="username" autocapitalize="none" spellcheck="false" />
+        <!-- Claim an account an admin created: the setup code proves it's your phone, and you
+             choose your own password. Nobody else ever knows it. -->
+        <section id="setupView" class="hidden" style="max-width:420px;margin:24px auto 0;">
+          <button class="linkbtn" id="setupBack" type="button" style="margin-bottom:12px;">← Back to log in</button>
+          <div class="screen-head">
+            <h2>Set up your account</h2>
+            <p class="muted">Enter the 8-digit code we sent you (by text or email) and choose a password.</p>
           </div>
-          <input id="oPhone" type="tel" placeholder="Their phone, e.g. 61 234 5678" style="margin-top:10px;" />
-          <div class="phone-hint muted" id="oPhoneHint"></div>
-          <input id="oEmail" type="email" placeholder="Email (optional — send the code by email)" style="margin-top:10px;" />
-          <button id="addOperator" type="button">Create &amp; send setup code</button>
-        </div>
+          <div class="card">
+            <label for="sPhone" style="margin-top:0;">Your phone number</label>
+            <input id="sPhone" type="tel" inputmode="tel" placeholder="61 234 5678" />
+            <div class="phone-hint muted" id="sPhoneHint"></div>
+            <label for="sCode">Setup code</label>
+            <input id="sCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="12345678" />
+            <label for="sPass">New password (at least 12 characters)</label>
+            <input id="sPass" type="password" autocomplete="new-password" />
+            <label for="sPass2">Repeat password</label>
+            <input id="sPass2" type="password" autocomplete="new-password" />
+            <button id="setupBtn" type="button">Set password &amp; log in</button>
+            <div class="muted" id="setupHint" style="margin-top:8px;"></div>
+          </div>
+        </section>
 
-        <div class="card">
-          <h3 style="margin:0 0 8px;">Change my password</h3>
-          <input id="pwCurrent" type="password" autocomplete="current-password" placeholder="current password" />
-          <input id="pwNew" type="password" autocomplete="new-password" placeholder="new password (min 12 characters)" style="margin-top:10px;" />
-          <button id="changePw" type="button">Change password</button>
-        </div>
-      </section>
-    </main>
+        <section id="dash" class="hidden">
+          <!-- The bootstrap account is created from OPERATOR_PASSWORD, which lives in .env and
+               shell history — this nag stays until it's changed. -->
+          <div class="card hidden" id="pwNag" style="border-color:var(--warn);">
+            <strong>Change your password.</strong>
+            <p class="muted" style="margin:6px 0 0;">This account still uses the bootstrap
+              password from the server environment. Anyone who has seen that file can sign in as you.
+              Go to <strong>Account</strong>.</p>
+          </div>
+
+          <!-- Only while the system is new. Each line disappears as it's done. -->
+          <div class="card hidden" id="firstRun" style="border-color:var(--gold);"></div>
+
+          <!-- ── Orders ── -->
+          <div data-panel="orders">
+            <div class="panel-head">
+              <div>
+                <h2>Active orders</h2>
+                <p class="muted" style="margin:4px 0 0;">Check the merchant phone for the money, then
+                  <strong>Confirm payment</strong>. Customers who tapped “I’ve paid” are at the top.</p>
+              </div>
+              <div class="chips" id="orderFilter" role="group" aria-label="Filter">
+                <button class="chip" type="button" data-filter="all" aria-pressed="true">All</button>
+                <button class="chip" type="button" data-filter="pay" aria-pressed="false">Payment</button>
+                <button class="chip" type="button" data-filter="dispatch" aria-pressed="false">Needs driver</button>
+                <button class="chip" type="button" data-filter="road" aria-pressed="false">On the road</button>
+              </div>
+            </div>
+            <div class="kpis" id="kpis"></div>
+            <div id="orders" class="board"></div>
+          </div>
+
+          <!-- ── Deliveries: proof review ── -->
+          <div data-panel="deliveries" class="hidden">
+            <div class="panel-head">
+              <div>
+                <h2>Deliveries</h2>
+                <p class="muted" style="margin:4px 0 0;">The last 7 days. A delivery is proven by the
+                  customer’s code; ones without it, without GPS, or far from the pin wait here for a check.</p>
+              </div>
+            </div>
+            <div id="deliveries" class="board"></div>
+          </div>
+
+          <!-- ── Refunds: money we owe customers ── -->
+          <div data-panel="refunds" class="hidden">
+            <div class="panel-head">
+              <div>
+                <h2>Refunds owed</h2>
+                <p class="muted" style="margin:4px 0 0;">The platform never holds money: you send it back
+                  from your own phone, then record the reference here.</p>
+              </div>
+              <span class="badge fail hidden" id="refundTotal"></span>
+            </div>
+            <div id="refunds" class="board"></div>
+            <details style="margin-top:14px;">
+              <summary class="muted">Recently closed</summary>
+              <div id="refundsClosed" style="margin-top:8px;"></div>
+            </details>
+          </div>
+
+          <!-- ── Drivers ── -->
+          <div data-panel="drivers" class="hidden">
+            <div class="panel-head"><h2>Drivers</h2></div>
+            <div class="panel-grid two">
+              <div id="drivers" class="board" style="grid-template-columns:1fr;"></div>
+              <div class="card admin-only hidden">
+                <h3 style="margin:0 0 6px;">Add driver</h3>
+                <p class="muted" style="margin:0 0 8px;">They get a setup code and choose their own PIN. Add an email to send the code there instead of by text.</p>
+                <label for="dName">Name</label>
+                <input id="dName" placeholder="Name" />
+                <label for="dMsisdn">Phone</label>
+                <input id="dMsisdn" placeholder="61 234 5678" />
+                <div class="phone-hint muted" id="phoneHint"></div>
+                <label for="dEmail">Email (optional)</label>
+                <input id="dEmail" type="email" placeholder="Send the code by email instead" />
+                <button id="addDriver" type="button">Create &amp; send setup code</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Team (admin only): access requests, operators ── -->
+          <div data-panel="team" class="hidden">
+            <!-- Approve records the decision; "Create account" is the separate step that texts
+                 them a setup code. Nobody types another person's password or PIN. -->
+            <div class="panel-head">
+              <h2>Access requests</h2>
+              <span class="badge pending hidden" id="requestCount"></span>
+            </div>
+            <div id="accessRequests" class="board"></div>
+
+            <div class="panel-head" style="margin-top:24px;"><h2>Operators</h2></div>
+            <div class="panel-grid two">
+              <div id="operators" class="board" style="grid-template-columns:1fr;"></div>
+              <div class="card">
+                <h3 style="margin:0 0 6px;">Add operator</h3>
+                <p class="muted" style="margin:0 0 8px;">They get a setup code and choose their own password. Add an email to send the code there instead of by text.</p>
+                <label for="oName">Name</label>
+                <input id="oName" placeholder="Name" />
+                <label for="oUsername">Username</label>
+                <input id="oUsername" placeholder="username" autocapitalize="none" spellcheck="false" />
+                <label for="oPhone">Phone</label>
+                <input id="oPhone" type="tel" placeholder="61 234 5678" />
+                <div class="phone-hint muted" id="oPhoneHint"></div>
+                <label for="oEmail">Email (optional)</label>
+                <input id="oEmail" type="email" placeholder="Send the code by email instead" />
+                <button id="addOperator" type="button">Create &amp; send setup code</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Account ── -->
+          <div data-panel="account" class="hidden" style="max-width:480px;">
+            <div class="panel-head"><h2>Account</h2></div>
+            <div class="card">
+              <h3 style="margin:0 0 8px;">Change my password</h3>
+              <label for="pwCurrent">Current password</label>
+              <input id="pwCurrent" type="password" autocomplete="current-password" />
+              <label for="pwNew">New password (min 12 characters)</label>
+              <input id="pwNew" type="password" autocomplete="new-password" />
+              <button id="changePw" type="button">Change password</button>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
   </div>
   <script src="/shared/config.js"></script>
   <script src="/shared/ids.js"></script>

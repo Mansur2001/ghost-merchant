@@ -8,8 +8,9 @@
 import { Router, raw } from 'express';
 import { createOrder, postMessage } from '../commands/orders.js';
 import { claimPayment, PaymentError } from '../commands/payments.js';
-import { getOrderTimeline, getMessages, getOrdersByUser } from '../queries/orders.js';
+import { getOrderTimeline, getMessages, getOrdersByUser, getHandoff, getProofs } from '../queries/orders.js';
 import { savePhoto } from '../commands/photos.js';
+import { disputeDelivery, ProofError } from '../commands/proofs.js';
 import { listPhotos, getPhoto } from '../queries/photos.js';
 import { getObject } from '../storage/objectStore.js';
 import { buildPaymentInstruction } from '../domain/ussd.js';
@@ -86,6 +87,40 @@ ordersRouter.get('/orders/:id', requireAuth, requireOrderAccess, (req, res) => {
 ordersRouter.get('/orders/:id/timeline', requireAuth, requireOrderAccess, async (req, res) => {
   res.json({ timeline: await getOrderTimeline(req.params.id) });
 });
+
+// The customer's delivery code: they read it to the driver at the door. Customer-only — a
+// driver or operator who could read it could "prove" a delivery that never happened. Shown
+// once the order is paid (before that there is nothing coming to hand over).
+const HANDOFF_VISIBLE = ['PAID_UNASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED'];
+ordersRouter.get('/orders/:id/handoff', customerOnly, requireOrderAccess, async (req, res) => {
+  const handoff = HANDOFF_VISIBLE.includes(req.order.status) ? await getHandoff(req.params.id) : null;
+  res.json({
+    code: handoff && !handoff.verified_at && req.order.status !== 'DELIVERED' ? handoff.code : null,
+    used: Boolean(handoff?.verified_at),
+  });
+});
+
+// How each driver step was proven (photo, code, GPS distance). No code values in here.
+ordersRouter.get('/orders/:id/proofs', requireAuth, requireOrderAccess, async (req, res) => {
+  res.json({ proofs: await getProofs(req.params.id) });
+});
+
+// POST /api/orders/:id/dispute { note? } — the customer says the delivery never reached them.
+ordersRouter.post(
+  '/orders/:id/dispute',
+  customerOnly,
+  requireOrderAccess,
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 5, message: 'too many requests' }),
+  async (req, res, next) => {
+    try {
+      await disputeDelivery({ orderId: req.params.id, note: req.body?.note });
+      res.json({ ok: true });
+    } catch (err) {
+      if (err instanceof ProofError) return res.status(err.status).json({ error: err.message });
+      next(err);
+    }
+  }
+);
 
 ordersRouter.get('/orders/:id/messages', requireAuth, requireOrderAccess, async (req, res) => {
   res.json({ messages: await getMessages(req.params.id) });

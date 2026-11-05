@@ -6,6 +6,8 @@ import { requireOrderAccess } from '../middleware/authorize.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { transitionOrder, postMessage } from '../commands/orders.js';
 import { savePhoto } from '../commands/photos.js';
+import { confirmPickup, confirmDelivery, ProofError } from '../commands/proofs.js';
+import { cleanReason } from '../domain/proof.js';
 import { getDriverQueue, getShoppingList } from '../queries/orders.js';
 import { STATUS } from '../domain/stateMachine.js';
 import { parsePhone } from '../domain/phone.js';
@@ -62,44 +64,59 @@ driversRouter.get('/driver/orders/:id', ...myOrder, async (req, res) => {
 // assigned, so "accept" contradicted the model and was the one route that needed to bypass
 // the assignment check. Assignment happens at POST /operator/orders/:id/assign.
 
-// POST /api/driver/orders/:id/secured — items in hand, heading to customer.
-driversRouter.post('/driver/orders/:id/secured', ...myOrder, async (req, res) => {
+// The two driver steps need evidence (domain/proof.js). The server checks it: an old app
+// build, or a hand-made request, can't skip it.
+function proofError(err, res, next) {
+  if (err instanceof ProofError) return res.status(err.status).json({ error: err.message, ...err.extra });
+  // An illegal transition from transitionOrder: a conflict, which the offline queue knows how
+  // to read (it may simply be a replay that already landed).
+  if (/^Illegal transition/.test(err.message)) return res.status(409).json({ error: err.message });
+  next(err);
+}
+
+// POST /api/driver/orders/:id/secured  { fix? } — items in hand. Needs the pickup photo.
+driversRouter.post('/driver/orders/:id/secured', ...myOrder, async (req, res, next) => {
   try {
-    const order = await transitionOrder(
-      req.params.id,
-      STATUS.IN_TRANSIT,
-      `driver:${req.auth.id}`,
-      'items secured'
-    );
+    const order = await confirmPickup({
+      orderId: req.params.id,
+      actor: `driver:${req.auth.id}`,
+      fix: req.body?.fix,
+    });
     res.json({ order });
   } catch (err) {
-    res.status(409).json({ error: err.message });
+    proofError(err, res, next);
   }
 });
 
-// POST /api/driver/orders/:id/delivered
-driversRouter.post('/driver/orders/:id/delivered', ...myOrder, async (req, res) => {
+// POST /api/driver/orders/:id/delivered  { code } | { noCodeReason }, plus { fix? }
+// The customer's 4-digit code is the proof. Without it: a door photo and a reason, flagged
+// for an operator to check.
+driversRouter.post('/driver/orders/:id/delivered', ...myOrder, async (req, res, next) => {
   try {
-    const order = await transitionOrder(
-      req.params.id,
-      STATUS.DELIVERED,
-      `driver:${req.auth.id}`,
-      'delivered'
-    );
+    const order = await confirmDelivery({
+      orderId: req.params.id,
+      actor: `driver:${req.auth.id}`,
+      code: req.body?.code,
+      noCodeReason: req.body?.noCodeReason,
+      fix: req.body?.fix,
+    });
     res.json({ order });
   } catch (err) {
-    res.status(409).json({ error: err.message });
+    proofError(err, res, next);
   }
 });
 
-// POST /api/driver/orders/:id/failed  { reason }
+// POST /api/driver/orders/:id/failed  { reason } — a reason is required: it is what the
+// operator reads before deciding what is owed.
 driversRouter.post('/driver/orders/:id/failed', ...myOrder, async (req, res) => {
+  const reason = cleanReason(req.body?.reason);
+  if (!reason) return res.status(400).json({ error: 'say what went wrong' });
   try {
     const order = await transitionOrder(
       req.params.id,
       STATUS.FAILED_REFUND,
       `driver:${req.auth.id}`,
-      req.body?.reason || 'driver reported failure'
+      reason
     );
     res.json({ order });
   } catch (err) {
@@ -107,22 +124,34 @@ driversRouter.post('/driver/orders/:id/failed', ...myOrder, async (req, res) => 
   }
 });
 
-// POST /api/driver/orders/:id/delivery-proof — driver uploads a proof-of-delivery photo
-// (raw image bytes). Stored in MinIO; posts a system line into the thread for live sync.
-driversRouter.post('/driver/orders/:id/delivery-proof', ...myOrder, rawImage, async (req, res) => {
-  try {
-    const photo = await savePhoto({
-      orderId: req.params.id,
-      kind: 'delivery_proof',
-      bytes: req.body,
-      contentType: req.get('Content-Type'),
-      uploadedBy: `driver:${req.auth.id}`,
-    });
-    res.status(201).json({ photo });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
+// Evidence photos (raw image bytes), each accepted only while its step is open. The object
+// key is deterministic per (order, kind), so a later upload would REPLACE the photo a
+// confirmed step rests on; once the step is done, its photo is frozen.
+const PROOF_PHOTO_OPEN = {
+  pickup_proof: [STATUS.DISPATCHED],
+  delivery_proof: [STATUS.IN_TRANSIT],
+};
+function proofPhotoRoute(kind) {
+  return async (req, res) => {
+    if (!PROOF_PHOTO_OPEN[kind].includes(req.order.status)) {
+      return res.status(409).json({ error: 'this step is already done — its photo can\'t change' });
+    }
+    try {
+      const photo = await savePhoto({
+        orderId: req.params.id,
+        kind,
+        bytes: req.body,
+        contentType: req.get('Content-Type'),
+        uploadedBy: `driver:${req.auth.id}`,
+      });
+      res.status(201).json({ photo });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  };
+}
+driversRouter.post('/driver/orders/:id/pickup-proof', ...myOrder, rawImage, proofPhotoRoute('pickup_proof'));
+driversRouter.post('/driver/orders/:id/delivery-proof', ...myOrder, rawImage, proofPhotoRoute('delivery_proof'));
 
 // POST /api/driver/orders/:id/adjust  { items } — out-of-stock / price adjustment.
 // Records the new item list and drops a note into the chat so the customer sees it.

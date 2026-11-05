@@ -38,7 +38,7 @@ chk "enumeration by id impossible " 404 "$(code -H "Authorization: Bearer $SO_TO
 echo
 echo "── 2. Client-minted ids make order creation idempotent ──"
 NEWID=$(python3 -c "import uuid;print(uuid.uuid4())")
-BODY=$(printf '{"id":"%s","items":[{"text":"idempotency test"}],"totalAmount":3.50,"landmark":"Test landmark"}' "$NEWID")
+BODY=$(printf '{"id":"%s","phone":"+252612345678","items":[{"text":"idempotency test"}],"totalAmount":3.50,"landmark":"Test landmark"}' "$NEWID")
 R1=$(curl -sk -w '\n%{http_code}' -X POST -H "Authorization: Bearer $SO_TOK" -H 'Content-Type: application/json' -d "$BODY" $B/orders)
 R2=$(curl -sk -w '\n%{http_code}' -X POST -H "Authorization: Bearer $SO_TOK" -H 'Content-Type: application/json' -d "$BODY" $B/orders)
 chk "first create -> 201          " 201 "$(echo "$R1" | tail -1)"
@@ -59,7 +59,7 @@ chk "  ...and leaks nothing       " "yes" "$(echo "$HIJACK" | head -1 | grep -q 
 
 echo
 echo "── 4. US numbers: full identity, no USSD ──"
-US_BODY='{"items":[{"text":"US test order"}],"totalAmount":9.99,"landmark":"Seattle test landmark"}'
+US_BODY='{"phone":"+12065551234","items":[{"text":"US test order"}],"totalAmount":9.99,"landmark":"Seattle test landmark"}'
 US_CREATE=$(curl -sk -X POST -H "Authorization: Bearer $US_TOK" -H 'Content-Type: application/json' -d "$US_BODY" $B/orders)
 US_OID=$(echo "$US_CREATE" | python3 -c "import sys,json;print(json.load(sys.stdin)['order']['id'])")
 chk "US customer can create order " "yes" "$([ -n "$US_OID" ] && echo yes || echo no)"
@@ -67,7 +67,7 @@ chk "stored as +1 E.164           " "+12065551234" "$(psql "SELECT user_phone FR
 chk "paymentMethod is manual      " "manual" "$(echo "$US_CREATE" | python3 -c "import sys,json;print(json.load(sys.stdin)['paymentMethod'])")"
 chk "no dead USSD link offered    " "None" "$(echo "$US_CREATE" | python3 -c "import sys,json;print(json.load(sys.stdin)['ussdUri'])")"
 chk "  ...explains why            " "yes" "$(echo "$US_CREATE" | grep -qi 'somali numbers' && echo yes || echo no)"
-SO_CREATE=$(curl -sk -X POST -H "Authorization: Bearer $SO_TOK" -H 'Content-Type: application/json' -d '{"items":[],"totalAmount":4.00,"landmark":"Mogadishu test"}' $B/orders)
+SO_CREATE=$(curl -sk -X POST -H "Authorization: Bearer $SO_TOK" -H 'Content-Type: application/json' -d '{"phone":"+252612345678","items":[],"totalAmount":4.00,"landmark":"Mogadishu test"}' $B/orders)
 # Wallets come from .env and have no defaults, so what a Somali order is offered depends on
 # whether this stack configured one. Either way it must never be a fake number.
 if [ -n "$(_env_or EVC_MERCHANT '')" ]; then

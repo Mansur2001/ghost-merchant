@@ -8,9 +8,5 @@
         </trust-anchors>
     </base-config>
 
-    <!-- DEV ONLY — generated for 172.20.2.34. A release build regenerates this file
-         with no exceptions, because the host is derived from GM_API_BASE. -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">172.20.2.34</domain>
-    </domain-config>
+    <!-- Production build: no cleartext exceptions. -->
 </network-security-config>

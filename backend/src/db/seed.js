@@ -12,6 +12,7 @@ import { hashSecret } from '../middleware/auth.js';
 import { putObject } from '../storage/objectStore.js';
 import { SEED_OPERATORS, SEED_DRIVERS, SEED_CUSTOMERS } from './seedFixtures.js';
 import { seedRefusal } from './seedSafety.js';
+import { buildProof } from '../domain/proof.js';
 
 // Rows this seed would never have created: evidence that real (or at least someone's) data
 // lives here. Checked BEFORE the truncate, outside its transaction.
@@ -92,7 +93,7 @@ async function seed() {
     // both slower and easy to get subtly wrong as the schema grows.
     await tx.$executeRawUnsafe(`
       TRUNCATE outbox, otp_codes, staff_invites, order_photos, order_events, messages, transactions,
-               refunds, access_requests, orders, drivers, users, operators
+               refunds, access_requests, order_proofs, delivery_handoffs, orders, drivers, users, operators
       RESTART IDENTITY CASCADE
     `);
 
@@ -195,6 +196,32 @@ async function seed() {
             status: 'owed',
             created_by: 'system:seed',
           },
+        });
+      }
+
+      // Delivery code and proof for the steps this order has passed (domain/proof.js). Fixed
+      // codes, so every run converges to the same state and screenshots don't change.
+      // eslint-disable-next-line no-await-in-loop
+      await tx.deliveryHandoff.create({
+        data: {
+          order_id: orderId,
+          code: String(4821 + ORDERS.indexOf(o) * 1111).slice(-4),
+          verified_at: o.status === 'DELIVERED' ? new Date() : null,
+        },
+      });
+      const pastPickup = ['IN_TRANSIT', 'DELIVERED'].includes(o.status);
+      const near = { lat: o.lat + 0.0004, lng: o.lng + 0.0003, accuracy: 18 };
+      if (pastPickup) {
+        photoJobs.push({ orderId, kind: 'pickup_proof', label: '🛍️ Items', bg: '#e6c65c' });
+        // eslint-disable-next-line no-await-in-loop
+        await tx.orderProof.create({
+          data: { order_id: orderId, actor: `driver:${driverId}`, ...buildProof({ step: 'pickup', method: 'photo', fix: near, order: o }) },
+        });
+      }
+      if (o.status === 'DELIVERED') {
+        // eslint-disable-next-line no-await-in-loop
+        await tx.orderProof.create({
+          data: { order_id: orderId, actor: `driver:${driverId}`, ...buildProof({ step: 'delivery', method: 'code', fix: near, order: o }) },
         });
       }
 

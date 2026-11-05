@@ -53,7 +53,9 @@ chk "username is case-insensitive " 200 "$(code -X POST -H 'Content-Type: applic
 # "wrong password" answer identically, so the difference can't enumerate the staff roster.
 NOUSER=$(curl -sk -X POST -H 'Content-Type: application/json' -d '{"username":"no-such-operator","password":"seeded-operator-pw-1"}' $B/operator/login)
 BADPW=$(curl -sk -X POST -H 'Content-Type: application/json' -d '{"username":"hodan","password":"wrong-password-here"}' $B/operator/login)
-chk "no-such-user == wrong-pw     " "$NOUSER" "$BADPW"
+# Each error carries its own request ref; the answers must match apart from that.
+noref() { sed 's/,"ref":"[0-9a-f]*"//'; }
+chk "no-such-user == wrong-pw     " "$(echo "$NOUSER" | noref)" "$(echo "$BADPW" | noref)"
 chk "GET /operator/me             " 200 "$(code -H "Authorization: Bearer $TOK" $B/operator/me)"
 chk "  ...never returns the hash  " "yes" "$(curl -sk -H "Authorization: Bearer $TOK" $B/operator/me | grep -q password_hash && echo no || echo yes)"
 # Staff management is ADMIN-only; hodan dispatches. The seeded admin manages the roster.

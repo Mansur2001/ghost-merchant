@@ -9,6 +9,28 @@ first build served to a real paying customer.
 
 ---
 
+## [0.2.0] — proof of delivery, delivery-app layout · Android versionCode 1
+
+### Added
+- **Proof of delivery, checked on the server.** Pickup needs a photo of the items. Delivery
+  needs the customer's 4-digit code (shown only on their order screen; 5 tries), or a door
+  photo plus a reason, which is flagged. Every step stores the driver's GPS fix and its distance
+  from the customer's pin. Evidence is written in the same transaction as the transition, and
+  evidence photos can't be replaced once their step is done.
+- **Deliveries review** in the operator console: the last 7 days, with flagged ones (no code,
+  no GPS, >300 m from the pin) waiting for "Mark checked", which records who checked.
+- Driver "Report a problem" requires a reason.
+- Migration `20261105090000_delivery_proofs`: `delivery_handoffs`, `order_proofs`, photo kind
+  `pickup_proof`. Live orders get a code on migrate.
+- `scripts/new-server.sh`: generate production secrets, provision a VPS, nightly backups.
+
+### Changed
+- **New layout across all three apps.** Customer: bottom tabs (Home / Orders / Help / Account),
+  sectioned checkout, tracking screen with status, progress, delivery code, proof, timeline
+  and chat. Driver: job list and a one-step-at-a-time job screen. Operator: sidebar console
+  with KPIs, filters, and Orders / Deliveries / Refunds / Drivers / Team / Account sections.
+  Gold is now the accent only, on neutral surfaces, in both themes.
+
 ## [Unreleased] — sign in (or up) with only an email
 
 ### Changed

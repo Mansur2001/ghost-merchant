@@ -3,100 +3,147 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#000000" />
+  <meta name="theme-color" content="#0b0b0c" />
   <link rel="stylesheet" href="/shared/styles.css" />
   <script src="/shared/theme.js"></script>
   <title>GuriKaabe — Driver</title>
 </head>
 <body>
-  <div class="app">
+  <div class="app no-tabbar">
     <header>
-      <img src="/icon-192.png" alt="" width="30" height="30" style="border-radius:7px;flex:0 0 auto;" />
-      <h1 data-i18n="drv.title">Driver</h1>
-      <a class="linkbtn" href="/" style="margin-left:auto;" data-i18n="nav.home">Home</a>
-      <button class="linkbtn" id="langToggle" type="button">SO</button>
-      <button class="linkbtn" id="themeToggle" type="button" title="Toggle theme">☀️</button>
-      <button class="linkbtn hidden" id="logoutBtn" type="button" data-i18n="drv.logout">Log out</button>
+      <a class="brand" href="/">
+        <img src="/icon-192.png" alt="" width="32" height="32" />
+        <h1><small>GuriKaabe</small><span data-i18n="drv.title">Driver</span></h1>
+      </a>
+      <span class="sync-state hidden" id="syncState"></span>
+      <button class="iconbtn" id="langToggle" type="button">SO</button>
+      <button class="iconbtn" id="themeToggle" type="button" title="Toggle theme">☀️</button>
+      <button class="iconbtn hidden" id="logoutBtn" type="button" aria-label="Log out" title="Log out">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h4v16h-4"/><path d="M10 8l-4 4 4 4M6 12h10"/></svg>
+      </button>
     </header>
     <div class="statusbar hidden" id="statusbar">
       <span class="sb-dot"></span>
       <span class="sb-text" id="sbText"></span>
-      <!-- Offline queue state. Hidden while everything is saved: a permanent green badge
-           trains people to ignore it, and this only matters when it is not green. -->
-      <span class="sync-state hidden" id="syncState"></span>
       <span class="sb-time" id="sbTime"></span>
     </div>
     <main>
       <!-- Login -->
-      <section id="loginView" class="card">
-        <label for="msisdn" data-i18n="auth.phone">Your phone number</label>
-        <input id="msisdn" type="tel" placeholder="61 234 5678" />
-        <div class="phone-hint muted" id="phoneHint"></div>
-        <label for="pin" data-i18n="drv.pin">PIN</label>
-        <input id="pin" type="password" inputmode="numeric" placeholder="••••" />
-        <button id="loginBtn" type="button" data-i18n="drv.login">Log in</button>
-        <p class="muted" style="margin:14px 0 0;"><span data-i18n="drv.setup.prompt">New driver?</span>
-          <button class="linkbtn" id="showSetup" type="button" data-i18n="drv.setup.link">Set up account →</button></p>
+      <section id="loginView">
+        <div class="screen-head" style="margin-top:12px;">
+          <h2 data-i18n="drv.login.title">Driver sign-in</h2>
+          <p class="muted" data-i18n="drv.login.sub">Use the phone number and PIN you set up.</p>
+        </div>
+        <div class="card">
+          <label for="msisdn" style="margin-top:0;" data-i18n="auth.phone">Your phone number</label>
+          <input id="msisdn" type="tel" placeholder="61 234 5678" />
+          <div class="phone-hint muted" id="phoneHint"></div>
+          <label for="pin" data-i18n="drv.pin">PIN</label>
+          <input id="pin" class="code-input" type="password" inputmode="numeric" placeholder="••••" />
+          <button id="loginBtn" type="button" data-i18n="drv.login">Log in</button>
+        </div>
+        <button class="tile" id="showSetup" type="button">
+          <span class="tile-body"><span class="tile-title" data-i18n="drv.setup.prompt">New driver?</span>
+            <span class="tile-sub" data-i18n="drv.setup.link">Set up account →</span></span>
+          <span class="chev">›</span>
+        </button>
       </section>
 
       <!-- Claim the account an admin created: the texted code proves it's your phone, and you
            choose your own PIN. Nobody else ever knows it. -->
-      <section id="setupView" class="card hidden">
-        <h3 style="margin:0 0 6px;" data-i18n="drv.setup.title">Set up your account</h3>
-        <p class="muted" style="margin:0 0 10px;" data-i18n="drv.setup.intro">Enter the 8-digit code we sent you (by text or email), then choose a 6-digit PIN.</p>
-        <label for="sPhone" data-i18n="auth.phone">Your phone number</label>
-        <input id="sPhone" type="tel" inputmode="tel" placeholder="61 234 5678" />
-        <div class="phone-hint muted" id="sPhoneHint"></div>
-        <label for="sCode" data-i18n="drv.setup.code">Setup code</label>
-        <input id="sCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="12345678" />
-        <label for="sPin" data-i18n="drv.setup.pin">New PIN (6 digits)</label>
-        <input id="sPin" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password" />
-        <label for="sPin2" data-i18n="drv.setup.pin2">Repeat PIN</label>
-        <input id="sPin2" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password" />
-        <button id="setupBtn" type="button" data-i18n="drv.setup.btn">Save PIN &amp; log in</button>
-        <button class="secondary" id="setupBack" type="button" data-i18n="nav.back">← Back</button>
-        <div class="muted" id="setupHint"></div>
+      <section id="setupView" class="hidden">
+        <button class="linkbtn" id="setupBack" type="button" style="margin-bottom:12px;" data-i18n="nav.back">← Back</button>
+        <div class="screen-head">
+          <h2 data-i18n="drv.setup.title">Set up your account</h2>
+          <p class="muted" data-i18n="drv.setup.intro">Enter the 8-digit code we sent you (by text or email), then choose a 6-digit PIN.</p>
+        </div>
+        <div class="card">
+          <label for="sPhone" style="margin-top:0;" data-i18n="auth.phone">Your phone number</label>
+          <input id="sPhone" type="tel" inputmode="tel" placeholder="61 234 5678" />
+          <div class="phone-hint muted" id="sPhoneHint"></div>
+          <label for="sCode" data-i18n="drv.setup.code">Setup code</label>
+          <input id="sCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="12345678" />
+          <label for="sPin" data-i18n="drv.setup.pin">New PIN (6 digits)</label>
+          <input id="sPin" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password" />
+          <label for="sPin2" data-i18n="drv.setup.pin2">Repeat PIN</label>
+          <input id="sPin2" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password" />
+          <button id="setupBtn" type="button" data-i18n="drv.setup.btn">Save PIN &amp; log in</button>
+          <div class="muted" id="setupHint" style="margin-top:8px;"></div>
+        </div>
       </section>
 
-      <!-- Queue -->
-      <section id="queueView" class="card hidden">
-        <div class="row" style="align-items:center;">
-          <h3 style="margin:0;" data-i18n="drv.orders">My deliveries</h3>
-          <button class="secondary" id="refreshBtn" type="button" style="max-width:140px;margin:0;" data-i18n="drv.refresh">Refresh</button>
+      <!-- Job list -->
+      <section id="queueView" class="hidden">
+        <div class="between screen-head">
+          <h2 data-i18n="drv.today">My deliveries</h2>
+          <button class="iconbtn" id="refreshBtn" type="button" aria-label="Refresh" title="Refresh">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>
+          </button>
         </div>
-        <div id="queue" class="scroll-list"></div>
+        <div class="kpis" style="grid-template-columns:1fr 1fr;">
+          <div class="kpi gold"><div class="k-label" data-i18n="drv.toPick">To pick up</div><div class="k-value" id="countPick">0</div></div>
+          <div class="kpi"><div class="k-label" data-i18n="drv.toDeliver">To deliver</div><div class="k-value" id="countDeliver">0</div></div>
+        </div>
+        <div id="queue"></div>
       </section>
 
-      <!-- Order detail / shopping list -->
-      <section id="detailView" class="card hidden">
-        <button class="secondary" id="backBtn" type="button" style="margin:0 0 12px;" data-i18n="nav.back">← Back</button>
-        <div class="row" style="align-items:center;">
-          <div class="muted"><span data-i18n="order.num">Order #</span><span id="dOrderId"></span></div>
-          <span class="badge pending" id="dStatus"></span>
+      <!-- One job -->
+      <section id="detailView" class="hidden">
+        <div class="between" style="margin-bottom:12px;">
+          <button class="linkbtn" id="backBtn" type="button" data-i18n="nav.back">← Back</button>
+          <span class="badge info" id="dStatus"></span>
+        </div>
+        <div class="screen-head">
+          <h2><span data-i18n="order.num">Order #</span><span class="mono" id="dOrderId"></span></h2>
+        </div>
+        <div class="stepper" id="stepper">
+          <div class="st" id="stepPick"><i>1</i><span data-i18n="drv.step.pickup">Pick up</span></div>
+          <div class="bar"></div>
+          <div class="st" id="stepDeliver"><i>2</i><span data-i18n="drv.step.deliver">Deliver</span></div>
         </div>
 
-        <h3 style="margin:14px 0 6px;" data-i18n="drv.items">Shopping list</h3>
-        <div id="dItems"></div>
-        <div class="muted"><span data-i18n="drv.budget">Customer paid: $</span><span id="dBudget"></span></div>
-
-        <h3 style="margin:16px 0 6px;" data-i18n="drv.delivery">Delivery</h3>
-        <div class="card" style="background:var(--panel-2);">
-          <div><strong data-i18n="drv.landmark">Landmark:</strong> <span id="dLandmark"></span></div>
-          <a id="navLink" href="#"><button class="secondary" type="button" data-i18n="drv.map">Open map</button></a>
-          <a id="callLink" href="#"><button class="secondary" type="button" data-i18n="drv.call">Call customer</button></a>
+        <div class="card">
+          <div class="section-title" data-i18n="drv.dropoff">Drop-off</div>
+          <div style="font-weight:700;font-size:16px;" id="dLandmark"></div>
+          <div class="btn-row">
+            <a class="btn secondary" id="navLink" href="#">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-8-8 18-2-8z"/></svg>
+              <span data-i18n="drv.nav">Navigate</span></a>
+            <a class="btn secondary" id="callLink" href="#">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg>
+              <span data-i18n="drv.callShort">Call</span></a>
+          </div>
         </div>
 
-        <h3 style="margin:16px 0 6px;" data-i18n="drv.adjust">Item or price change</h3>
-        <textarea id="adjustNote" data-i18n-ph="drv.adjust.ph" placeholder="e.g. No sugar, got jaggery instead. Oil +$0.50."></textarea>
-        <button class="warn" id="adjustBtn" type="button" data-i18n="drv.adjust.btn">Send to customer</button>
+        <div class="card">
+          <div class="section-title" data-i18n="drv.items">Shopping list</div>
+          <div id="dItems"></div>
+          <div class="between" style="margin-top:12px;">
+            <span class="muted" data-i18n="drv.paid">Customer paid</span>
+            <strong class="mono">$<span id="dBudget"></span></strong>
+          </div>
+          <div class="photos" id="dPhotos" style="margin-top:12px;"></div>
+          <details class="bare" style="margin-top:12px;">
+            <summary class="muted" data-i18n="drv.adjust">Item or price change</summary>
+            <textarea id="adjustNote" style="margin-top:10px;" data-i18n-ph="drv.adjust.ph" placeholder="e.g. No sugar, got jaggery instead. Oil +$0.50."></textarea>
+            <button class="secondary" id="adjustBtn" type="button" data-i18n="drv.adjust.btn">Send to customer</button>
+          </details>
+        </div>
 
-        <h3 style="margin:16px 0 6px;" data-i18n="order.photos">Photos</h3>
-        <div class="photos" id="dPhotos"></div>
-        <input id="proofPhoto" type="file" accept="image/*" capture="environment" style="margin-top:10px;" />
-        <button class="secondary" id="proofBtn" type="button" data-i18n="drv.proof.btn">Upload delivery photo</button>
+        <!-- The step in hand, with the proof it needs. Filled by renderActions(). -->
+        <div class="card raised" id="actions"></div>
 
-        <h3 style="margin:16px 0 6px;" data-i18n="drv.actions">Actions</h3>
-        <div id="actions"></div>
+        <details id="problemBox" class="hidden">
+          <summary data-i18n="drv.problem">Report a problem</summary>
+          <label for="failReason" data-i18n="drv.fail.reason">What went wrong?</label>
+          <select id="failReason">
+            <option value="Customer not answering" data-i18n="drv.fail.noAnswer">Customer not answering</option>
+            <option value="Items not available" data-i18n="drv.fail.noStock">Items not available</option>
+            <option value="Customer cancelled" data-i18n="drv.fail.cancelled">Customer cancelled</option>
+            <option value="Address not safe or not found" data-i18n="drv.fail.unsafe">Address not safe or not found</option>
+          </select>
+          <button class="danger-ghost" id="failBtn" type="button" data-i18n="drv.fail.btn">Stop this order</button>
+        </details>
       </section>
     </main>
   </div>

@@ -20,7 +20,9 @@ import { transitionOrder, postMessage, assignDriver } from '../commands/orders.j
 import {
   getActiveOrders,
   getOrder,
+  getRecentDeliveries,
 } from '../queries/orders.js';
+import { markProofReviewed, ProofError } from '../commands/proofs.js';
 import { getDriversWithStats, getDriverById } from '../queries/drivers.js';
 import { STATUS } from '../domain/stateMachine.js';
 import { wakeOutbox, outboxHealth } from '../events/outbox.js';
@@ -432,6 +434,24 @@ operatorRouter.post('/operator/orders/:id/refund', operatorOnly, async (req, res
     res.json({ order });
   } catch (err) {
     res.status(409).json({ error: err.message });
+  }
+});
+
+// GET /api/operator/deliveries — the last week's deliveries with their proof, the ones that
+// need a look (no code, no GPS, far from the pin) and haven't had one first.
+operatorRouter.get('/operator/deliveries', operatorOnly, async (req, res) => {
+  res.json({ deliveries: await getRecentDeliveries() });
+});
+
+// POST /api/operator/orders/:id/proofs/review — "I checked this delivery". Records who.
+operatorRouter.post('/operator/orders/:id/proofs/review', operatorOnly, async (req, res, next) => {
+  if (!isUuid(req.params.id)) return res.status(404).json({ error: 'order not found' });
+  try {
+    await markProofReviewed({ orderId: req.params.id, actor: actorLabel(req.auth) });
+    res.json({ ok: true });
+  } catch (err) {
+    if (err instanceof ProofError) return res.status(err.status).json({ error: err.message });
+    next(err);
   }
 });
 

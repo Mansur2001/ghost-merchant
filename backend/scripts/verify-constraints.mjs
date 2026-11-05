@@ -17,11 +17,15 @@ const REQUIRED_INDEXES = {
   idx_operators_active: 'login lookup among active accounts',
   idx_refunds_one_open: 'one open refund per order',
   idx_refunds_owed: 'the reconciliation queue',
+  idx_order_proofs_review: "the operator's queue of deliveries to check",
 };
 
 const REQUIRED_CHECKS = {
   orders_total_amount_check: 'an order total can never be negative',
-  order_photos_kind_check: 'photo kind is one of the two known values',
+  order_photos_kind_check: 'photo kind is one of the three known values',
+  delivery_handoffs_code_check: 'a delivery code is exactly 4 digits',
+  order_proofs_step_check: 'proof step is pickup or delivery',
+  order_proofs_method_check: 'proof method is photo, code or photo_no_code',
   refunds_amount_check: 'a refund can never be negative',
   refunds_status_check: 'refund status is one of owed/settled/waived',
   users_has_login: 'every customer account can be signed in to (phone or email)',

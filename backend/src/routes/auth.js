@@ -16,6 +16,7 @@ import { rateLimit } from '../middleware/rateLimit.js';
 import { isWellFormedCode } from '../domain/otp.js';
 import { parsePhone } from '../domain/phone.js';
 import { config } from '../config.js';
+import { smsAvailable } from '../notify/smsSender.js';
 
 export const authRouter = Router();
 
@@ -45,7 +46,9 @@ const verifyLimits = [
 // GET /api/auth/channels — whether the sign-in screen should offer "Email me a code".
 // Server-wide only: it says nothing about any particular number.
 authRouter.get('/auth/channels', (req, res) => {
-  res.json({ sms: true, email: emailAvailable() });
+  // The Play review number signs in by phone with no text sent, so keep the phone box for it.
+  const review = Boolean(config.otp.review?.phone && isWellFormedCode(config.otp.review?.code));
+  res.json({ sms: smsAvailable() || review, email: emailAvailable() });
 });
 
 // POST /api/auth/otp/request { phone }  or  { channel: 'email', email }

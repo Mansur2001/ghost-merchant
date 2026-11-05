@@ -1,7 +1,7 @@
 // Staff onboarding by invite: an admin adds a driver (setup code by email), and the driver
 // chooses their own PIN with it and lands in their queue.
 import { test, expect } from '@playwright/test';
-import { openApp, signInOperator, codeIn, somaliNumber, SEED } from './helpers.js';
+import { openApp, signInOperator, codeIn, somaliNumber, SEED, goSection } from './helpers.js';
 
 test('admin invites a driver by email; the driver sets a PIN and signs in', async ({ browser }, testInfo) => {
   const admin = await openApp(browser, testInfo);
@@ -9,6 +9,7 @@ test('admin invites a driver by email; the driver sets a PIN and signs in', asyn
 
   const name = `Staging Driver ${Date.now().toString().slice(-5)}`;
   const phone = somaliNumber('65');
+  await goSection(admin, 'drivers');
   await admin.fill('#dName', name);
   await admin.fill('#dMsisdn', phone);
   await admin.fill('#dEmail', `driver-${Date.now()}@example.com`);

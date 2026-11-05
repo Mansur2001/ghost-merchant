@@ -106,6 +106,38 @@ customer's page flips to paid live.`
    a route under `/orders/:id` without `requireAuth, requireOrderAccess` is a data breach, not a
    missing feature. The same rule governs WebSocket `subscribe`.
 
+9. **A driver step needs evidence, checked on the server** (`domain/proof.js`,
+   `commands/proofs.js`). Pickup needs a `pickup_proof` photo; delivery needs the customer's
+   4-digit handoff code, or a door photo + reason (flagged for an operator). The proof row is
+   written in the SAME transaction as the transition. Never add a driver route that
+   transitions without it.
+
+---
+
+## Proof of delivery: the verification standard
+
+| Step | Who | Proof the server requires |
+|---|---|---|
+| Paid | operator | telecom reference (see below) |
+| Dispatched | operator | a named, active driver |
+| Picked up (`/secured`) | driver | a photo of the items (`pickup_proof`) |
+| Delivered (`/delivered`) | driver | the customer's **4-digit code** — or a door photo (`delivery_proof`) + a reason |
+| Failed (`/failed`) | driver | a reason |
+
+- **The code lives in `delivery_handoffs`, never on `orders`.** Order rows go to the assigned
+  driver (`GET /orders/:id`, socket events); a code the driver can read proves nothing. Only
+  `GET /orders/:id/handoff` (customerOnly) returns it. Operators can't see it either.
+- Created with the order (same transaction), CSPRNG, compared in constant time, **5 tries**
+  then locked (the photo path remains). Wrong tries RETURN from the transaction and throw
+  after, so the count commits.
+- **GPS is evidence, not a gate.** Each step stores the driver's fix and its distance from the
+  customer's pin. No fix, >300 m away, or no code → `flags` → the operator's **Deliveries**
+  review (`GET /operator/deliveries`, "Mark checked" records who). A cheap phone with no fix
+  must not strand a driver who did the job.
+- **Evidence photos freeze** once their step is done (409): the keys are deterministic, so a
+  later upload would silently replace the proof.
+- Offline: photos and steps queue in order (FIFO); the server checks the code at replay.
+
 ---
 
 ## Payment confirmation: a person, not a device
@@ -346,9 +378,9 @@ MinIO runs the **AIStor** image, pinned to an exact release in `docker-compose.y
 license from a **file** (`./minio.license`, git-ignored like `.env`) and will not start without
 it. Never `latest`: an `up` must not change the storage engine under the photos by accident.
 
-Two photo types, stored in MinIO and indexed in `order_photos`:
-**`order_ref`** (customer attaches at checkout) and **`delivery_proof`** (driver uploads at
-delivery). Rules (`commands/photos.js`):
+Three photo types, stored in MinIO and indexed in `order_photos`:
+**`order_ref`** (customer attaches at checkout), **`pickup_proof`** and **`delivery_proof`**
+(driver evidence; see *Proof of delivery*). Rules (`commands/photos.js`):
 
 - Bytes are the raw request body (route-scoped `express.raw`, 6MB cap — separate from the
   sub-10KB order-JSON budget). The global `express.json` skips non-JSON bodies.
@@ -384,6 +416,13 @@ Worker that cache-first serves its shell.
   thumbnails; PAID_UNASSIGNED cards have a driver picker →
   `POST /operator/orders/:id/assign`, which sets `driver_id` and transitions to DISPATCHED.
   A Drivers panel lists the roster with live workload stats.
+- **Layout**: standard delivery-app shell. Customer: app bar + bottom tabs (Home / Orders /
+  Help / Account), sectioned checkout with a sticky action bar, tracking screen (status hero,
+  delivery code, proof, timeline from `/orders/:id/timeline`, chat). Driver: job list, then
+  one job with a 2-step stepper and the step's proof panel. Operator: sidebar sections
+  (pills on a phone) — Orders, Deliveries, Refunds, Drivers, Team, Account. Gold is the accent
+  only; surfaces are neutral. Old WebViews (minSdk 22) lack `color-mix`: keep a plain fallback
+  line before any use of it.
 - **Theme** (`shared/theme.js`): black ↔ white with constant gold trim, set before paint (no
   flash), persisted in `localStorage` (`gm_theme`) across all three PWAs.
 - **Language** (`shared/i18n.js`): English ↔ Somali toggle (SO/EN in the header) on the customer
@@ -428,7 +467,7 @@ Guards (`db/seedSafety.js`), because the seed truncates everything and its passw
 ## Testing
 
 ```bash
-cd backend && npm install && npm test   # 378 Jest unit tests, ESM via --experimental-vm-modules
+cd backend && npm install && npm test   # 394 Jest unit tests, ESM via --experimental-vm-modules
 ./scripts/verify/run-all.sh             # live suites over real HTTP + WebSocket
 ```
 

@@ -18,7 +18,7 @@ for (const path of ['/', '/driver/', '/operator/']) {
 test('phone switch draws both flags', async ({ browser }, testInfo) => {
   const page = await openApp(browser, testInfo);
   await page.goto('/');
-  await page.getByRole('button', { name: /I'm a customer/ }).click();
+  await page.locator('#asCustomer').click();
   const sw = page.locator('#authView .phone-field .cc-switch');
   await expect(sw.locator('button')).toHaveText(['+252', '+1']);
   await expect(sw.locator('svg')).toHaveCount(2);
@@ -27,7 +27,7 @@ test('phone switch draws both flags', async ({ browser }, testInfo) => {
 test('Somali toggle switches the text', async ({ browser }, testInfo) => {
   const page = await openApp(browser, testInfo);
   await page.goto('/');
-  await page.getByRole('button', { name: /I'm a customer/ }).click();
+  await page.locator('#asCustomer').click();
   await page.click('#langToggle');
   await expect(page.locator('#sendCodeBtn')).toHaveText('Koodh ii soo dir');
 });

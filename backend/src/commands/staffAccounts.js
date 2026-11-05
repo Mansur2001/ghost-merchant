@@ -20,6 +20,7 @@ import { maskPhone } from '../domain/redact.js';
 import { normalizeEmail, maskEmail } from '../domain/email.js';
 import { sendSetupSms } from '../notify/smsSender.js';
 import { sendSetupEmail } from '../notify/emailSender.js';
+import { smsAvailable } from '../notify/smsSender.js';
 
 export class StaffError extends Error {
   constructor(message, status = 400) {
@@ -100,6 +101,8 @@ async function sendCode({ phone, email }, role, code) {
 //               from the request, and the request is marked as having produced an account).
 export async function createStaffAccount({ role, name, phone, username, email: rawEmail, createdBy, requestId }) {
   const email = emailOrNull(rawEmail);
+  // No texts on this server: the code can only go by email, so say so before creating anything.
+  if (!email && !smsAvailable()) throw new StaffError('text messages are off on this server — add an email to send the setup code');
   const result = await withTransaction(async (tx) => {
     let r = { role, name, phone };
 
@@ -194,6 +197,7 @@ export async function resendSetupCode({ role, accountId, createdBy, email: rawEm
       await model.update({ where: { id }, data: { email: newEmail } });
     }
     const email = via === 'sms' ? null : newEmail || account.email || null;
+    if (!email && !smsAvailable()) throw new StaffError('text messages are off on this server — add an email to send the setup code');
     const code = await issueCode(tx, { role, accountId: id, phone, createdBy });
     return { role, phone, email, code };
   });

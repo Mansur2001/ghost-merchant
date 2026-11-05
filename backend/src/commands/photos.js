@@ -14,14 +14,17 @@ const EXT = {
   'image/heic': 'heic',
 };
 
+export const PHOTO_KINDS = ['order_ref', 'pickup_proof', 'delivery_proof'];
+
 const NOTE = {
   order_ref: '📷 Customer added a reference photo.',
+  pickup_proof: '🛍️ Driver photographed the items.',
   delivery_proof: '📦 Driver added a delivery-proof photo.',
 };
 
 // Store (or replace) a photo for an order. `bytes` is a Buffer, `contentType` an image/* MIME.
 export async function savePhoto({ orderId, kind, bytes, contentType, uploadedBy }) {
-  if (!['order_ref', 'delivery_proof'].includes(kind)) throw new Error(`bad photo kind: ${kind}`);
+  if (!PHOTO_KINDS.includes(kind)) throw new Error(`bad photo kind: ${kind}`);
   if (!bytes || !bytes.length) throw new Error('empty photo body');
   const ext = EXT[contentType] || 'bin';
   // One logical photo per (order, kind) → deterministic key → idempotent overwrite.

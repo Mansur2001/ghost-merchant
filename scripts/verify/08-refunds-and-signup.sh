@@ -112,8 +112,9 @@ echo "── 9. \"I've paid\" -> operator confirms -> a later failure still owes
 # No device reads receipts. The customer's claim only tells the operator where to look; the
 # operator's confirmation records the payment, so failing the order later opens a refund.
 # Its own fixture, so it doesn't depend on what earlier sections left behind.
-ORDER=$(psql "INSERT INTO orders(user_phone, status, total_amount, items, landmark_text)
-              VALUES ('+252612345678','PENDING_PAYMENT', 33.33, '[]'::jsonb, 'claim fixture')
+ORDER=$(psql "INSERT INTO orders(user_phone, user_id, status, total_amount, items, landmark_text)
+              VALUES ('+252612345678', (SELECT id FROM users WHERE phone_number='+252612345678'),
+                      'PENDING_PAYMENT', 33.33, '[]'::jsonb, 'claim fixture')
               RETURNING id;" | head -1)
 DEVCODE=$(curl -sk -X POST -H 'Content-Type: application/json' -d '{"phone":"+252612345678"}' $B/auth/otp/request |
   python3 -c "import sys,json;print(json.load(sys.stdin).get('devCode',''))")
