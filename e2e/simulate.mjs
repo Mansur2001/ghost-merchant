@@ -67,9 +67,23 @@ async function emailOnly(page) {
   await page.route('**/api/auth/channels', (r) => r.fulfill({ json: { sms: false, email: true } }));
 }
 
+// The everyday way in: email + password, no email has to arrive.
+const SIM_PASSWORD = 'market day 2026';
 async function customerSignsUp(page, email) {
   await page.goto(BASE + '/');
   await page.click('#asCustomer');
+  await page.fill('#pwEmail', email);
+  await page.fill('#pwPass', SIM_PASSWORD);
+  await page.fill('#pwPass2', SIM_PASSWORD);
+  await page.click('#pwBtn');
+  await page.waitForSelector('#startView', { state: 'visible' });
+}
+
+// The emailed-code way in (proving the address, or "forgot password").
+async function customerSignsInByCode(page, email) {
+  await page.goto(BASE + '/');
+  await page.click('#asCustomer');
+  await page.click('#useCode');
   await page.waitForSelector('#signinEmail', { state: 'visible' });
   await page.fill('#signinEmail', email);
   await page.click('#sendCodeBtn');
@@ -158,14 +172,14 @@ await step(cust.page, 'Customer', 'Opens the app for the first time', 'Landing p
   must(await cust.page.isVisible('#asCustomer'), 'no Start button');
 });
 await cust.page.click('#asCustomer');
-await step(cust.page, 'Customer', 'Taps “Start an order” (email-only server)', 'Email box only — no phone switch, because SMS is off', async () => {
-  await cust.page.waitForSelector('#signinEmail', { state: 'visible' });
-  must(await cust.page.isHidden('#channelPick'), 'phone/email switch still shown');
+await step(cust.page, 'Customer', 'Taps “Create account” (email-only server)', 'Email + password form; no phone box, because SMS is off', async () => {
+  await cust.page.waitForSelector('#pwEmail', { state: 'visible' });
+  must(await cust.page.isVisible('#pwPass2'), 'no repeat-password box on sign-up');
   must(await cust.page.isHidden('#phone'), 'phone box shown');
 });
 const email = `sim-${stamp}@example.com`;
 await customerSignsUp(cust.page, email);
-await step(cust.page, 'Customer', `Signs up with ${email} and the emailed code`, 'Lands on New order, signed in', async () => {
+await step(cust.page, 'Customer', `Creates an account with ${email} and a password`, 'Lands on New order, signed in — no email had to arrive', async () => {
   await waitText(cust.page.locator('#signedInAs'), new RegExp(email));
 });
 let A;
@@ -247,6 +261,17 @@ await step(cust.page, 'Customer', 'Sees the end of the order', '“Delivered”,
 await cust.page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
 await step(cust.page, 'Customer', 'Scrolls the tracking page', 'Timeline with real times for each step, and the chat history', async () => {
   await waitText(cust.page.locator('#timeline'), /Delivered/);
+});
+await step(cust.page, 'Customer', 'Signs out, then signs back in with email + password', 'Signed in at once, and the delivered order is still in “Orders”', async () => {
+  await cust.page.click('.tabbar [data-tab="account"]');
+  await cust.page.click('#signOutBtn');
+  await cust.page.click('#asSignin');
+  await cust.page.fill('#pwEmail', email);
+  await cust.page.fill('#pwPass', SIM_PASSWORD);
+  await cust.page.click('#pwBtn');
+  await cust.page.waitForSelector('#startView', { state: 'visible' });
+  await cust.page.click('.tabbar [data-tab="orders"]');
+  await waitText(cust.page.locator('#resumeList'), /Delivered/);
 });
 await section(op.page, 'deliveries');
 await step(op.page, 'Operator', 'Opens Deliveries and selects the order', 'Proven by code, GPS ~25 m from the pin, photos — nothing to check', async () => {

@@ -118,7 +118,83 @@ function setAuthMode(mode) {
   $('authIntro').dataset.i18n = `auth.intro.${mode}`;
   $('authTitle').textContent = t($('authTitle').dataset.i18n);
   $('authIntro').textContent = t($('authIntro').dataset.i18n);
+  renderAuthMethod();
 }
+
+// ── Email + password (the everyday way in) ──
+// A password sign-in needs no email to arrive. The emailed code stays for proving the address
+// and for "forgot password": after a code sign-in the account can set a new one (15 minutes).
+let authMethod = 'password';
+let forgotFlow = false; // signed in by code from "Forgot your password?" -> go set a new one
+let promptPasswordReset = false;
+function renderAuthMethod() {
+  const pw = authMethod === 'password' && emailOffered;
+  $('pwBlock').classList.toggle('hidden', !pw);
+  $('codeBlock').classList.toggle('hidden', pw);
+  $('usePassword').classList.toggle('hidden', !emailOffered);
+  $('pwConfirmWrap').classList.toggle('hidden', authMode !== 'signup');
+  $('pwPass').autocomplete = authMode === 'signup' ? 'new-password' : 'current-password';
+  $('pwBtn').dataset.i18n = authMode === 'signup' ? 'auth.pwCreate' : 'auth.pwSignin';
+  $('pwBtn').textContent = t($('pwBtn').dataset.i18n);
+  $('useCode').dataset.i18n = `auth.useCode.${authMode}`;
+  $('useCode').textContent = t($('useCode').dataset.i18n);
+  if (pw) {
+    $('consentNote').dataset.i18nHtml = 'auth.consentPw';
+    $('consentNote').innerHTML = t('auth.consentPw');
+  } else {
+    renderChannel();
+  }
+}
+$('pwShow').addEventListener('change', () => {
+  const type = $('pwShow').checked ? 'text' : 'password';
+  ['pwPass', 'pwPass2'].forEach((id) => { $(id).type = type; });
+});
+$('useCode').addEventListener('click', () => {
+  authMethod = 'code';
+  forgotFlow = authMode === 'signin';
+  // A forgotten password is an email account's: send the code there. Otherwise keep the
+  // server's default channel (phone where SMS works).
+  if (emailOffered && (forgotFlow || !smsOffered)) {
+    otpChannel = 'email';
+    if (!$('signinEmail').value) $('signinEmail').value = $('pwEmail').value;
+  }
+  renderAuthMethod();
+});
+$('usePassword').addEventListener('click', () => {
+  authMethod = 'password';
+  forgotFlow = false;
+  if (!$('pwEmail').value) $('pwEmail').value = $('signinEmail').value;
+  renderAuthMethod();
+});
+async function passwordSubmit() {
+  const email = $('pwEmail').value.trim();
+  const password = $('pwPass').value;
+  if (!EMAIL_RE.test(email)) return toast(t('email.bad'));
+  if (password.length < 8) return toast(t('err.pwShort'));
+  if (authMode === 'signup' && password !== $('pwPass2').value) return toast(t('auth.pwMismatch'));
+  $('pwBtn').disabled = true;
+  $('pwStatus').textContent = '';
+  const res = await api(authMode === 'signup' ? '/auth/signup' : '/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  $('pwBtn').disabled = false;
+  if (res.error) {
+    $('pwStatus').textContent = errText(res);
+    // "This email already has an account": the next thing they want is Sign in.
+    if (res.status === 409) setAuthMode('signin');
+    return;
+  }
+  setSession(res.token, res.email || res.phone);
+  $('pwPass').value = ''; $('pwPass2').value = '';
+  showSignedIn();
+  goTab(afterSignIn || 'home');
+  afterSignIn = null;
+  toast(t(authMode === 'signup' ? 'auth.okNew' : 'auth.ok'));
+}
+$('pwBtn').addEventListener('click', passwordSubmit);
+$('pwPass').addEventListener('keydown', (e) => { if (e.key === 'Enter' && authMode === 'signin') passwordSubmit(); });
 $('authMode').querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => setAuthMode(b.dataset.mode)));
 $('authHome').addEventListener('click', () => showView('landingView'));
 
@@ -126,6 +202,7 @@ $('authHome').addEventListener('click', () => showView('landingView'));
 // With a phone (a text) or an email (only offered when the server sends email). Either alone
 // is a full sign-in, and a first sign-in creates the account. The switch swaps the box.
 let otpChannel = 'sms';
+let smsOffered = true;
 let emailOffered = false;
 let codeFor = null; // what the code was sent for — { phone } or { email } — so verify matches it
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -156,10 +233,13 @@ $('channelPick').querySelectorAll('[data-channel]').forEach((b) =>
   const res = await api('/auth/channels');
   emailOffered = Boolean(res.email);
   // A server without texting (no Twilio) signs everyone in by email: no switch, no phone box.
-  const smsOffered = res.sms !== false;
+  smsOffered = res.sms !== false;
   $('channelPick').classList.toggle('hidden', !(emailOffered && smsOffered));
   otpChannel = emailOffered && !smsOffered ? 'email' : emailOffered ? otpChannel : 'sms';
+  // Passwords are email accounts: with no email on this server, codes are the only way in.
+  if (!emailOffered) authMethod = 'code';
   renderChannel();
+  renderAuthMethod();
 })();
 
 async function requestCode() {
@@ -239,6 +319,8 @@ async function verifyCode() {
   codeFor = null;
   showSignedIn();
   // Where they were headed before sign-in (My orders, Account) — otherwise a new order.
+  // Came in through "Forgot your password?": straight to setting a new one.
+  if (forgotFlow) { afterSignIn = 'account'; promptPasswordReset = true; forgotFlow = false; }
   goTab(afterSignIn || 'home');
   afterSignIn = null;
   toast(t(authMode === 'signup' ? 'auth.okNew' : 'auth.ok'));
@@ -788,6 +870,38 @@ async function sendChat() {
   }
 }
 
+// ── Account: set or change the password ──
+let pwState = null;
+async function loadPasswordBox() {
+  const res = await api('/auth/me');
+  if (res.error || !res.email) { $('pwSetBox').classList.add('hidden'); return; }
+  pwState = res;
+  const needCurrent = res.hasPassword && !res.canResetWithoutCurrent;
+  $('pwSetTitle').dataset.i18n = res.hasPassword ? 'acct.pw.title.change' : 'acct.pw.title.set';
+  $('pwSetTitle').textContent = t($('pwSetTitle').dataset.i18n);
+  $('pwCurrentWrap').classList.toggle('hidden', !needCurrent);
+  $('pwResetNote').classList.toggle('hidden', !(promptPasswordReset || (res.canResetWithoutCurrent && res.hasPassword)));
+  $('pwSetBox').classList.remove('hidden');
+  if (promptPasswordReset) { $('pwNew').focus(); promptPasswordReset = false; }
+}
+$('pwSetBtn').addEventListener('click', async () => {
+  const newPassword = $('pwNew').value;
+  if (newPassword.length < 8) return toast(t('err.pwShort'));
+  if (newPassword !== $('pwNew2').value) return toast(t('auth.pwMismatch'));
+  $('pwSetBtn').disabled = true;
+  const res = await api('/auth/password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ newPassword, currentPassword: $('pwCurrent').value || undefined }),
+  });
+  $('pwSetBtn').disabled = false;
+  if (res.error) { $('pwSetStatus').textContent = errText(res); return; }
+  $('pwNew').value = ''; $('pwNew2').value = ''; $('pwCurrent').value = '';
+  $('pwSetStatus').textContent = '';
+  toast(t('acct.pw.saved'));
+  loadPasswordBox();
+});
+
 // ── Navigation: bottom tabs ──
 // Home = the new-order screen when signed in, the landing page when not. Orders and Account
 // need a session, so they send a signed-out visitor to sign-in first and come back after.
@@ -824,6 +938,7 @@ function goTab(tab, { start = false } = {}) {
   if (tab === 'account') {
     showSignedIn();
     loadEmailBox();
+    loadPasswordBox();
     return showView('accountView');
   }
 }

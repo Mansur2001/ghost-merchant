@@ -36,6 +36,12 @@ model User {
   created_at   DateTime @default(now()) @db.Timestamptz(6)
   /// Proven by an email code: at sign-in, or confirmed while signed in.
   email        String?  @unique
+  /// scrypt. Null = signs in by code only.
+  password_hash        String?
+  /// When a code sent to `email` was last used — proof the address is theirs.
+  email_verified_at    DateTime? @db.Timestamptz(6)
+  /// After a code sign-in: until then a new password may be set without the old one.
+  password_reset_until DateTime? @db.Timestamptz(6)
   orders       Order[]
   email_challenge EmailChallenge?
 

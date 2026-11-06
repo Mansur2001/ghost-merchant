@@ -13,6 +13,7 @@ const prisma = {
   user: {
     findUnique: jest.fn(async ({ where }) => (where.email ? owner : account)),
     upsert: jest.fn(async ({ create }) => ({ id: 41, phone_number: null, email: null, ...create })),
+    create: jest.fn(async ({ data }) => ({ id: 41, phone_number: null, email: null, ...data })),
     update: jest.fn(async () => ({})),
   },
   otpCode: { findUnique: jest.fn(async () => ({ last_sent_at: new Date() })), deleteMany: jest.fn(), update: jest.fn() },
@@ -40,7 +41,7 @@ const live = (code) => ({ code_hash: hashCode(code), expires_at: new Date(Date.n
 beforeEach(() => {
   challenge = null; upsertWins = true; owner = null; account = null;
   jest.spyOn(console, 'error').mockImplementation(() => {});
-  [sendOtpSms, sendOtpEmail, prisma.$queryRaw, prisma.otpCode.deleteMany, prisma.user.upsert, prisma.user.update]
+  [sendOtpSms, sendOtpEmail, prisma.$queryRaw, prisma.otpCode.deleteMany, prisma.user.upsert, prisma.user.update, prisma.user.create]
     .forEach((f) => f.mockClear());
 });
 
@@ -79,10 +80,31 @@ describe('verifyOtpByEmail', () => {
   test('the right code signs in to the account behind the email, creating it the first time', async () => {
     challenge = live('123456');
     const user = await verifyOtpByEmail('Amina@Example.com', '123456');
-    expect(prisma.user.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      where: { email: 'amina@example.com' }, create: { email: 'amina@example.com' },
+    expect(prisma.user.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ email: 'amina@example.com', email_verified_at: expect.any(Date) }),
     }));
     expect(user).toMatchObject({ id: 41, email: 'amina@example.com', phone_number: null });
+  });
+
+  test('the first code on a password account proves the email and REMOVES a squatter\'s password', async () => {
+    challenge = live('123456');
+    owner = { id: 5, email_verified_at: null };
+    await verifyOtpByEmail('amina@example.com', '123456');
+    expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 5 },
+      data: expect.objectContaining({ email_verified_at: expect.any(Date), password_hash: null, password_reset_until: expect.any(Date) }),
+    }));
+  });
+
+  test('an already-verified account keeps its password; the code only opens the reset window', async () => {
+    challenge = live('123456');
+    const verified = new Date('2026-01-01');
+    owner = { id: 5, email_verified_at: verified };
+    await verifyOtpByEmail('amina@example.com', '123456');
+    const data = prisma.user.update.mock.calls[0][0].data;
+    expect(data).not.toHaveProperty('password_hash');
+    expect(data.email_verified_at).toBe(verified);
+    expect(data.password_reset_until).toBeInstanceOf(Date);
     expect(rawKeys()[0]).toMatch(/^email:[0-9a-f]{64}$/);
   });
 
@@ -132,7 +154,7 @@ describe('adding an email to a phone account', () => {
     owner = { id: 9, phone_number: '+252651234567', email: 'amina@example.com' };
     await expect(verifyEmailLink(7, '123456')).resolves.toEqual({ email: 'amina@example.com' });
     expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 9 }, data: { email: null } });
-    expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 7 }, data: { email: 'amina@example.com' } });
+    expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: 7 }, data: { email: 'amina@example.com', email_verified_at: expect.any(Date) } });
   });
 
   test("an email-only account can't remove its only way in", async () => {

@@ -60,6 +60,17 @@
 - **Not built, on purpose:** custody/escrow wallets, cash advances to drivers, and customer ID checks (see *Business posture*). The pasted brief asked for these; they conflict with the rules in CLAUDE.md.
 - Tests: 409 unit, 17 Playwright, and a 52-step simulation (`staging.sh simulate`).
 
+## 2026-11-06 (later): passwords, SendGrid drops
+
+- **SendGrid drops codes.** The production log shows 10 sends accepted (202) and only 1 used, against 11 failed code entries: the mail is lost after SendGrid accepts it. The sender is `@gmail.com`, which is spoofing-filter bait. Fix: authenticate `gurikaabe.com` in SendGrid and send from `no-reply@gurikaabe.com` (`docs/EMAIL_DELIVERY.md`). The key is send-only, so per-message reasons are in SendGrid's Activity Feed.
+- **Customer passwords:**
+  - email + password sign-up and sign-in, working at once with no email needed;
+  - an email code proves the address and resets a forgotten password (a 15-minute, single-use window);
+  - the first code sign-in deletes a password set before the address was proven, so squatting an email gains nothing;
+  - migration `20261107090000_customer_passwords`.
+- Tests: 423 unit, 19 Playwright, a 53-step simulation.
+- The dev Mac was overloaded: the Docker VM ran two stacks at over 400% CPU and heavy swap, so tests timed out on wall-clock time. Stop the dev stack (`docker compose stop`) while staging runs.
+
 ## Decisions
 
 - **GPS is evidence, not a gate.** Refusing a delivery because a cheap handset has no fix would strand a driver who did the job. It is flagged instead.

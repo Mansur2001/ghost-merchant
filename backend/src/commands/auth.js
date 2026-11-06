@@ -148,9 +148,33 @@ export async function verifyOtp(rawPhone, submittedCode) {
 export async function verifyOtpByEmail(rawEmail, submittedCode) {
   const email = normalizeEmail(rawEmail);
   if (!email) throw new OtpInvalidError();
-  return consumeChallenge(emailKey(email), submittedCode, (tx) =>
-    tx.user.upsert({ where: { email }, update: {}, create: { email }, select: ACCOUNT }));
+  // A used code proves the address. Three things follow, in the same transaction:
+  //   * the email is marked verified;
+  //   * the FIRST proof removes any password set before it — whoever made a password account
+  //     on someone else's email loses it the moment the real owner signs in with a code;
+  //   * a short window opens to set a new password without the old one (the reset flow).
+  // The challenge row is locked FOR UPDATE above, so two verifies of one email serialize here.
+  return consumeChallenge(emailKey(email), submittedCode, async (tx) => {
+    const now = new Date();
+    const resetUntil = new Date(now.getTime() + PASSWORD_RESET_WINDOW_MS);
+    const existing = await tx.user.findUnique({ where: { email }, select: { id: true, email_verified_at: true } });
+    if (!existing) {
+      return tx.user.create({ data: { email, email_verified_at: now, password_reset_until: resetUntil }, select: ACCOUNT });
+    }
+    return tx.user.update({
+      where: { id: existing.id },
+      data: {
+        email_verified_at: existing.email_verified_at || now,
+        ...(existing.email_verified_at ? {} : { password_hash: null }),
+        password_reset_until: resetUntil,
+      },
+      select: ACCOUNT,
+    });
+  });
 }
+
+// How long after a code sign-in a new password may be set without the old one.
+export const PASSWORD_RESET_WINDOW_MS = 15 * 60 * 1000;
 
 // Check a submitted code against the challenge under `key`. On success the challenge is
 // consumed (single-use) and `account(tx)` finds or creates the account, in the same transaction.
@@ -273,7 +297,7 @@ export async function verifyEmailLink(userId, submittedCode) {
       if (!owner.phone_number) return { ok: false, taken: true };
       await tx.user.update({ where: { id: owner.id }, data: { email: null } });
     }
-    await tx.user.update({ where: { id: userId }, data: { email: challenge.email } });
+    await tx.user.update({ where: { id: userId }, data: { email: challenge.email, email_verified_at: new Date() } });
     return { ok: true, email: challenge.email };
   });
   // Said only AFTER the code proved this person reads that inbox, so it reveals nothing.

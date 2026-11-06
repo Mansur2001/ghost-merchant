@@ -13,6 +13,7 @@ import {
 } from '../commands/auth.js';
 import { signToken, requireRole, CUSTOMER_TOKEN_TTL_SECONDS } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
+import { signUpWithPassword, signInWithPassword, setPassword, passwordState, PasswordError } from '../commands/passwords.js';
 import { isWellFormedCode } from '../domain/otp.js';
 import { parsePhone } from '../domain/phone.js';
 import { config } from '../config.js';
@@ -115,7 +116,10 @@ authRouter.get('/auth/me', requireRole('customer'), async (req, res, next) => {
   try {
     const user = await getCustomer(req.auth.uid);
     if (!user) return res.status(401).json({ error: 'unauthorized' });
-    res.json({ phone: user.phone_number, email: user.email, role: req.auth.role, exp: req.auth.exp });
+    res.json({
+      phone: user.phone_number, email: user.email, role: req.auth.role, exp: req.auth.exp,
+      ...(await passwordState(req.auth.uid)),
+    });
   } catch (err) {
     next(err);
   }
@@ -177,3 +181,59 @@ authRouter.delete('/auth/email', requireRole('customer'), async (req, res, next)
     next(err);
   }
 });
+
+// ── Email + password (customers) ──
+// So signing in doesn't depend on an email arriving. Email codes stay the proof of owning the
+// address and the way to reset a forgotten password (commands/passwords.js).
+const customerToken = (user) => signToken({ role: 'customer', uid: user.id }, CUSTOMER_TOKEN_TTL_SECONDS);
+const signedIn = (user) => ({
+  token: customerToken(user), phone: user.phone_number, email: user.email, expiresInSeconds: CUSTOMER_TOKEN_TTL_SECONDS,
+});
+const emailKeyOf = (req) => `pw:${String(req.body?.email || '').trim().toLowerCase().slice(0, 254)}`;
+function passwordFail(err, res, next) {
+  if (err instanceof PasswordError) return res.status(err.status).json({ error: err.message });
+  return next(err);
+}
+
+// POST /api/auth/signup { email, password } — the account works at once.
+authRouter.post(
+  '/auth/signup',
+  rateLimit({ windowMs: HOUR, max: 10, message: 'too many sign-ups — try again later' }),
+  async (req, res, next) => {
+    try {
+      res.status(201).json(signedIn(await signUpWithPassword(req.body || {})));
+    } catch (err) {
+      passwordFail(err, res, next);
+    }
+  }
+);
+
+// POST /api/auth/login { email, password } — one error for every failure.
+authRouter.post(
+  '/auth/login',
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: 'too many attempts' }),
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 10, key: emailKeyOf, message: 'too many attempts' }),
+  async (req, res, next) => {
+    try {
+      res.json(signedIn(await signInWithPassword(req.body || {})));
+    } catch (err) {
+      passwordFail(err, res, next);
+    }
+  }
+);
+
+// POST /api/auth/password { newPassword, currentPassword? } — set or change it. The current one
+// isn't needed within 15 minutes of an email-code sign-in: that is "forgot password".
+authRouter.post(
+  '/auth/password',
+  requireRole('customer'),
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 10, key: (req) => `pwset:${req.auth.uid}`, message: 'too many attempts' }),
+  async (req, res, next) => {
+    try {
+      await setPassword({ userId: req.auth.uid, currentPassword: req.body?.currentPassword, newPassword: req.body?.newPassword });
+      res.json({ ok: true });
+    } catch (err) {
+      passwordFail(err, res, next);
+    }
+  }
+);

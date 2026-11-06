@@ -43,6 +43,7 @@ export async function codeIn(locator, length = 6) {
 export async function signInCustomer(page, national, country = 'SO') {
   await page.goto('/');
   await page.locator('#asCustomer').click();
+  await page.click('#useCode'); // the code flow sits behind the password form
   await page.locator('#authView .phone-field .cc-switch button', { hasText: country === 'US' ? '+1' : '+252' }).click();
   await page.fill('#phone', national);
   await page.click('#sendCodeBtn');

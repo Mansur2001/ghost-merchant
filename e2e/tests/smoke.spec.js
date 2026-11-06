@@ -19,6 +19,7 @@ test('phone switch draws both flags', async ({ browser }, testInfo) => {
   const page = await openApp(browser, testInfo);
   await page.goto('/');
   await page.locator('#asCustomer').click();
+  await page.click('#useCode'); // the code flow sits behind the password form
   const sw = page.locator('#authView .phone-field .cc-switch');
   await expect(sw.locator('button')).toHaveText(['+252', '+1']);
   await expect(sw.locator('svg')).toHaveCount(2);
@@ -28,6 +29,7 @@ test('Somali toggle switches the text', async ({ browser }, testInfo) => {
   const page = await openApp(browser, testInfo);
   await page.goto('/');
   await page.locator('#asCustomer').click();
+  await page.click('#useCode'); // the code flow sits behind the password form
   await page.click('#langToggle');
   await expect(page.locator('#sendCodeBtn')).toHaveText('Koodh ii soo dir');
 });

@@ -230,7 +230,27 @@ and it is bounded: it carries a code, never money. No SDK — one HTTPS call eac
   carriers filter unregistered senders. `+252` needs Somalia enabled in Geo permissions.
   Setup and troubleshooting: `docs/LIVE_SMS_SETUP.md`.
 
-### Email codes: a sign-in of their own
+### Customer passwords (the everyday sign-in)
+
+Email codes alone made sign-in depend on SendGrid delivering every time, and it didn't
+(`docs/EMAIL_DELIVERY.md`). Customers now **create an account and sign in with email +
+password** (`commands/passwords.js`, `domain/customerPassword.js`); codes prove the address and
+reset a forgotten password.
+
+- Sign-up works at once with the email **unverified**. The **first email-code sign-in** sets
+  `email_verified_at` and **deletes any password set before it** — so registering someone
+  else's email gains nothing: the owner's code sign-in locks the squatter out.
+- A code sign-in opens `password_reset_until` (15 min): a new password may be set without the
+  old one, once. Otherwise changing it needs the current password.
+- Login: one error ("wrong email or password") for no account, no password and wrong password,
+  checked against a dummy scrypt hash when there's no account so timing doesn't tell either.
+  Sign-up does reveal "this email has an account" (a usable form needs to); it is
+  rate-limited (10/hour/IP) so it can't sweep a list.
+- Rules: 8–128 characters, not a common password, not containing the email's name part. No
+  composition rules — they push people back to codes.
+- Phone-only accounts have no password (passwords are email accounts).
+
+## Email codes: a sign-in of their own
 
 Email is the **alternative** to SMS, not a supplement: where a text can't arrive (no 10DLC yet,
 a carrier block), a customer signs in — or up — with only an email (invariant 4). At sign-in
@@ -262,7 +282,7 @@ Three identities, one signing secret (`SESSION_SECRET`), all tokens HMAC-signed
 
 | Role | Authenticates with | Token TTL | Sees |
 |---|---|---|---|
-| `customer` | 6-digit code by SMS to a phone, or by email | 30 days | only orders placed from their account (`user_id`) |
+| `customer` | email + password, or a 6-digit code by email (SMS when enabled) | 30 days | only orders placed from their account (`user_id`) |
 | `driver` | msisdn + PIN (scrypt), chosen by the driver via a setup code | 12 hours | only orders the operator assigned to them |
 | `operator` | username + password (scrypt), chosen via a setup code | 12 hours | everything; **admins** also manage staff |
 

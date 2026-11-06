@@ -32,6 +32,7 @@ test('link an email, then sign in by email', async ({ browser }, testInfo) => {
   await page.click('#signOutBtn');
   await page.goto('/');
   await page.locator('#asCustomer').click();
+  await page.click('#useCode'); // the code flow sits behind the password form
   await page.locator('#channelPick [data-channel="email"]').click();
   await expect(page.locator('#phone')).toBeHidden();
   await expect(page.locator('#signinEmail')).toBeVisible();
@@ -58,6 +59,7 @@ test('the Phone | Email switch swaps the box, both ways', async ({ browser }, te
   const page = await openApp(browser, testInfo);
   await page.goto('/');
   await page.locator('#asCustomer').click();
+  await page.click('#useCode'); // the code flow sits behind the password form
   await expect(page.locator('#phone')).toBeVisible();
   await expect(page.locator('#signinEmail')).toBeHidden();
   await page.locator('#channelPick [data-channel="email"]').click();
@@ -73,6 +75,7 @@ test('a new customer signs up with only an email, then orders with a phone for t
   const page = await openApp(browser, testInfo);
   await page.goto('/');
   await page.locator('#asCustomer').click();
+  await page.click('#useCode'); // the code flow sits behind the password form
   await page.locator('#channelPick [data-channel="email"]').click();
   const email = `new-${Date.now()}@example.com`;
   await page.fill('#signinEmail', email);

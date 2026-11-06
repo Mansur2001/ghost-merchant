@@ -14,7 +14,7 @@ info:
 
     | Role | How you get a token | Lifetime | Sees |
     |---|---|---|---|
-    | `customer` | `POST /api/auth/otp/verify` (email code; SMS when enabled) | 30 days | only orders of its own account |
+    | `customer` | `POST /api/auth/login` (email + password), `POST /api/auth/signup`, or `POST /api/auth/otp/verify` (email code) | 30 days | only orders of its own account |
     | `driver` | `POST /api/driver/login` (phone + PIN) | 12 hours | only orders the **system** assigned to it |
     | `operator` | `POST /api/operator/login` (username + password) | 12 hours | every order; **admins** also staff, refunds, audit |
 
@@ -192,6 +192,69 @@ paths:
                   expiresInSeconds: { type: integer, example: 2592000 }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/auth/signup:
+    post:
+      tags: [Public]
+      summary: Create a customer account with email + password (works at once)
+      description: |
+        No email has to arrive. The email starts **unverified**: the first email-code sign-in proves
+        it — and removes a password set before that, so registering someone else's email gains
+        nothing. 10 per hour per IP.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8, maxLength: 128, description: "Not a common password, not containing your email" }
+      responses:
+        "201": { description: Account created and signed in, content: { application/json: { schema: { $ref: "#/components/schemas/CustomerSession" } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { description: "An account with this email exists — sign in", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/auth/login:
+    post:
+      tags: [Public]
+      summary: Customer sign-in with email + password
+      description: One answer for every failure (no account, no password, wrong password) and the same work either way. 20/15 min per IP, 10/15 min per email. Forgot it? Sign in with an email code, then set a new one.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties: { email: { type: string, format: email }, password: { type: string } }
+      responses:
+        "200": { description: Signed in, content: { application/json: { schema: { $ref: "#/components/schemas/CustomerSession" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/auth/password:
+    post:
+      tags: [Customer — account]
+      summary: Set or change my password
+      description: Needs `currentPassword` if one is set — except within 15 minutes of an email-code sign-in (the "forgot password" path, usable once). The account must have an email.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newPassword]
+              properties: { newPassword: { type: string, minLength: 8 }, currentPassword: { type: string } }
+      responses:
+        "200": { description: Set, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { description: Current password wrong or missing, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
         "429": { $ref: "#/components/responses/RateLimited" }
 
   /api/signup/contact:
@@ -395,6 +458,9 @@ paths:
                   email: { type: [string, "null"] }
                   role: { type: string, const: customer }
                   exp: { type: integer }
+                  hasPassword: { type: boolean }
+                  canResetWithoutCurrent: { type: boolean, description: "true for 15 minutes after an email-code sign-in" }
+                  emailVerified: { type: boolean }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/auth/email/request:
@@ -1331,6 +1397,14 @@ components:
               devCode: { type: string, description: Development only }
 
   schemas:
+    CustomerSession:
+      type: object
+      properties:
+        token: { type: string }
+        phone: { type: [string, "null"] }
+        email: { type: [string, "null"] }
+        expiresInSeconds: { type: integer, example: 2592000 }
+
     Error:
       type: object
       required: [error]

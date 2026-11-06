@@ -12,6 +12,7 @@ test('customer: a server failure shows the reason and the reference', async ({ b
   }));
   await page.goto('/');
   await page.locator('#asCustomer').click();
+  await page.click('#useCode'); // the code flow sits behind the password form
   await page.fill('#phone', somaliNumber());
   await page.click('#sendCodeBtn');
   await expect(page.locator('#otpStatus')).toHaveText(
@@ -27,6 +28,7 @@ test('customer: the reference survives translation to Somali', async ({ browser 
   }));
   await page.goto('/');
   await page.locator('#asCustomer').click();
+  await page.click('#useCode'); // the code flow sits behind the password form
   await page.click('#langToggle');
   await page.fill('#phone', somaliNumber());
   await page.click('#sendCodeBtn');

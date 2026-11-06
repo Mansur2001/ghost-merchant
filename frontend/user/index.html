@@ -132,7 +132,28 @@
           <h2 id="authTitle" data-i18n="auth.title.signup">Create your account</h2>
           <p class="muted" id="authIntro" data-i18n="auth.intro.signup">Just your email. We send you a code — no password to remember.</p>
         </div>
-        <div class="card">
+        <!-- Email + password: the everyday way in, needing no email to arrive. -->
+        <div class="card" id="pwBlock">
+          <label for="pwEmail" style="margin-top:0;" data-i18n="auth.email">Your email</label>
+          <input id="pwEmail" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" />
+          <label for="pwPass" data-i18n="auth.password">Password</label>
+          <input id="pwPass" type="password" autocomplete="new-password" />
+          <div id="pwConfirmWrap">
+            <label for="pwPass2" data-i18n="auth.password2">Repeat password</label>
+            <input id="pwPass2" type="password" autocomplete="new-password" />
+            <div class="phone-hint muted" data-i18n="auth.pwHint">At least 8 characters.</div>
+          </div>
+          <label class="muted" style="display:flex;align-items:center;gap:8px;margin-top:10px;font-weight:500;">
+            <input id="pwShow" type="checkbox" style="width:auto;min-height:0;" /> <span data-i18n="auth.showPw">Show password</span>
+          </label>
+          <button id="pwBtn" type="button" data-i18n="auth.pwCreate">Create account</button>
+          <div id="pwStatus" class="muted" style="margin-top:10px;"></div>
+          <button class="linkbtn" id="useCode" type="button" style="margin-top:12px;" data-i18n="auth.useCode.signup">Rather get a code by email?</button>
+        </div>
+
+        <!-- Email (or SMS) code: proves the address, and is the "forgot password" way in. -->
+        <div class="card hidden" id="codeBlock">
+          <button class="linkbtn hidden" id="usePassword" type="button" style="margin-bottom:12px;" data-i18n="auth.usePassword">Use a password instead</button>
           <div id="channelPick" class="cc-switch channel-pick hidden" role="group" aria-label="Sign in with">
             <button type="button" data-channel="sms" aria-pressed="true" data-i18n="auth.viaSms">Phone</button>
             <button type="button" data-channel="email" aria-pressed="false" data-i18n="auth.viaEmail">Email</button>
@@ -311,6 +332,22 @@
             <div class="muted" id="emailStatus" style="margin-top:8px;"></div>
           </details>
           <button class="danger-ghost" id="signOutBtn" type="button" data-i18n="start.signout">Sign out</button>
+        </div>
+        <!-- Email accounts: a password, so signing in never waits on an email. -->
+        <div class="card hidden" id="pwSetBox">
+          <div class="section-title" id="pwSetTitle" data-i18n="acct.pw.title.set">Set a password</div>
+          <p class="callout hidden" id="pwResetNote" data-i18n="acct.pw.reset">You signed in with a code. Set a new password now.</p>
+          <p class="muted" style="margin:0 0 4px;" data-i18n="acct.pw.sub">Then you can sign in without waiting for an email.</p>
+          <div id="pwCurrentWrap" class="hidden">
+            <label for="pwCurrent" data-i18n="acct.pw.current">Current password</label>
+            <input id="pwCurrent" type="password" autocomplete="current-password" />
+          </div>
+          <label for="pwNew" data-i18n="acct.pw.new">New password</label>
+          <input id="pwNew" type="password" autocomplete="new-password" />
+          <label for="pwNew2" data-i18n="auth.password2">Repeat password</label>
+          <input id="pwNew2" type="password" autocomplete="new-password" />
+          <button id="pwSetBtn" type="button" data-i18n="acct.pw.save">Save password</button>
+          <div id="pwSetStatus" class="muted" style="margin-top:8px;"></div>
         </div>
         <div class="section-title" data-i18n="role.staff">For our team</div>
         <a class="tile" href="/driver/"><span class="tile-body"><span class="tile-title" data-i18n="role.driver">I'm a driver</span></span><span class="chev">›</span></a>
