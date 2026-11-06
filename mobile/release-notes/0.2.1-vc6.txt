@@ -1,0 +1,16 @@
+<en-US>
+0.2.1 (build 6)
+• Sign up and sign in with your email and a password. No waiting for an email.
+• Forgot your password? Sign in with a code we email you, then set a new one.
+• Add or change your password under Account.
+• If someone else used your email, signing in with the emailed code locks them out.
+Problem? Send us the "ref" code shown in the error.
+</en-US>
+<so>
+0.2.1 (nooca 6)
+• Akoon samee oo gal adoo isticmaalaya iimaylkaaga iyo furaha sirta. Iimayl sugid ma jiro.
+• Furaha sirta ma ilowday? Ku gal koodh aan iimayl kuugu soo dirno, kadib samee mid cusub.
+• Furaha sirta ku dar ama beddel qaybta Akoon.
+• Haddii qof kale iimaylkaaga isticmaalay, koodhka iimaylka ayaa isaga xiraya.
+Dhibaato? Noo soo dir koodhka "ref" ee khaladka.
+</so>

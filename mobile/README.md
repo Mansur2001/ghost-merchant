@@ -8,7 +8,7 @@ the customer flow ships to web and Android from the same file.
 |---|---|
 | App name | **GuriKaabe** |
 | Application ID | `com.gurikaabe.app` — permanent; changing it means a new Play listing |
-| Version | `versionName 0.2.0`, `versionCode 5` |
+| Version | `versionName 0.2.1`, `versionCode 6` |
 | Min / target / compile SDK | 24 (Android 7.0) / 36 (Android 16) / 36 |
 
 `minSdk 24` is the lowest Play accepts with automatic protection turned on (it refused 22).
