@@ -124,10 +124,11 @@
           <div class="section-title" id="dTargetTitle" data-i18n="drv.dropoff">Drop-off</div>
           <div style="font-weight:700;font-size:16px;" id="dLandmark"></div>
           <div class="muted" id="dDistance" style="font-size:13px;"></div>
+          <button id="navStart" type="button" data-i18n="nav.start">Start navigation</button>
           <div class="btn-row">
             <a class="btn secondary" id="navLink" href="#">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-8-8 18-2-8z"/></svg>
-              <span data-i18n="drv.nav">Navigate</span></a>
+              <span data-i18n="drv.navApp">Maps app</span></a>
             <a class="btn secondary" id="callLink" href="#">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg>
               <span data-i18n="drv.callShort">Call</span></a>
@@ -184,6 +185,27 @@
       </section>
     </main>
   </div>
+
+  <!-- Turn-by-turn navigation (shared/nav.js): full screen, following the driver. -->
+  <section class="nav-view" id="navView" hidden aria-label="Navigation">
+    <div class="nav-banner">
+      <div class="nav-arrow" id="navArrow">↑</div>
+      <div class="nav-main">
+        <div class="nav-dist" id="navDist"></div>
+        <div class="nav-text" id="navText"></div>
+        <div class="nav-then" id="navThen"></div>
+      </div>
+    </div>
+    <div class="nav-note" id="navNote" hidden></div>
+    <div class="nav-map" id="navMap">
+      <button class="secondary nav-recenter hidden" id="navRecenter" type="button" data-i18n="nav.recenter">Re-center</button>
+    </div>
+    <div class="nav-foot">
+      <div class="nav-eta"><strong id="navEta"></strong><div class="muted" id="navLeft"></div></div>
+      <button class="secondary" id="navVoice" type="button" aria-pressed="false">🔇</button>
+      <button id="navExit" type="button" data-i18n="nav.exit">Exit</button>
+    </div>
+  </section>
   <script src="/shared/config.js"></script>
   <script src="/shared/ids.js"></script>
   <script src="/shared/syncPolicy.js"></script>
@@ -194,6 +216,7 @@
   <script src="/shared/vendor/protomaps-leaflet-5.1.0.js"></script>
   <script src="/shared/map.js"></script>
   <script src="/shared/location.js"></script>
+  <script src="/shared/nav.js"></script>
   <script src="/driver/app.js"></script>
 </body>
 </html>

@@ -231,7 +231,10 @@
             <span class="point-text" id="dropoffText" data-i18n="ride.dropoff.none">Where to?</span>
           </div>
           <label for="placeSearch" data-i18n="ride.search">Search a place</label>
-          <input id="placeSearch" type="search" autocomplete="off" data-i18n-ph="ride.search.ph" placeholder="Bakaara, KM4, Lido…" />
+          <div class="search-row">
+            <input id="placeSearch" type="search" autocomplete="off" enterkeyhint="search" data-i18n-ph="ride.search.ph" placeholder="Bakaara, KM4, Lido…" />
+            <button class="secondary small" id="placeOsm" type="button" data-i18n="search.btn">Search</button>
+          </div>
           <div class="place-results" id="placeResults"></div>
           <label for="pickupNote" data-i18n="ride.note">Where exactly? (optional)</label>
           <input id="pickupNote" type="text" maxlength="200" data-i18n-ph="ride.note.ph" placeholder="Outside the pharmacy, blue gate" />
@@ -303,7 +306,10 @@
           </button>
           <div id="locStatus" class="muted" style="margin-top:8px;" data-i18n="loc.none">Location not set.</div>
           <label for="dropSearch" data-i18n="ride.search">Search a place</label>
-          <input id="dropSearch" type="search" autocomplete="off" data-i18n-ph="ride.search.ph" placeholder="Bakaara, KM4, Lido…" />
+          <div class="search-row">
+            <input id="dropSearch" type="search" autocomplete="off" enterkeyhint="search" data-i18n-ph="ride.search.ph" placeholder="Bakaara, KM4, Lido…" />
+            <button class="secondary small" id="dropOsm" type="button" data-i18n="search.btn">Search</button>
+          </div>
           <div class="place-results" id="dropResults"></div>
           <label for="landmark" data-i18n="start.landmark">Nearest landmark (required)</label>
           <input id="landmark" type="text" data-i18n-ph="start.landmark.ph" placeholder="Green house next to the yellow pharmacy" />
@@ -596,6 +602,7 @@
   <script src="/shared/vendor/protomaps-leaflet-5.1.0.js"></script>
   <script src="/shared/map.js"></script>
   <script src="/shared/location.js"></script>
+  <script src="/shared/nav.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

@@ -100,6 +100,19 @@ services:
     depends_on:
       - backend
 
+  # OPTIONAL routing engine for turn-by-turn navigation and road distances: OSRM with the
+  # Somalia road network from OpenStreetMap (scripts/fetch-routing-data.sh builds ./routing).
+  # ~400 MB of RAM. Off unless started with --profile routing AND ROUTING_URL=http://osrm:5000.
+  # Pinned: an `up` must not change the engine (or its data format) by accident.
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    profiles: ["routing"]
+    restart: unless-stopped
+    command: ["osrm-routed", "--algorithm", "mld", "--max-table-size", "100", "/data/somalia-latest.osrm"]
+    volumes:
+      - ./routing:/data:ro
+    mem_limit: 1g
+
 volumes:
   postgres_data:
   minio_data:

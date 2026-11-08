@@ -38,3 +38,40 @@ export async function routeBetween(a, b, { url = config.routingUrl, fetchImpl = 
     return estimate();
   }
 }
+
+// The full route for navigation: the road geometry and each maneuver. Null when no routing
+// engine is configured or it can't answer — the apps then draw a straight line and offer the
+// phone's own maps app. Never invents a route.
+export async function routeDetail(a, b, { url = config.routingUrl, fetchImpl = fetch } = {}) {
+  if (!url) return null;
+  try {
+    const path = `${a.lng},${a.lat};${b.lng},${b.lat}`;
+    const res = await fetchImpl(
+      `${url.replace(/\/$/, '')}/route/v1/driving/${path}?overview=full&geometries=geojson&steps=true`,
+      { signal: AbortSignal.timeout(4000) }
+    );
+    if (!res.ok) return null;
+    const body = await res.json();
+    const r = body?.routes?.[0];
+    if (body?.code !== 'Ok' || !r) return null;
+    const meters = Math.round(r.distance);
+    return {
+      meters,
+      // OSRM's speeds are for empty roads; never promise faster than our city speed.
+      minutes: Math.max(Math.ceil(r.duration / 60), etaMinutes(meters)),
+      // [lat, lng] pairs, rounded to ~1 m: what Leaflet draws and the apps snap to.
+      geometry: (r.geometry?.coordinates || []).map(([lng, lat]) => [Math.round(lat * 1e5) / 1e5, Math.round(lng * 1e5) / 1e5]),
+      steps: (r.legs?.[0]?.steps || []).map((s) => ({
+        type: s.maneuver?.type,
+        modifier: s.maneuver?.modifier || null,
+        exit: s.maneuver?.exit ?? null,
+        name: s.name || '',
+        distance: Math.round(s.distance),
+        duration: Math.round(s.duration),
+        at: s.maneuver?.location ? [s.maneuver.location[1], s.maneuver.location[0]] : null,
+      })),
+    };
+  } catch {
+    return null;
+  }
+}

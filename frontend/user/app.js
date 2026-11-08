@@ -421,26 +421,63 @@ function searchPlaces(q) {
   if (f.length < 2) return [];
   return (placesCache || []).filter((p) => fold(p.name_en).includes(f) || fold(p.name_so).includes(f)).slice(0, 8);
 }
-// Results as buttons; `onPick(place)` sets the point.
-function renderPlaceResults(box, list, onPick) {
-  box.replaceChildren(...list.map((p) => {
+// Results as buttons; `onPick(place)` sets the point. OpenStreetMap results carry an "OSM" tag
+// and the attribution line the data's licence asks for.
+function renderPlaceResults(box, list, onPick, { osm = false } = {}) {
+  const rows = list.map((p) => {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'place-result';
     const name = document.createElement('span');
-    name.textContent = placeName(p);
+    name.textContent = p.osm ? p.name : placeName(p);
     const sub = document.createElement('span');
     sub.className = 'muted';
-    sub.textContent = p.city;
+    sub.textContent = p.osm ? p.detail : p.city;
     b.append(name, sub);
+    if (p.osm) {
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = 'OSM';
+      b.append(tag);
+    }
     b.addEventListener('click', () => { box.replaceChildren(); onPick(p); });
     return b;
-  }));
+  });
+  if (osm) {
+    const note = document.createElement('div');
+    note.className = 'osm-attrib';
+    note.textContent = list.length ? '© OpenStreetMap contributors' : t('search.none');
+    rows.push(note);
+  }
+  box.replaceChildren(...rows);
 }
+
+// Search OpenStreetMap (through our server, which keeps to its rules). On a tap or Enter only:
+// the public service forbids search-as-you-type. Our own places come first.
+let osmSeq = 0;
+async function searchOsm(input, box, onPick) {
+  // A pending as-you-type filter must not replace these results after they arrive.
+  clearTimeout(searchTimer);
+  const seq = ++osmSeq;
+  const q = input.value.trim();
+  if (q.length < 3) return toast(t('search.short'));
+  box.replaceChildren(Object.assign(document.createElement('div'), { className: 'muted', textContent: t('search.searching') }));
+  await loadPlaces();
+  const ours = searchPlaces(q);
+  const res = await api(`/geocode?q=${encodeURIComponent(q)}&lang=${GMI18n.lang()}`);
+  if (seq !== osmSeq) return; // a newer search (or typing) took over
+  if (res.error && !ours.length) { box.replaceChildren(); return toast(GMI18n.err(res.error)); }
+  const osm = (res.results || []).map((r) => ({ ...r, osm: true }));
+  renderPlaceResults(box, [...ours, ...osm], onPick, { osm: true });
+}
+const pickOsmOrPlace = (p) => (p.osm
+  ? { lat: p.lat, lng: p.lng, label: p.name }
+  : { lat: p.lat, lng: p.lng, placeId: p.id, label: placeName(p) });
+
 // What the server is told about a point: the place id when one was chosen (so the server uses
 // ITS coordinates), otherwise the pin.
 const pointBody = (p) => (p.placeId ? { placeId: p.placeId } : { lat: p.lat, lng: p.lng });
-const pointText = (p) => (p.placeId ? p.label
+const pointText = (p) => (p.placeId || p.label ? p.label
   : p.gps ? t('ride.myLocation', { m: p.accuracy }) : t('ride.pinned'));
 
 // A phone indoors in Mogadishu is often 100 m+ out. Above this, ask for the pin to be dragged.
@@ -457,6 +494,16 @@ const refreshRidePhone = SomPhone.attach({
   hint: $('ridePhoneHint'),
   onChange: (r) => { ridePhoneE164 = r.valid ? r.e164 : null; },
 });
+
+// The road the trip will take, once both ends are set (straight line until it arrives).
+let rideRouteSeq = 0;
+async function drawRideRoute() {
+  if (!ride.pickup || !ride.dropoff) return;
+  const seq = ++rideRouteSeq;
+  const res = await api(`/route?from=${ride.pickup.lat},${ride.pickup.lng}&to=${ride.dropoff.lat},${ride.dropoff.lng}`);
+  if (seq !== rideRouteSeq || !res.route) return;
+  ride.map.route('route', res.route.geometry);
+}
 
 function setPicking(which) {
   ride.picking = which;
@@ -482,6 +529,7 @@ function setRidePoint(which, p) {
   if (which === 'pickup' && !ride.dropoff) setPicking('dropoff');
   ride.map.line('route', ride.pickup, ride.dropoff);
   if (ride.pickup && ride.dropoff) ride.map.fit([ride.pickup, ride.dropoff]);
+  drawRideRoute();
   quoteRide();
 }
 
@@ -526,6 +574,7 @@ $('rideLocate').addEventListener('click', locateForRide);
 
 let searchTimer;
 $('placeSearch').addEventListener('input', () => {
+  osmSeq += 1;
   clearTimeout(searchTimer);
   searchTimer = setTimeout(async () => {
     await loadPlaces();
@@ -535,6 +584,13 @@ $('placeSearch').addEventListener('input', () => {
     });
   }, 150);
 });
+
+function pickRidePlace(p) {
+  $('placeSearch').value = '';
+  setRidePoint(ride.picking, pickOsmOrPlace(p));
+}
+$('placeOsm').addEventListener('click', () => searchOsm($('placeSearch'), $('placeResults'), pickRidePlace));
+$('placeSearch').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); searchOsm($('placeSearch'), $('placeResults'), pickRidePlace); } });
 
 async function quoteRide() {
   ride.quote = null;
@@ -801,10 +857,10 @@ function setDropPoint(p) {
   drop.point = p;
   drop.map.pin('dropoff', p, { kind: 'dropoff', draggable: true, onMove: (q) => setDropPoint({ lat: q.lat, lng: q.lng }) });
   drop.map.accuracy('acc', p.accuracy ? p : null, p.accuracy);
-  $('locStatus').textContent = p.placeId ? p.label
+  $('locStatus').textContent = p.placeId || p.label ? p.label
     : p.gps && p.accuracy > UNSURE_M ? t('ride.unsure', { m: p.accuracy })
       : p.gps ? t('loc.ok', { m: p.accuracy }) : t('ride.pinned');
-  if (p.placeId && !$('landmark').value.trim()) $('landmark').value = p.label;
+  if ((p.placeId || p.label) && !$('landmark').value.trim()) $('landmark').value = p.label;
   quoteDelivery();
 }
 
@@ -883,7 +939,16 @@ $('locBtn').addEventListener('click', async () => {
   }
 });
 
+function pickDropPlace(p) {
+  $('dropSearch').value = '';
+  setDropPoint(pickOsmOrPlace(p));
+  drop.map.fit([drop.point]);
+}
+$('dropOsm').addEventListener('click', () => searchOsm($('dropSearch'), $('dropResults'), pickDropPlace));
+$('dropSearch').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); searchOsm($('dropSearch'), $('dropResults'), pickDropPlace); } });
+
 $('dropSearch').addEventListener('input', () => {
+  osmSeq += 1;
   clearTimeout(searchTimer);
   searchTimer = setTimeout(async () => {
     await loadPlaces();
@@ -1006,8 +1071,16 @@ function renderOrderMap() {
   orderMap.refresh();
   orderMap.pin('start', start, { kind: isRide(order) ? 'pickup' : 'market' });
   orderMap.pin('end', end, { kind: 'dropoff' });
-  orderMap.line('route', start, end);
-  if (!live) { driverAt = null; orderMap.remove('driver'); $('driverStrip').classList.add('hidden'); }
+  // The driver's road route replaces the straight start-to-end line once it is known.
+  if (trackRoute.tracker) orderMap.remove('route'); else orderMap.line('route', start, end);
+  if (!live) {
+    driverAt = null;
+    orderMap.remove('driver');
+    orderMap.remove('driverRoute');
+    trackRoute.key = null;
+    trackRoute.tracker = null;
+    $('driverStrip').classList.add('hidden');
+  }
   orderMap.fit([start, end, driverAt].filter(Boolean));
   if (live) loadDriverLocation();
 }
@@ -1015,6 +1088,24 @@ async function loadDriverLocation() {
   const res = await api(`/orders/${order.id}/driver-location`);
   if (res.location) showDriver(res.location);
 }
+// The road the driver is taking to the rider (or the door), redrawn when they leave it.
+const trackRoute = { key: null, tracker: null, at: 0, busy: false };
+async function refreshTrackRoute(from, to, key) {
+  if (trackRoute.busy || (trackRoute.key === key && Date.now() - trackRoute.at < 20000)) return;
+  trackRoute.busy = true;
+  trackRoute.at = Date.now();
+  try {
+    const res = await api(`/route?from=${from.lat},${from.lng}&to=${to.lat},${to.lng}`);
+    if (!res.route || !orderMap || !order) return;
+    trackRoute.key = key;
+    trackRoute.tracker = GMNav.track(res.route);
+    orderMap.remove('route');
+    orderMap.route('driverRoute', res.route.geometry);
+  } finally {
+    trackRoute.busy = false;
+  }
+}
+
 function showDriver(loc) {
   if (!order || !orderMap || !['DISPATCHED', 'IN_TRANSIT'].includes(order.status)) return;
   const first = !driverAt;
@@ -1024,10 +1115,19 @@ function showDriver(loc) {
   const target = isRide(order) && order.status === 'DISPATCHED'
     ? { lat: order.pickup_lat, lng: order.pickup_lng } : { lat: order.lat, lng: order.lng };
   const d = GMMap.distance(driverAt, target);
-  const minutes = Math.max(1, Math.ceil(((d * 1.3) / 1000 / 18) * 60));
+  let minutes = Math.max(1, Math.ceil(((d * 1.3) / 1000 / 18) * 60));
+  // Along the road when we have the route; a new one when the driver leaves it or the leg
+  // changes (pickup -> destination).
+  const key = `${order.id}|${order.status}`;
+  if (trackRoute.key !== key || (trackRoute.tracker && trackRoute.tracker.update(driverAt).offRoute)) refreshTrackRoute(driverAt, target, key);
+  if (trackRoute.tracker && trackRoute.key === key) {
+    const p = trackRoute.tracker.update(driverAt);
+    minutes = p.minutes;
+    $('driverEta').textContent = ` · ${t('drv.eta', { d: GMMap.formatDistance(p.remaining), n: minutes })}`;
+  }
   $('driverIc').textContent = VEHICLE_ICON[driverAt.vehicle] || '🛵';
   $('driverName').textContent = driverAt.name || '';
-  $('driverEta').textContent = ` · ${t('drv.eta', { d: GMMap.formatDistance(d), n: minutes })}`;
+  if (!(trackRoute.tracker && trackRoute.key === key)) $('driverEta').textContent = ` · ${t('drv.eta', { d: GMMap.formatDistance(d), n: minutes })}`;
   $('driverStrip').classList.remove('hidden');
   if (first) orderMap.fit([driverAt, target]);
 }

@@ -67,16 +67,29 @@
     opts = opts || {};
     var minInterval = opts.minIntervalMs || 5000;
     if (!geo) { if (onError) onError('unavailable'); return function () {}; }
+    // Throttled, but never lossy: a reading inside the interval is held and delivered when the
+    // interval ends. A phone that stops moving may send no more readings, and its LAST one (at
+    // the door, at the pickup) is the one that matters.
     var last = 0;
+    var pending = null;
+    var timer = null;
+    function deliver() {
+      timer = null;
+      if (!pending) return;
+      last = Date.now();
+      var f = pending;
+      pending = null;
+      onFix(f);
+    }
     var id = geo.watchPosition(function (pos) {
-      var now = Date.now();
-      if (now - last < minInterval) return;
-      last = now;
-      onFix(toFix(pos));
+      pending = toFix(pos);
+      var wait = last + minInterval - Date.now();
+      if (wait <= 0) deliver();
+      else if (!timer) timer = setTimeout(deliver, wait);
     }, function (err) {
       if (onError) onError(why(err));
     }, { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 });
-    return function () { geo.clearWatch(id); };
+    return function () { geo.clearWatch(id); clearTimeout(timer); pending = null; };
   }
 
   global.GMLocation = { best: best, watch: watch, supported: Boolean(geo) };

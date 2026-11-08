@@ -98,6 +98,13 @@ export const config = {
   // Help assistant: a hosted open model (Groq by default). Unset = FAQ answers only.
   assistant: parseAssistant(process.env, { production: process.env.NODE_ENV === 'production' }),
 
+  // Place search: OpenStreetMap Nominatim, through our backend (geocode/nominatim.js). Set
+  // NOMINATIM_URL='' to switch it off, or to our own Nominatim for heavy use.
+  geocoder: {
+    url: process.env.NOMINATIM_URL ?? 'https://nominatim.openstreetmap.org',
+    userAgent: `GuriKaabe/0.3 (${process.env.OWNER_EMAIL || 'gurikaabe@gmail.com'})`,
+  },
+
   // Optional self-hosted OSRM for road distances (routing/route.js). Unset = straight line x 1.3.
   routingUrl: process.env.ROUTING_URL || '',
 

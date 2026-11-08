@@ -5,6 +5,7 @@ import http from 'node:http';
 import express from 'express';
 import { config } from './config.js';
 import { ordersRouter } from './routes/orders.js';
+import { mapsRouter } from './routes/maps.js';
 import { paymentsWebhookRouter } from './routes/paymentsWebhook.js';
 import { driversRouter } from './routes/drivers.js';
 import { operatorRouter } from './routes/operator.js';
@@ -65,6 +66,7 @@ app.use('/api', authRouter);
 app.use('/api', signupRouter);
 app.use('/api', staffSetupRouter);
 app.use('/api', ordersRouter);
+app.use('/api', mapsRouter);
 app.use('/api', driversRouter);
 app.use('/api', operatorRouter);
 

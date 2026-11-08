@@ -658,6 +658,72 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { description: Not enough balance, or already paid, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
+  /api/route:
+    get:
+      tags: [Orders (shared)]
+      summary: Road route with turn-by-turn steps (self-hosted OSRM)
+      description: |
+        Any signed-in role. Both points must be in Somalia. `route` is null when no routing engine
+        is configured or it can't answer — the apps then draw a straight line and offer the phone's
+        own maps app. 30 a minute per caller.
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string }, example: "2.0478,45.3291" }
+        - { name: to, in: query, required: true, schema: { type: string }, example: "2.0144,45.3047" }
+      responses:
+        "200":
+          description: Route or null
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  route:
+                    type: [object, "null"]
+                    properties:
+                      meters: { type: integer }
+                      minutes: { type: integer }
+                      geometry: { type: array, items: { type: array, items: { type: number } }, description: "[lat, lng] pairs" }
+                      steps:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            type: { type: string, example: turn }
+                            modifier: { type: [string, "null"], example: right }
+                            exit: { type: [integer, "null"] }
+                            name: { type: string, example: Wadada Makkah }
+                            distance: { type: integer }
+                            duration: { type: integer }
+                            at: { type: array, items: { type: number }, description: "[lat, lng] of the maneuver" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { description: Not signed in, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { description: Too many requests, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/geocode:
+    get:
+      tags: [Orders (shared)]
+      summary: Search any place in Somalia (OpenStreetMap Nominatim, through our server)
+      description: |
+        One request a second to the public server for the whole backend, cached for a day, Somalia
+        only. Search on submit — the public server forbids search-as-you-type. Show the attribution.
+        15 a minute per caller.
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 3 } }
+        - { name: lang, in: query, schema: { type: string, enum: [en, so] } }
+      responses:
+        "200":
+          description: Places
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results: { type: array, items: { type: object, properties: { name: { type: string }, detail: { type: string }, lat: { type: number }, lng: { type: number }, kind: { type: [string, "null"] } } } }
+                  attribution: { type: string }
+        "401": { description: Not signed in, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { description: Too many searches, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "503": { description: Search unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
   /api/catalog:
     get:
       tags: [Public]

@@ -101,6 +101,8 @@ up() {
   ensure_env_keys
   [ -f minio.license ] || { echo "minio.license is missing (MinIO won't start without it)"; exit 1; }
   dc up -d --build
+  # The routing engine, when its data has been built (./scripts/fetch-routing-data.sh).
+  if ls routing/somalia-latest.osrm* >/dev/null 2>&1; then dc --profile routing up -d osrm; fi
   wait_healthy
   # Seed a brand-new stack only, so an `up` after a code change keeps what you were testing.
   if [ "$(psql_staging 'SELECT count(*) FROM operators;' | tr -d ' ')" -le 1 ]; then seed; fi

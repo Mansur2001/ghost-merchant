@@ -86,6 +86,7 @@
     var layers = {};
     var tapHandler = null;
     map.on('click', function (e) { if (tapHandler) tapHandler({ lat: e.latlng.lat, lng: e.latlng.lng }); });
+    map.on('dragstart', function () { api.dragged = true; if (api.onDrag) api.onDrag(); });
 
     var api = {
       map: map,
@@ -122,6 +123,18 @@
         if (!a || !b) return;
         layers[key] = L.polyline([[a.lat, a.lng], [b.lat, b.lng]], { className: 'gm-line', weight: 4, dashArray: '6 8' }).addTo(map);
       },
+      // A road route from GET /api/route: [[lat, lng], …]. Replaces any straight line.
+      route: function (key, coords) {
+        api.remove(key);
+        if (!coords || coords.length < 2) return;
+        layers[key] = L.polyline(coords, { className: 'gm-route', weight: 6, lineJoin: 'round', lineCap: 'round' }).addTo(map);
+      },
+      // Keep `p` in view as it moves (navigation). Stops while the person drags the map.
+      follow: function (p, zoom) {
+        if (!p || api.dragged) return;
+        map.setView([p.lat, p.lng], zoom || Math.max(map.getZoom(), 16), { animate: true });
+      },
+      dragged: false,
       remove: function (key) {
         if (layers[key]) { map.removeLayer(layers[key]); delete layers[key]; }
       },

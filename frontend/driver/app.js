@@ -145,6 +145,7 @@ window.addEventListener('online', flushQueue);
 setInterval(flushQueue, 15000);
 
 function showQueue() {
+  if (navState.on) stopNav();
   current = null;
   showOnly('queueView');
   setStatus(t('drv.signedIn'), 'ok');
@@ -533,6 +534,139 @@ $('releaseBtn').addEventListener('click', async () => {
   showQueue();
 });
 
+// ── Turn-by-turn navigation ──
+// The route comes from our own OSRM (GET /api/route); the position from this phone, every 2 s
+// while navigating. Off the road line for two readings in a row -> a new route. The screen
+// stays on (Wake Lock) while it runs. No route engine: a straight line and the distance, and
+// "Maps app" is still there.
+const navState = { on: false, map: null, route: null, tracker: null, stop: null, target: null,
+  offCount: 0, lastRouteAt: 0, lastSpoken: null, voice: false, wake: null, fix: null };
+const fmtDist = (m) => GMMap.formatDistance(m);
+async function fetchRoute(from, to) {
+  const q = `from=${from.lat},${from.lng}&to=${to.lat},${to.lng}`;
+  const res = await api(`/route?${q}`);
+  return res.route || null;
+}
+async function routeFrom(fix) {
+  navState.lastRouteAt = Date.now();
+  navState.offCount = 0;
+  const route = await fetchRoute(fix, navState.target);
+  if (!navState.on) return;
+  navState.route = route;
+  navState.tracker = route ? GMNav.track(route) : null;
+  $('navNote').hidden = Boolean(route);
+  if (!route) $('navNote').textContent = t('nav.noRoute');
+  if (route) navState.map.route('route', route.geometry);
+  else navState.map.line('route', fix, navState.target);
+  navState.lastSpoken = null;
+  onNavFix(fix);
+}
+function onNavFix(fix) {
+  if (!navState.on || !GMMap.inArea(fix)) return;
+  navState.fix = fix;
+  navState.map.pin('me', fix, { kind: 'driver' });
+  navState.map.follow(fix, 17);
+  // Keep sharing while navigating, so the rider's map moves too.
+  if (me?.online) sendFix(fix);
+  if (!navState.tracker) {
+    const d = GMMap.distance(fix, navState.target);
+    $('navArrow').textContent = '↑';
+    $('navDist').textContent = fmtDist(d);
+    $('navText').textContent = targetOf(current).text;
+    $('navThen').textContent = '';
+    $('navEta').textContent = t('ride.min', { n: Math.max(1, Math.ceil(((d * 1.3) / 1000 / 18) * 60)) });
+    $('navLeft').textContent = fmtDist(d);
+    return;
+  }
+  const p = navState.tracker.update(fix);
+  // The pin may be off the road (a gate, a courtyard): the route ends at the nearest road, so
+  // being at the pin itself also counts as arrived.
+  if (GMMap.distance(fix, navState.target) < 40) p.arrived = true;
+  if (p.arrived) {
+    $('navArrow').textContent = '🏁';
+    $('navDist').textContent = '';
+    $('navText').textContent = t('nav.arrive');
+    $('navThen').textContent = targetOf(current).text;
+    if (navState.lastSpoken !== 'arrive' && navState.voice) GMNav.speak(t('nav.arrive'), GMI18n.lang());
+    navState.lastSpoken = 'arrive';
+  } else {
+    const step = p.next;
+    $('navArrow').textContent = GMNav.arrow(step);
+    $('navDist').textContent = fmtDist(p.toNext);
+    $('navText').textContent = GMNav.say(step);
+    $('navThen').textContent = p.after ? `${t('nav.then')} ${GMNav.say(p.after)}` : '';
+    // Say each turn once, as it comes up (under 200 m).
+    const key = step ? `${step.along}` : 'none';
+    if (navState.voice && step && p.toNext < 200 && navState.lastSpoken !== key) {
+      GMNav.speak(`${t('nav.in', { d: fmtDist(p.toNext) })} ${GMNav.say(step)}`, GMI18n.lang());
+      navState.lastSpoken = key;
+    }
+  }
+  const at = new Date(Date.now() + p.minutes * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  $('navEta').textContent = `${t('ride.min', { n: p.minutes })} · ${at}`;
+  $('navLeft').textContent = fmtDist(p.remaining);
+  navState.offCount = p.offRoute ? navState.offCount + 1 : 0;
+  if (navState.offCount >= 2 && Date.now() - navState.lastRouteAt > 10000) {
+    $('navNote').hidden = false;
+    $('navNote').textContent = t('nav.rerouting');
+    routeFrom(fix);
+  }
+}
+async function startNav() {
+  const tg = targetOf(current);
+  if (tg.lat == null) return toast(t('drv.noLandmark'));
+  navState.target = { lat: tg.lat, lng: tg.lng };
+  navState.on = true;
+  $('navView').hidden = false;
+  if (!navState.map) {
+    navState.map = GMMap.create($('navMap'), { zoom: 16 });
+    navState.map.onDrag = () => $('navRecenter').classList.remove('hidden');
+  }
+  navState.map.dragged = false;
+  navState.map.refresh();
+  navState.map.pin('end', navState.target, { kind: current.kind === 'RIDE' && current.status === 'DISPATCHED' ? 'pickup' : 'dropoff' });
+  $('navArrow').textContent = '…';
+  $('navDist').textContent = '';
+  $('navText').textContent = t('nav.finding');
+  $('navThen').textContent = '';
+  try { navState.wake = await navigator.wakeLock?.request('screen'); } catch { navState.wake = null; }
+  let first = true;
+  navState.stop = GMLocation.watch((fix) => {
+    if (!GMMap.inArea(fix)) { $('navNote').hidden = false; $('navNote').textContent = t('drv.loc.outside'); return; }
+    if (first) { first = false; routeFrom(fix); } else onNavFix(fix);
+  }, () => { $('navNote').hidden = false; $('navNote').textContent = t('drv.loc.off'); }, { minIntervalMs: 2000 });
+}
+function stopNav() {
+  navState.on = false;
+  if (navState.stop) { navState.stop(); navState.stop = null; }
+  try { navState.wake?.release(); } catch { /* already released */ }
+  navState.wake = null;
+  try { window.speechSynthesis?.cancel(); } catch { /* none */ }
+  $('navView').hidden = true;
+  if (navState.map) { navState.map.remove('route'); navState.map.remove('me'); }
+  navState.route = null;
+  navState.tracker = null;
+}
+$('navStart').addEventListener('click', startNav);
+$('navExit').addEventListener('click', stopNav);
+$('navRecenter').addEventListener('click', () => {
+  navState.map.dragged = false;
+  $('navRecenter').classList.add('hidden');
+  if (navState.fix) navState.map.follow(navState.fix, 17);
+});
+$('navVoice').addEventListener('click', () => {
+  navState.voice = !navState.voice;
+  $('navVoice').textContent = navState.voice ? '🔊' : '🔇';
+  $('navVoice').setAttribute('aria-pressed', String(navState.voice));
+  if (navState.voice && !GMNav.speak(t('nav.voiceOn'), GMI18n.lang())) toast(t('nav.noVoice'));
+});
+// The screen lock drops when the app is hidden; take it again on return.
+document.addEventListener('visibilitychange', async () => {
+  if (navState.on && document.visibilityState === 'visible') {
+    try { navState.wake = await navigator.wakeLock?.request('screen'); } catch { /* not supported */ }
+  }
+});
+
 // The driver's GPS fix, as evidence. Never a gate: no fix (denied, indoors, no GPS chip) just
 // goes up as "no fix" and the office sees that.
 function getFix() {
@@ -591,6 +725,9 @@ async function doStep(action, payload) {
       return toast(GMI18n.err(res.error));
     }
     current = { ...current, ...res.order };
+    // The next leg has a different destination (pickup done -> drop-off): navigation restarts
+    // from the job screen.
+    if (navState.on) stopNav();
     renderStatus();
     renderTarget();
     renderActions();

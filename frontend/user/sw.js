@@ -1,6 +1,6 @@
 // Service Worker: caches the app shell on first load so repeat visits render from local
 // storage with near-zero mobile data (SRS 3.1). Bump CACHE to ship new assets.
-const CACHE = 'gurikaabe-user-v45';
+const CACHE = 'gurikaabe-user-v46';
 const SHELL = [
   '/',
   '/index.html',
@@ -10,7 +10,7 @@ const SHELL = [
   '/shared/styles.css',
   '/shared/config.js', '/shared/ids.js', '/shared/syncPolicy.js', '/shared/queue.js', '/shared/phone.js',
   '/shared/theme.js', '/shared/i18n.js',
-  '/shared/map.js', '/shared/location.js',
+  '/shared/map.js', '/shared/location.js', '/shared/nav.js',
   '/shared/vendor/leaflet-1.9.4.js', '/shared/vendor/leaflet-1.9.4.css', '/shared/vendor/protomaps-leaflet-5.1.0.js',
 ];
 

@@ -48,3 +48,6 @@ e2e/simulation/
 
 # Self-hosted street map (scripts/fetch-map-tiles.sh): ~100+ MB of OpenStreetMap data.
 tiles/*.pmtiles
+
+# OSRM routing data (scripts/fetch-routing-data.sh): ~650 MB, rebuilt from OpenStreetMap.
+routing/
