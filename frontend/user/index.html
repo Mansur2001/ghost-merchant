@@ -7,6 +7,7 @@
   <link rel="manifest" href="/manifest.json" />
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
+  <link rel="stylesheet" href="/shared/vendor/leaflet-1.9.4.css" />
   <link rel="stylesheet" href="/shared/styles.css" />
   <script src="/shared/theme.js"></script>
   <title>GuriKaabe</title>
@@ -184,40 +185,141 @@
         <p class="muted" id="consentNote" style="font-size:12px;padding:0 4px;" data-i18n-html="auth.consent">We text you a one-time code each time you sign in. Message and data rates may apply. Reply STOP to opt out, HELP for help. By continuing you agree to our <a href="/terms.html">Terms</a> and <a href="/privacy.html">Privacy Policy</a>.</p>
       </section>
 
-      <!-- New order (checkout). -->
-      <section id="startView" class="hidden">
+      <!-- Home (signed in): what do you want — a ride or a delivery. -->
+      <section id="homeView" class="hidden">
         <div class="screen-head">
-          <h2 data-i18n="start.title">New order</h2>
+          <h2 data-i18n="home.title">Where are you going?</h2>
           <p class="muted"><span data-i18n="start.as">Signed in as</span> <strong id="signedInAs"></strong></p>
         </div>
+        <button class="service service-ride" id="goRide" type="button">
+          <span class="service-icon" aria-hidden="true">🛺</span>
+          <span class="service-body">
+            <span class="service-title" data-i18n="home.ride">Ride</span>
+            <span class="service-sub" data-i18n="home.ride.sub">Bajaj or car. Fixed price before you book.</span>
+          </span>
+          <span class="chev">›</span>
+        </button>
+        <button class="service" id="goShop" type="button">
+          <span class="service-icon" aria-hidden="true">🛍️</span>
+          <span class="service-body">
+            <span class="service-title" data-i18n="home.shop">Food &amp; shopping</span>
+            <span class="service-sub" data-i18n="home.shop.sub">Meals, groceries and more, brought to your door.</span>
+          </span>
+          <span class="chev">›</span>
+        </button>
+      </section>
 
-        <div class="section-title" data-i18n="start.what">What do you need?</div>
+      <!-- Book a ride: pickup and destination on the map, then a vehicle and its fare. -->
+      <section id="rideView" class="hidden">
+        <button class="linkbtn" id="rideBack" type="button" style="margin-bottom:12px;" data-i18n="nav.back">← Back</button>
+        <div class="map-card">
+          <div class="map" id="rideMap"></div>
+          <div class="map-hint muted" id="rideMapHint" data-i18n="ride.tapHint">Tap the map to set the point you are choosing.</div>
+        </div>
         <div class="card">
-          <label for="request" style="margin-top:0;" data-i18n="start.request">Your list</label>
-          <textarea id="request" data-i18n-ph="start.request.ph" placeholder="e.g. 2kg rice, cooking oil, 6 eggs"></textarea>
-          <label for="amount" data-i18n="start.amount">Agreed total (USD)</label>
-          <input id="amount" type="number" inputmode="decimal" step="0.01" min="0" placeholder="5.50" />
-          <label for="refPhoto" data-i18n="start.photo">Photo of the item (optional)</label>
-          <label class="capture" id="refCapture" style="margin-top:0;">
-            <input id="refPhoto" type="file" accept="image/*" capture="environment" />
-            <span class="thumb" id="refThumb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span>
-            <span><span data-i18n="start.photo.add">Add a photo</span><span class="cap-sub" data-i18n="start.photo.sub">Helps the driver buy the right thing</span></span>
-          </label>
+          <div class="cc-switch point-pick" id="ridePick" role="group" aria-label="Choose point">
+            <button type="button" data-point="pickup" aria-pressed="true"><span class="pt pt-a">A</span> <span data-i18n="ride.from">Pickup</span></button>
+            <button type="button" data-point="dropoff" aria-pressed="false"><span class="pt pt-b">B</span> <span data-i18n="ride.to">Destination</span></button>
+          </div>
+          <div class="point-row">
+            <span class="pt pt-a">A</span>
+            <span class="point-text" id="pickupText" data-i18n="ride.pickup.none">Pickup not set</span>
+            <button class="iconbtn" id="rideLocate" type="button" data-i18n-title="loc.btn" title="Use my location"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/></svg></button>
+          </div>
+          <div class="point-row">
+            <span class="pt pt-b">B</span>
+            <span class="point-text" id="dropoffText" data-i18n="ride.dropoff.none">Where to?</span>
+          </div>
+          <label for="placeSearch" data-i18n="ride.search">Search a place</label>
+          <input id="placeSearch" type="search" autocomplete="off" data-i18n-ph="ride.search.ph" placeholder="Bakaara, KM4, Lido…" />
+          <div class="place-results" id="placeResults"></div>
+          <label for="pickupNote" data-i18n="ride.note">Where exactly? (optional)</label>
+          <input id="pickupNote" type="text" maxlength="200" data-i18n-ph="ride.note.ph" placeholder="Outside the pharmacy, blue gate" />
+        </div>
+
+        <div class="section-title" data-i18n="ride.choose">Choose a ride</div>
+        <div id="rideOptions" class="ride-options"><p class="muted" data-i18n="ride.setBoth">Set the pickup and the destination to see prices.</p></div>
+
+        <div class="card">
+          <label for="ridePhone" style="margin-top:0;" data-i18n="ride.phone">Phone for the driver</label>
+          <input id="ridePhone" type="tel" inputmode="tel" placeholder="61 234 5678" autocomplete="tel" />
+          <div class="phone-hint muted" id="ridePhoneHint"></div>
+        </div>
+        <div class="action-bar">
+          <button id="rideBook" type="button" disabled data-i18n="ride.book">Book</button>
+        </div>
+      </section>
+
+      <!-- The generic catalog: pick items, then the cart. -->
+      <section id="shopView" class="hidden">
+        <button class="linkbtn" id="shopBack" type="button" style="margin-bottom:12px;" data-i18n="nav.back">← Back</button>
+        <div class="screen-head"><h2 data-i18n="shop.title">Food &amp; shopping</h2></div>
+        <div class="chips" id="catChips" role="tablist"></div>
+        <div id="catItems" class="catalog"></div>
+        <button class="tile custom-tile" id="shopCustom" type="button">
+          <span class="tile-icon">📷</span>
+          <span class="tile-body">
+            <span class="tile-title" data-i18n="shop.custom">Something else?</span>
+            <span class="tile-sub" data-i18n="shop.custom.sub">Describe it and add a photo at checkout.</span>
+          </span>
+          <span class="chev">›</span>
+        </button>
+        <div class="cart-bar hidden" id="cartBar">
+          <button id="cartOpen" type="button"><span id="cartCount"></span> · <span data-i18n="shop.viewCart">View cart</span> · $<span id="cartSum"></span></button>
+        </div>
+      </section>
+
+      <!-- Checkout: the cart, where it goes, and the price from the server. -->
+      <section id="startView" class="hidden">
+        <button class="linkbtn" id="checkoutBack" type="button" style="margin-bottom:12px;" data-i18n="shop.back">← Keep shopping</button>
+        <div class="screen-head">
+          <h2 data-i18n="start.title">New order</h2>
+        </div>
+
+        <div class="section-title" data-i18n="cart.title">Your cart</div>
+        <div class="card">
+          <div id="cartLines"></div>
+          <details id="customBox" class="bare" style="margin-top:8px;">
+            <summary data-i18n="shop.custom">Something else?</summary>
+            <label for="request" data-i18n="start.request">What do you need?</label>
+            <textarea id="request" maxlength="300" data-i18n-ph="start.request.ph" placeholder="e.g. Red school shoes, size 34"></textarea>
+            <label for="budget" data-i18n="start.budget">Most the driver may spend (USD)</label>
+            <input id="budget" type="number" inputmode="decimal" step="0.01" min="0.5" max="500" placeholder="5.00" />
+            <label for="refPhoto" data-i18n="start.photo">Photo of the item (optional)</label>
+            <label class="capture" id="refCapture" style="margin-top:0;">
+              <input id="refPhoto" type="file" accept="image/*" capture="environment" />
+              <span class="thumb" id="refThumb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span>
+              <span><span data-i18n="start.photo.add">Add a photo</span><span class="cap-sub" data-i18n="start.photo.sub">Helps the driver buy the right thing</span></span>
+            </label>
+          </details>
         </div>
 
         <div class="section-title" data-i18n="start.where">Where to?</div>
         <div class="card">
-          <button class="secondary" id="locBtn" type="button" style="margin-top:0;">
+          <div class="map small" id="dropMap"></div>
+          <button class="secondary" id="locBtn" type="button">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/></svg>
             <span data-i18n="loc.btn">Use my location</span>
           </button>
           <div id="locStatus" class="muted" style="margin-top:8px;" data-i18n="loc.none">Location not set.</div>
+          <label for="dropSearch" data-i18n="ride.search">Search a place</label>
+          <input id="dropSearch" type="search" autocomplete="off" data-i18n-ph="ride.search.ph" placeholder="Bakaara, KM4, Lido…" />
+          <div class="place-results" id="dropResults"></div>
           <label for="landmark" data-i18n="start.landmark">Nearest landmark (required)</label>
           <input id="landmark" type="text" data-i18n-ph="start.landmark.ph" placeholder="Green house next to the yellow pharmacy" />
           <!-- Not who you are (that's the account): the number the driver calls for this order. -->
           <label for="orderPhone" data-i18n="start.phone">Phone for the driver</label>
           <input id="orderPhone" type="tel" inputmode="tel" placeholder="61 234 5678" autocomplete="tel" />
           <div class="phone-hint muted" id="orderPhoneHint"></div>
+        </div>
+
+        <div class="card" id="quoteBox">
+          <dl class="kv">
+            <dt data-i18n="quote.items">Items</dt><dd class="mono">$<span id="qSubtotal">—</span></dd>
+            <dt data-i18n="quote.fee">Delivery</dt><dd class="mono">$<span id="qFee">—</span></dd>
+            <dt><strong data-i18n="quote.total">Total</strong></dt><dd class="mono"><strong>$<span id="qTotal">—</span></strong></dd>
+          </dl>
+          <p class="muted" id="qNote" style="margin:6px 0 0;"></p>
         </div>
 
         <div class="action-bar">
@@ -239,11 +341,20 @@
           <div class="track" id="track"></div>
         </div>
 
+        <!-- Where the driver is, and where the job starts and ends. -->
+        <div class="map-card hidden" id="orderMapCard">
+          <div class="map" id="orderMap"></div>
+          <div class="driver-strip hidden" id="driverStrip">
+            <span class="driver-ic" id="driverIc">🛺</span>
+            <span class="driver-body"><strong id="driverName"></strong><span class="muted" id="driverEta"></span></span>
+          </div>
+        </div>
+
         <!-- The delivery code: the customer gives it to the driver at the door, and only then. -->
         <div class="card accent code-card hidden" id="handoffCard">
           <div class="section-title" style="text-align:center;" data-i18n="code.title">Your delivery code</div>
           <div class="code-digits" id="handoffCode"></div>
-          <p class="muted" style="margin:0;" data-i18n="code.help">Give this code to the driver only when you have your items.</p>
+          <p class="muted" style="margin:0;" id="codeHelp" data-i18n="code.help">Give this code to the driver only when you have your items.</p>
         </div>
 
         <!-- Pay: one button per configured wallet; then "I've paid". -->
@@ -252,6 +363,15 @@
           <div class="between" style="margin-bottom:4px;">
             <span class="muted" data-i18n="pay.amount">Amount</span>
             <strong class="mono" style="font-size:20px;">$<span id="orderTotal"></span></strong>
+          </div>
+          <!-- Pay in the app (WaafiPay): a prompt on your phone, approved with your PIN. -->
+          <div id="appPay" class="hidden">
+            <label for="payPhone" style="margin-top:0;" data-i18n="apppay.phone">Wallet number that pays</label>
+            <input id="payPhone" type="tel" inputmode="tel" placeholder="90 123 4567" autocomplete="tel" />
+            <div class="phone-hint muted" id="payPhoneHint"></div>
+            <div id="appPayButtons"></div>
+            <p class="callout hidden" id="appPayStatus"></p>
+            <hr class="sep" />
           </div>
           <div id="payWallets" class="hidden"></div>
           <p class="muted" id="payNote" style="margin:10px 0 0;"></p>
@@ -280,9 +400,10 @@
         <div class="card">
           <div class="section-title" data-i18n="order.details">Order details</div>
           <dl class="kv">
-            <dt data-i18n="order.items">Items</dt><dd id="orderItems"></dd>
-            <dt data-i18n="order.landmark">Landmark</dt><dd id="orderLandmark"></dd>
+            <dt id="orderItemsLabel" data-i18n="order.items">Items</dt><dd id="orderItems"></dd>
+            <dt id="orderLandmarkLabel" data-i18n="order.landmark">Landmark</dt><dd id="orderLandmark"></dd>
           </dl>
+          <button class="danger-ghost hidden" id="cancelBtn" type="button" data-i18n="order.cancel">Cancel</button>
           <div class="photos" id="photos" style="margin-top:12px;"></div>
         </div>
 
@@ -404,6 +525,10 @@
   <script src="/shared/queue.js"></script>
   <script src="/shared/phone.js"></script>
   <script src="/shared/i18n.js"></script>
+  <script src="/shared/vendor/leaflet-1.9.4.js"></script>
+  <script src="/shared/vendor/protomaps-leaflet-5.1.0.js"></script>
+  <script src="/shared/map.js"></script>
+  <script src="/shared/location.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#0b0b0c" />
+  <link rel="stylesheet" href="/shared/vendor/leaflet-1.9.4.css" />
   <link rel="stylesheet" href="/shared/styles.css" />
   <script src="/shared/theme.js"></script>
   <title>GuriKaabe — Driver</title>
@@ -80,6 +81,19 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>
           </button>
         </div>
+        <!-- "I want work": dispatch only picks drivers who are online, and rides go to the
+             nearest one, so being online means sharing where you are. -->
+        <div class="card" id="onlineCard">
+          <div class="online-switch">
+            <div>
+              <div class="state off" id="onlineState" data-i18n="drv.offline">You are offline</div>
+              <div class="muted" id="vehicleLine" style="font-size:13px;"></div>
+            </div>
+            <button class="small" id="onlineBtn" type="button" data-i18n="drv.goOnline">Go online</button>
+          </div>
+          <p class="muted" id="onlineSub" style="margin:8px 0 0;font-size:13px;" data-i18n="drv.offline.sub">You get no new jobs. Jobs you have stay with you.</p>
+          <p class="muted" id="locLine" style="margin:4px 0 0;font-size:13px;"></p>
+        </div>
         <div class="kpis" style="grid-template-columns:1fr 1fr;">
           <div class="kpi gold"><div class="k-label" data-i18n="drv.toPick">To pick up</div><div class="k-value" id="countPick">0</div></div>
           <div class="kpi"><div class="k-label" data-i18n="drv.toDeliver">To deliver</div><div class="k-value" id="countDeliver">0</div></div>
@@ -102,9 +116,14 @@
           <div class="st" id="stepDeliver"><i>2</i><span data-i18n="drv.step.deliver">Deliver</span></div>
         </div>
 
+        <div class="map-card">
+          <div class="map" id="jobMap"></div>
+        </div>
+
         <div class="card">
-          <div class="section-title" data-i18n="drv.dropoff">Drop-off</div>
+          <div class="section-title" id="dTargetTitle" data-i18n="drv.dropoff">Drop-off</div>
           <div style="font-weight:700;font-size:16px;" id="dLandmark"></div>
+          <div class="muted" id="dDistance" style="font-size:13px;"></div>
           <div class="btn-row">
             <a class="btn secondary" id="navLink" href="#">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-8-8 18-2-8z"/></svg>
@@ -115,7 +134,14 @@
           </div>
         </div>
 
-        <div class="card">
+        <div class="card hidden" id="fareCard">
+          <div class="between">
+            <span class="muted" data-i18n="drv.ride.fare">Fare (paid)</span>
+            <strong class="mono">$<span id="dFare"></span></strong>
+          </div>
+        </div>
+
+        <div class="card" id="shopCard">
           <div class="section-title" data-i18n="drv.items">Shopping list</div>
           <div id="dItems"></div>
           <div class="between" style="margin-top:12px;">
@@ -143,6 +169,17 @@
             <option value="Address not safe or not found" data-i18n="drv.fail.unsafe">Address not safe or not found</option>
           </select>
           <button class="danger-ghost" id="failBtn" type="button" data-i18n="drv.fail.btn">Stop this order</button>
+          <!-- Before pickup a job can go back to dispatch instead: nothing bought, nobody in the car. -->
+          <div id="releaseBox" class="hidden">
+            <hr class="sep" />
+            <label for="releaseReason" data-i18n="drv.release">Can't take this job? Give it back</label>
+            <select id="releaseReason">
+              <option value="Too far away" data-i18n="drv.release.reason1">Too far away</option>
+              <option value="Vehicle problem" data-i18n="drv.release.reason2">Vehicle problem</option>
+              <option value="Not safe to go there" data-i18n="drv.release.reason3">Not safe to go there</option>
+            </select>
+            <button class="secondary" id="releaseBtn" type="button" data-i18n="drv.release.btn">Give job back</button>
+          </div>
         </details>
       </section>
     </main>
@@ -153,6 +190,10 @@
   <script src="/shared/queue.js"></script>
   <script src="/shared/phone.js"></script>
   <script src="/shared/i18n.js"></script>
+  <script src="/shared/vendor/leaflet-1.9.4.js"></script>
+  <script src="/shared/vendor/protomaps-leaflet-5.1.0.js"></script>
+  <script src="/shared/map.js"></script>
+  <script src="/shared/location.js"></script>
   <script src="/driver/app.js"></script>
 </body>
 </html>

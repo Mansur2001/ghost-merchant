@@ -1,7 +1,8 @@
-// Driver PWA logic. PIN login, job list, and the two driver steps — each with the proof the
-// server requires (backend domain/proof.js):
-//   pickup   — a photo of the items;
-//   delivery — the customer's 4-digit code, or a door photo + a reason (the office checks it).
+// Driver PWA logic. PIN login, the online switch (which shares the phone's position), job list,
+// and the two driver steps — each with the proof the server requires (backend domain/proof.js):
+//   delivery  pickup: a photo of the items; door: the customer's 4-digit code, or a door photo
+//             + a reason (the office checks it).
+//   ride      pickup: the rider's 4-digit code, or a reason; drop-off: just the GPS fix.
 // Every step also sends the phone's GPS fix when it can get one. A step taken offline queues
 // (photo included) and replays in order when signal returns.
 
@@ -148,6 +149,7 @@ function showQueue() {
   showOnly('queueView');
   setStatus(t('drv.signedIn'), 'ok');
   $('logoutBtn').classList.remove('hidden');
+  loadMe();
   loadQueue();
   connectSocket();
   GMQueue.onChange(renderSyncState);
@@ -162,8 +164,59 @@ $('logoutBtn').addEventListener('click', () => {
   sessionStorage.removeItem('driverToken');
   token = null;
   if (ws) { ws.onclose = null; ws.close(); ws = null; }
+  stopSharing();
   location.reload();
 });
+
+// ── Online switch + location sharing ──
+// Online = "give me jobs". Rides go to the NEAREST online driver, so being online means the
+// phone reports where it is every few seconds (only the latest position is kept on the server).
+// Browsers pause location in the background: keep the app open while online.
+let me = null;
+let stopWatch = null;
+let lastFix = null;
+async function loadMe() {
+  const res = await api('/driver/me');
+  if (res.error) return;
+  me = res.driver;
+  renderOnline();
+  if (me.online) startSharing();
+}
+function renderOnline() {
+  if (!me) return;
+  $('onlineState').textContent = t(me.online ? 'drv.online' : 'drv.offline');
+  $('onlineState').className = 'state ' + (me.online ? 'on' : 'off');
+  $('onlineSub').textContent = t(me.online ? 'drv.online.sub' : 'drv.offline.sub');
+  $('onlineBtn').textContent = t(me.online ? 'drv.goOffline' : 'drv.goOnline');
+  $('onlineBtn').className = 'small' + (me.online ? ' secondary' : '');
+  $('vehicleLine').textContent = t('drv.vehicle', { v: t(`veh.${me.vehicle}`) });
+}
+$('onlineBtn').addEventListener('click', async () => {
+  if (!me) return;
+  $('onlineBtn').disabled = true;
+  const res = await api('/driver/online', { method: 'POST', body: JSON.stringify({ online: !me.online }) });
+  $('onlineBtn').disabled = false;
+  if (res.error) return toast(GMI18n.err(res.error));
+  me = res.driver;
+  renderOnline();
+  if (me.online) startSharing(); else stopSharing();
+});
+function sendFix(fix) {
+  lastFix = fix;
+  const frame = { lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy, heading: fix.heading, speed: fix.speed };
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'location', ...frame }));
+  else if (navigator.onLine) api('/driver/location', { method: 'POST', body: JSON.stringify(frame) });
+  $('locLine').textContent = t('drv.loc.on', { m: fix.accuracy });
+  if (jobMap && current) showSelfOnMap();
+}
+function startSharing() {
+  if (stopWatch) return;
+  stopWatch = GMLocation.watch(sendFix, () => { $('locLine').textContent = t('drv.loc.off'); }, { minIntervalMs: 5000 });
+}
+function stopSharing() {
+  if (stopWatch) { stopWatch(); stopWatch = null; }
+  $('locLine').textContent = '';
+}
 
 async function loadQueue() {
   const res = await api('/driver/queue');
@@ -175,10 +228,10 @@ async function loadQueue() {
   $('queue').innerHTML = orders.length
     ? orders.map((o) => `
       <button class="tile" type="button" data-id="${o.id}">
-        <span class="tile-icon">${o.status === 'IN_TRANSIT' ? '🛵' : '🛍️'}</span>
+        <span class="tile-icon">${o.kind === 'RIDE' ? '🛺' : o.status === 'IN_TRANSIT' ? '🛵' : '🛍️'}</span>
         <span class="tile-body">
           <span class="tile-title">${esc(o.landmark_text || t('drv.noLandmark'))}</span>
-          <span class="tile-sub">${esc((o.items || [])[0]?.text || '')}</span>
+          <span class="tile-sub">${esc(o.kind === 'RIDE' ? t('drv.ride.tile', { p: o.pickup_text || '' }) : (o.items || []).map((i) => i.text).filter(Boolean).join(', '))}</span>
           <span class="tile-sub">#${GMIds.shortId(o.id)} · $${Number(o.total_amount).toFixed(2)}
             · <strong style="color:var(--gold)">${label(o.status)}</strong></span>
         </span>
@@ -196,26 +249,62 @@ async function openDetail(id) {
   current = res.order;
   photosOf = {};
   showOnly('detailView');
+  const ride = current.kind === 'RIDE';
   $('dOrderId').textContent = GMIds.shortId(current.id);
   $('dBudget').textContent = Number(current.total_amount).toFixed(2);
-  $('dLandmark').textContent = current.landmark_text || t('drv.noLandmark');
+  $('dFare').textContent = Number(current.total_amount).toFixed(2);
+  $('shopCard').classList.toggle('hidden', ride);
+  $('fareCard').classList.toggle('hidden', !ride);
   $('dItems').innerHTML = (current.items || [])
     .map((it) => `<div style="padding:4px 0;">• ${esc(it.text || JSON.stringify(it))}${it.price ? ` — $${esc(it.price)}` : ''}</div>`)
     .join('') || `<div class="muted">${t('drv.noItems')}</div>`;
-
-  // geo: link triggers the driver's own OS-native map app (zero Google dependency).
-  if (current.lat != null && current.lng != null) {
-    $('navLink').setAttribute('href', `geo:${current.lat},${current.lng}?q=${current.lat},${current.lng}`);
-    $('navLink').classList.remove('hidden');
-  } else {
-    $('navLink').classList.add('hidden');
-  }
   // tel: link for the final-100m call.
   $('callLink').setAttribute('href', `tel:${current.user_phone}`);
 
   renderStatus();
-  await loadPhotos(current.id);
+  renderTarget();
+  renderJobMap();
+  if (!ride) await loadPhotos(current.id);
   renderActions();
+}
+
+// Where to go next: a rider waiting at the pickup, otherwise the end of the job.
+function targetOf(o) {
+  if (o.kind === 'RIDE' && o.status === 'DISPATCHED' && o.pickup_lat != null) {
+    return { lat: o.pickup_lat, lng: o.pickup_lng, text: o.pickup_text || t('ride.pinned'), title: 'drv.ride.pickupAt' };
+  }
+  return { lat: o.lat, lng: o.lng, text: o.landmark_text || t('drv.noLandmark'), title: o.kind === 'RIDE' ? 'drv.ride.dropAt' : 'drv.dropoff' };
+}
+function renderTarget() {
+  const tg = targetOf(current);
+  $('dTargetTitle').textContent = t(tg.title);
+  $('dLandmark').textContent = tg.text;
+  // geo: link triggers the driver's own OS-native map app (zero Google dependency).
+  if (tg.lat != null && tg.lng != null) {
+    $('navLink').setAttribute('href', GMMap.navUri(tg));
+    $('navLink').classList.remove('hidden');
+  } else {
+    $('navLink').classList.add('hidden');
+  }
+  $('dDistance').textContent = lastFix && tg.lat != null ? t('drv.distance', { d: GMMap.formatDistance(GMMap.distance(lastFix, tg)) }) : '';
+}
+
+let jobMap = null;
+function renderJobMap() {
+  if (!jobMap) jobMap = GMMap.create($('jobMap'));
+  jobMap.refresh();
+  const start = current.pickup_lat != null ? { lat: current.pickup_lat, lng: current.pickup_lng } : null;
+  const end = current.lat != null ? { lat: current.lat, lng: current.lng } : null;
+  jobMap.pin('start', start, { kind: current.kind === 'RIDE' ? 'pickup' : 'market' });
+  jobMap.pin('end', end, { kind: 'dropoff' });
+  jobMap.line('route', start, end);
+  showSelfOnMap();
+  jobMap.fit([start, end, lastFix].filter(Boolean));
+}
+function showSelfOnMap() {
+  if (!jobMap) return;
+  jobMap.pin('me', lastFix, { kind: 'driver' });
+  if (current) renderTarget();
 }
 
 function renderStatus() {
@@ -319,7 +408,9 @@ function renderActions() {
   const s = current.status;
   const box = $('actions');
   $('problemBox').classList.toggle('hidden', !['DISPATCHED', 'IN_TRANSIT'].includes(s));
+  $('releaseBox').classList.toggle('hidden', s !== 'DISPATCHED');
   box.classList.remove('hidden');
+  if (current.kind === 'RIDE') return renderRideActions(box, s);
 
   if (s === 'DISPATCHED') {
     box.innerHTML = `
@@ -376,23 +467,91 @@ function renderActions() {
   box.innerHTML = `<p class="muted" style="margin:0;">${t('drv.act.none')}</p>`;
 }
 
+// A ride: the rider's code when they get in, then "End trip" when they get out.
+function renderRideActions(box, s) {
+  if (s === 'DISPATCHED') {
+    box.innerHTML = `
+      <div class="section-title">${t('drv.ride.pickupAt')}</div>
+      <p class="muted" style="margin:0 0 4px;">${t('drv.ride.codeHelp')}</p>
+      <label for="codeIn">${t('drv.ride.code')}</label>
+      <input id="codeIn" class="code-input" type="text" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="••••" />
+      <div id="codeMsg" class="muted" style="margin-top:6px;min-height:18px;"></div>
+      <button id="rideStartBtn" type="button">${t('drv.ride.start')}</button>
+      <details class="bare" id="noCodeBox" style="margin-top:14px;">
+        <summary class="muted">${t('drv.ride.noCode')}</summary>
+        <div style="margin-top:12px;">
+          <select id="noCodeReason">
+            <option value="Rider has no phone with them">${t('drv.ride.reason.noPhone')}</option>
+            <option value="Rider's phone is off or dead">${t('drv.ride.reason.dead')}</option>
+            <option value="Booked for someone else">${t('drv.ride.reason.other')}</option>
+          </select>
+          <p class="muted" style="margin:10px 0 0;">${t('drv.ride.flagNote')}</p>
+          <button class="secondary" id="rideNoCodeBtn" type="button">${t('drv.ride.startNoCode')}</button>
+        </div>
+      </details>`;
+    $('codeIn').addEventListener('input', () => {
+      $('codeIn').value = $('codeIn').value.replace(/\D/g, '').slice(0, 4);
+      $('codeMsg').textContent = '';
+    });
+    $('rideStartBtn').addEventListener('click', () => {
+      const code = $('codeIn').value;
+      if (!/^\d{4}$/.test(code)) return toast(t('drv.code.need'));
+      doStep('secured', { code });
+    });
+    $('rideNoCodeBtn').addEventListener('click', () => doStep('secured', { noCodeReason: $('noCodeReason').value }));
+    return;
+  }
+  if (s === 'IN_TRANSIT') {
+    box.innerHTML = `
+      <div class="section-title">${t('drv.ride.end.title')}</div>
+      <p class="muted" style="margin:0 0 4px;">${t('drv.ride.end.help')}</p>
+      <button id="rideEndBtn" type="button">${t('drv.ride.end')}</button>`;
+    $('rideEndBtn').addEventListener('click', () => doStep('dropoff', {}));
+    return;
+  }
+  box.innerHTML = `<p class="muted" style="margin:0;">${t('drv.act.none')}</p>`;
+}
+
+// "Give job back" (before pickup): two taps, then it goes to the next driver.
+$('releaseBtn').addEventListener('click', async () => {
+  const b = $('releaseBtn');
+  if (b.dataset.armed !== '1') {
+    b.dataset.armed = '1';
+    b.textContent = t('drv.release.confirm');
+    setTimeout(() => { b.dataset.armed = ''; b.textContent = t('drv.release.btn'); }, 4000);
+    return;
+  }
+  b.dataset.armed = '';
+  b.disabled = true;
+  const res = await api(`/driver/orders/${current.id}/release`, { method: 'POST', body: JSON.stringify({ reason: $('releaseReason').value }) });
+  b.disabled = false;
+  b.textContent = t('drv.release.btn');
+  if (res.error) return toast(GMI18n.err(res.error));
+  toast(t('drv.release.done'));
+  showQueue();
+});
+
 // The driver's GPS fix, as evidence. Never a gate: no fix (denied, indoors, no GPS chip) just
 // goes up as "no fix" and the office sees that.
 function getFix() {
-  if (!navigator.geolocation) return Promise.resolve(null);
+  // A fresh reading is the evidence; the last shared position is only the fallback (it can be
+  // a minute and a few hundred metres old by the time the driver is at the door).
+  const recent = lastFix && Date.now() - lastFix.at < 60000
+    ? { lat: lastFix.lat, lng: lastFix.lng, accuracy: lastFix.accuracy } : null;
+  if (!navigator.geolocation) return Promise.resolve(recent);
   return new Promise((resolve) => {
     navigator.geolocation.getCurrentPosition(
       (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy }),
-      () => resolve(null),
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+      () => resolve(recent),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 }
     );
   });
 }
 
 // The state a given action moves the order to. Needed so the sync policy can tell "this
 // already landed, the response was just lost" from a real conflict.
-const ACTION_TARGET = { secured: 'IN_TRANSIT', delivered: 'DELIVERED', failed: 'FAILED_REFUND' };
-const ACTION_LABEL = { secured: 'Items secured', delivered: 'Mark delivered', failed: 'Report failure' };
+const ACTION_TARGET = { secured: 'IN_TRANSIT', delivered: 'DELIVERED', dropoff: 'DELIVERED', failed: 'FAILED_REFUND' };
+const ACTION_LABEL = { secured: 'Items secured', delivered: 'Mark delivered', dropoff: 'End trip', failed: 'Report failure' };
 
 async function doStep(action, payload) {
   const buttons = $('detailView').querySelectorAll('button');
@@ -417,7 +576,7 @@ async function doStep(action, payload) {
     const res = await api(path, { method: 'POST', body });
     if (res.offline) return await queue();
     if (res.error) {
-      if (action === 'delivered' && payload.code !== undefined && $('codeMsg')) {
+      if ((action === 'delivered' || action === 'secured') && payload.code !== undefined && $('codeMsg')) {
         $('codeMsg').textContent = res.triesLeft != null
           ? `${GMI18n.err(res.error)} ${t('drv.tries', { n: res.triesLeft })}`
           : GMI18n.err(res.error);
@@ -431,6 +590,7 @@ async function doStep(action, payload) {
     }
     current = { ...current, ...res.order };
     renderStatus();
+    renderTarget();
     renderActions();
     toast(t('drv.updated'));
     if (['DELIVERED', 'FAILED_REFUND'].includes(current.status)) setTimeout(showQueue, 900);
@@ -501,9 +661,17 @@ function connectSocket() {
       return location.reload();
     }
     if (m.type === 'order_state' && current && String(m.orderId) === String(current.id) && m.to !== current.status) {
+      // Released or cancelled from elsewhere: it isn't this driver's job any more.
+      if (m.to === 'PAID_UNASSIGNED' || m.to === 'FAILED_REFUND') { toast(label(m.to)); return showQueue(); }
       current.status = m.to;
       renderStatus();
+      renderTarget();
       renderActions();
+    }
+    // A new job: buzz, so a driver with the phone in a holder notices without looking.
+    if (m.type === 'order_state' && m.to === 'DISPATCHED' && m.from === 'PAID_UNASSIGNED') {
+      try { navigator.vibrate && navigator.vibrate([300, 150, 300]); } catch { /* not supported */ }
+      toast(t('drv.newJob'));
     }
     if ((m.type === 'order_created' || m.type === 'order_state' || m.type === 'payment_confirmed')
         && !$('queueView').classList.contains('hidden')) {
@@ -518,7 +686,8 @@ document.addEventListener('gm:lang', () => {
   $('sPhone').dispatchEvent(new Event('input'));
   if (lastSyncStats) renderSyncState(lastSyncStats);
   if (!token) return;
-  if (current && !$('detailView').classList.contains('hidden')) { renderStatus(); renderActions(); loadPhotos(current.id); }
+  renderOnline();
+  if (current && !$('detailView').classList.contains('hidden')) { renderStatus(); renderTarget(); renderActions(); loadPhotos(current.id); }
   else { setStatus(t('drv.signedIn'), 'ok'); loadQueue(); }
 });
 

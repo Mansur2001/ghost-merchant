@@ -54,6 +54,18 @@ ensure_env() {
   chmod 600 "$ENV_FILE"
 }
 
+# Settings added after a .env.staging was first written: appended once, never overwritten.
+ensure_env_keys() {
+  grep -q '^WAAFIPAY_URL=' "$ENV_FILE" || {
+    echo
+    echo "# STAGING ONLY: in-app wallet payments go to the WaafiPay simulator (scripts/waafipay-mock.mjs)."
+    echo "WAAFIPAY_MERCHANT_UID=M0000000"
+    echo "WAAFIPAY_API_USER_ID=1000000"
+    echo "WAAFIPAY_API_KEY=API-STAGING-ONLY"
+    echo "WAAFIPAY_URL=http://waafipay-mock:8099/asm"
+  } >> "$ENV_FILE"
+}
+
 wait_healthy() {
   printf 'waiting for %s ' "$URL"
   for _ in $(seq 1 90); do
@@ -69,7 +81,7 @@ wait_healthy() {
 seed() {
   dc exec -T -e SEED_CONFIRM=wipe-local-data backend npm run seed >/dev/null
   echo "seeded: operators admin / change-me-please-1, hodan / seeded-operator-pw-1;"
-  echo "        drivers 619876543 / 1234 (Amina), 651112223 / 5678 (Bashir)"
+  echo "        drivers 619876543 / 1234 (Amina), 651112223 / 5678 (Bashir), 631234567 / 2468 (Cali)"
 }
 
 psql_staging() {
@@ -81,6 +93,7 @@ psql_staging() {
 
 up() {
   ensure_env
+  ensure_env_keys
   [ -f minio.license ] || { echo "minio.license is missing (MinIO won't start without it)"; exit 1; }
   dc up -d --build
   wait_healthy

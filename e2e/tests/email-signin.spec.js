@@ -50,7 +50,7 @@ test('link an email, then sign in by email', async ({ browser }, testInfo) => {
   }
   await page.fill('#codeInput', await codeIn(status));
   await page.click('#verifyBtn');
-  await expect(page.locator('#startView')).toBeVisible();
+  await expect(page.locator('#homeView')).toBeVisible();
   // Same account as the phone sign-in: the email only found it.
   await expect(page.locator('#signedInAs')).toContainText(number.replace(/\D/g, '').slice(-4));
 });
@@ -86,9 +86,14 @@ test('a new customer signs up with only an email, then orders with a phone for t
   // Its only way in is this email: nothing to add or remove.
   await expect(page.locator('#emailBox')).toBeHidden();
 
-  // No phone on the account, so the order asks for one.
-  await page.fill('#request', 'Email-only staging order');
-  await page.fill('#amount', '2');
+  // No phone on the account, so the order asks for one. No GPS on this "phone" either: the
+  // door is chosen from the places list instead.
+  await page.click('#goShop');
+  await page.locator('#catItems .step-add').first().click();
+  await page.click('#cartOpen');
+  await page.fill('#dropSearch', 'Bakaa');
+  await page.locator('#dropResults .place-result').first().click();
+  await expect(page.locator('#qTotal')).toHaveText(/^\d+\.\d{2}$/);
   await page.fill('#landmark', 'Staging landmark');
   await page.click('#submitBtn');
   await expect(page.locator('#orderView')).toBeHidden();

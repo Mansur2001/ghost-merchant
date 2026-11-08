@@ -499,3 +499,118 @@ body.op { height: 100vh; height: 100dvh; overflow: hidden; }
   main { padding: 12px; }
   .code-digits span { width: 48px; height: 58px; font-size: 28px; }
 }
+
+/* ── Maps (shared/map.js). Pins are CSS, not images: nothing to fetch, and they follow the theme. ── */
+.map-card { border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); background: var(--panel); margin-bottom: 14px; }
+.map { height: 46vh; min-height: 260px; max-height: 520px; width: 100%; background: var(--panel-2); }
+.map.small { height: 220px; min-height: 0; border-radius: 12px; overflow: hidden; margin-bottom: 4px; }
+.map-hint { padding: 8px 12px; font-size: 13px; }
+.gm-map.leaflet-container { font: inherit; background: var(--panel-2); }
+/* No street file installed: a plain grid so the pins still read as a map. */
+.gm-map-plain.leaflet-container {
+  background-color: var(--panel-2);
+  background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+.gm-map-note { background: var(--panel); color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; font-size: 12px; max-width: 220px; }
+.leaflet-control-attribution { background: var(--panel) !important; color: var(--muted) !important; font-size: 10px; }
+.leaflet-control-attribution a { color: var(--muted); }
+.leaflet-bar a, .leaflet-bar a:hover { background: var(--panel); color: var(--text); border-color: var(--line); }
+.gm-pin { background: none; border: 0; }
+.gm-pin .gm-pin-head {
+  display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
+  background: var(--gold); color: var(--on-gold); font-weight: 800; font-size: 13px; box-shadow: 0 2px 6px rgba(0,0,0,.35);
+  border: 2px solid var(--panel);
+}
+.gm-pin .gm-pin-head > b { transform: rotate(45deg); line-height: 1; }
+.gm-pin-dropoff .gm-pin-head { background: var(--text); color: var(--bg); }
+.gm-pin-market .gm-pin-head { background: var(--panel); color: var(--text); }
+.gm-pin .gm-dot { display: block; width: 22px; height: 22px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 4px rgba(124, 180, 255, .35), 0 2px 6px rgba(0,0,0,.4); }
+.gm-pin-driver .gm-dot { background: var(--gold); box-shadow: 0 0 0 5px var(--gold-soft), 0 2px 6px rgba(0,0,0,.4); }
+.gm-pin-me .gm-dot { background: var(--info); }
+.gm-accuracy { fill: var(--info); fill-opacity: .12; stroke: var(--info); stroke-opacity: .5; }
+.gm-line { stroke: var(--gold); stroke-opacity: .9; fill: none; }
+
+/* ── Home: the two services ── */
+.service {
+  display: flex; align-items: center; gap: 14px; width: 100%; margin: 0 0 12px; padding: 18px 16px; min-height: 0;
+  border-radius: 20px; text-align: left; font-weight: 400; background: var(--panel); color: var(--text); border: 1px solid var(--line);
+}
+.service:hover { filter: none; border-color: var(--gold); }
+.service-ride { background: radial-gradient(120% 140% at 100% 0%, var(--gold-soft), transparent 60%), var(--panel); border-color: var(--gold); }
+.service-icon { font-size: 34px; width: 56px; height: 56px; display: grid; place-items: center; border-radius: 16px; background: var(--panel-2); flex: 0 0 auto; }
+.service-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.service-title { font-size: 18px; font-weight: 800; }
+.service-sub { color: var(--muted); font-size: 13px; }
+.service .chev { color: var(--muted); font-size: 22px; }
+
+/* ── Ride booking ── */
+.point-pick { width: 100%; margin: 0 0 10px; }
+.point-pick button { flex: 1; min-height: 40px; padding: 8px 0; font-size: 14px; }
+.pt { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; font-size: 11px; font-weight: 800; flex: 0 0 auto; }
+.pt-a { background: var(--gold); color: var(--on-gold); }
+.pt-b { background: var(--text); color: var(--bg); }
+.point-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.point-row:last-of-type { border-bottom: 0; }
+.point-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.point-row .iconbtn { margin: 0; }
+.place-results { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.place-result {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 44px; margin: 0; padding: 8px 12px;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 10px; font-weight: 600; text-align: left;
+}
+.place-result .muted { font-weight: 400; font-size: 12px; }
+.ride-options { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.ride-option {
+  display: flex; align-items: center; gap: 12px; margin: 0; padding: 12px 14px; min-height: 64px; text-align: left; font-weight: 400;
+  background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 14px;
+}
+.ride-option[aria-pressed="true"] { border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-soft); }
+.ride-option:hover { filter: none; }
+.ro-icon { font-size: 28px; flex: 0 0 auto; }
+.ro-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ro-sub { font-size: 12px; }
+.ro-price { font-size: 17px; }
+
+/* ── Catalog + cart ── */
+.chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 10px; margin-bottom: 4px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.cat-chip {
+  width: auto; flex: 0 0 auto; min-height: 38px; margin: 0; padding: 6px 14px; border-radius: 999px; font-size: 14px; font-weight: 700;
+  background: var(--panel); color: var(--text); border: 1px solid var(--line);
+}
+.cat-chip[aria-pressed="true"] { background: var(--gold); color: var(--on-gold); border-color: var(--gold); }
+.catalog { display: flex; flex-direction: column; margin-bottom: 12px; }
+.cat-item { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.cat-item:last-child { border-bottom: 0; }
+.cat-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.cat-body .muted { font-size: 13px; }
+.qty { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.qty button { width: 36px; min-height: 36px; padding: 0; margin: 0; border-radius: 10px; font-size: 18px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); }
+.qty .step-add { width: auto; padding: 0 14px; font-size: 14px; background: var(--gold-soft); color: var(--gold); border-color: transparent; }
+.step-n { min-width: 22px; text-align: center; font-weight: 800; }
+.custom-tile .tile-icon { font-size: 20px; }
+.cart-bar { position: sticky; bottom: calc(70px + env(safe-area-inset-bottom)); z-index: 10; padding: 10px 0 4px; background: linear-gradient(180deg, transparent, var(--bg) 30%); }
+.cart-bar button { margin: 0; }
+#customBox summary { cursor: pointer; font-weight: 700; color: var(--gold); padding: 6px 0; }
+
+/* ── Tracking: who is coming ── */
+.driver-strip { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.driver-ic { font-size: 24px; }
+.driver-body { flex: 1; min-width: 0; }
+
+/* ── Driver: online switch and job map ── */
+.online-switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.online-switch .state { font-weight: 800; }
+.online-switch .state.on { color: var(--ok); }
+.online-switch .state.off { color: var(--muted); }
+
+/* ── Operator live map ── */
+#mapWs { grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); }
+#mapWs > .detail { display: flex; }
+.op-map { flex: 1; min-height: 360px; height: 100%; }
+.op-map-small { height: 200px; border-radius: 10px; overflow: hidden; }
+@media (max-width: 959px) {
+  #mapWs { grid-template-rows: minmax(0, 40%) minmax(0, 1fr); }
+  #mapWs > .list { display: flex; }
+}

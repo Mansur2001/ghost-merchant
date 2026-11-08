@@ -24,6 +24,19 @@
 		root * /srv/frontend
 		file_server
 	}
+	# The street map: one self-hosted file read with range requests (frontend/shared/map.js).
+	# Public data (OpenStreetMap), so any origin may read it — the Android app's WebView is a
+	# different origin from this server. Missing file = the apps fall back to a plain grid.
+	handle /tiles/* {
+		root * /srv
+		header Access-Control-Allow-Origin *
+		header Access-Control-Allow-Headers Range
+		header Access-Control-Expose-Headers "Content-Length, Content-Range, Accept-Ranges, ETag"
+		header Cache-Control "public, max-age=86400"
+		@preflight method OPTIONS
+		respond @preflight 204
+		file_server
+	}
 	handle_path /driver/* {
 		root * /srv/frontend/driver
 		file_server
@@ -76,6 +89,19 @@ localhost {
 	# Shared assets (stylesheet) reachable from all three PWAs.
 	handle /shared/* {
 		root * /srv/frontend
+		file_server
+	}
+	# The street map: one self-hosted file read with range requests (frontend/shared/map.js).
+	# Public data (OpenStreetMap), so any origin may read it — the Android app's WebView is a
+	# different origin from this server. Missing file = the apps fall back to a plain grid.
+	handle /tiles/* {
+		root * /srv
+		header Access-Control-Allow-Origin *
+		header Access-Control-Allow-Headers Range
+		header Access-Control-Expose-Headers "Content-Length, Content-Range, Accept-Ranges, ETag"
+		header Cache-Control "public, max-age=86400"
+		@preflight method OPTIONS
+		respond @preflight 204
 		file_server
 	}
 

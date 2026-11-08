@@ -2,7 +2,10 @@
 // operator confirms and dispatches, the driver delivers — and the customer's page follows
 // every step live over the WebSocket.
 import { test, expect } from '@playwright/test';
-import { openApp, signInCustomer, signInOperator, signInDriver, somaliNumber, SEED, DRIVER_PHONE, goSection, assignedDriver } from './helpers.js';
+import {
+  openApp, signInCustomer, signInOperator, signInDriver, somaliNumber, SEED, DRIVER_PHONE, CUSTOMER_PHONE,
+  goSection, assignedDriver, driversOnline, placeDelivery,
+} from './helpers.js';
 
 // A 1×1 PNG: the server checks a photo exists, not what's in it.
 const photo = (name) => ({
@@ -11,24 +14,22 @@ const photo = (name) => ({
   buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64'),
 });
 
-test('order → pay → confirm → dispatch → pickup photo → customer code, live on the customer page', async ({ browser }, testInfo) => {
-  const customer = await openApp(browser, testInfo);
+test('cart → pay → confirm → dispatch → pickup photo → customer code, live on the customer page', async ({ browser, request }, testInfo) => {
+  await driversOnline(request);
+  const customer = await openApp(browser, testInfo, CUSTOMER_PHONE);
   await signInCustomer(customer, somaliNumber());
 
-  // Place the order.
-  await customer.fill('#request', 'Staging test: 2kg rice, cooking oil');
-  await customer.fill('#amount', '7.50');
-  await customer.fill('#landmark', 'Staging landmark — green gate by the pharmacy');
-  await customer.click('#submitBtn');
-  await expect(customer.locator('#orderView')).toBeVisible();
-  const short = (await customer.locator('#orderId').textContent()).trim();
-  const orderId = await customer.evaluate(() => JSON.parse(localStorage.getItem('gm_last')).orderId);
+  // Place the order from the catalog; the server prices it.
+  const { orderId, total } = await placeDelivery(customer, { n: 2, landmark: 'Staging landmark — green gate by the pharmacy' });
+  await expect(customer.locator('#orderTotal')).toHaveText(total);
+  await expect(customer.locator('#orderMapCard')).toBeVisible();
 
-  // The wallet picker: one button per configured wallet, with the # still %23-encoded.
+  // The wallet picker: one button per configured wallet, with the # still %23-encoded and the
+  // server's total in it.
   const pay = customer.locator('#payWallets a');
   await expect(pay).toHaveCount(1);
   await expect(pay).toHaveText('Pay with EVC Plus');
-  await expect(pay).toHaveAttribute('href', 'tel:*712*612345678*7.50%23');
+  await expect(pay).toHaveAttribute('href', `tel:*712*612345678*${total}%23`);
 
   // "I've paid" is a hint for the operator, never a status change.
   const ref = `STG${Date.now().toString().slice(-6)}`;
@@ -57,7 +58,7 @@ test('order → pay → confirm → dispatch → pickup photo → customer code,
   expect(code).toMatch(/^\d{4}$/);
 
   // Nobody picks the driver: the system assigns one the moment it's paid.
-  await expect(card).toContainText('Driver at market');
+  await expect(card).toContainText('Driver assigned');
   const chosen = await assignedDriver(operator);
   await expect(detail.locator('select')).toHaveCount(0);
 
@@ -72,6 +73,8 @@ test('order → pay → confirm → dispatch → pickup photo → customer code,
   await expect(customer.locator('#statusBadge')).toHaveText('On the way to you');
   await expect(customer.locator('#proofList')).toContainText('photographed your items');
 
+  // At the customer's door now (the phone's GPS moves with the driver).
+  await driver.context().setGeolocation(CUSTOMER_PHONE.geolocation);
   // Delivery needs the customer's code. A wrong one is refused and counted.
   const wrong = code === '0000' ? '1111' : '0000';
   await driver.fill('#codeIn', wrong);
@@ -104,16 +107,12 @@ test('order → pay → confirm → dispatch → pickup photo → customer code,
   await expect(deliveredRow).toContainText('Check');
 });
 
-test('a delivery without the code needs a door photo and a reason, and waits for an operator', async ({ browser }, testInfo) => {
-  const customer = await openApp(browser, testInfo);
+test('a delivery without the code needs a door photo and a reason, and waits for an operator', async ({ browser, request }, testInfo) => {
+  await driversOnline(request);
+  const customer = await openApp(browser, testInfo, CUSTOMER_PHONE);
   await signInCustomer(customer, somaliNumber());
-  await customer.fill('#request', 'Staging: no-code delivery');
-  await customer.fill('#amount', '3');
-  await customer.fill('#landmark', 'Staging landmark — blue door');
-  await customer.click('#submitBtn');
-  await expect(customer.locator('#orderView')).toBeVisible();
-  const short = (await customer.locator('#orderId').textContent()).trim();
-  const orderId = await customer.evaluate(() => JSON.parse(localStorage.getItem('gm_last')).orderId);
+  // Something not in the catalog: a free-text line with its own budget.
+  const { orderId } = await placeDelivery(customer, { n: 0, custom: { text: 'Staging: red school shoes, size 34', budget: 3 }, landmark: 'Staging landmark — blue door' });
 
   const operator = await openApp(browser, testInfo);
   await signInOperator(operator, SEED.dispatcher);
@@ -121,7 +120,7 @@ test('a delivery without the code needs a door photo and a reason, and waits for
   await card.click();
   await operator.fill(`[data-payref="${orderId}"]`, `NC${Date.now().toString().slice(-7)}`);
   await operator.locator(`[data-confirm="${orderId}"]`).click();
-  await expect(card).toContainText('Driver at market');
+  await expect(card).toContainText('Driver assigned');
   const chosen = await assignedDriver(operator);
 
   const driver = await openApp(browser, testInfo, DRIVER_PHONE);

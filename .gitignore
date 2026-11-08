@@ -45,3 +45,6 @@ e2e/playwright-report/
 .env.production
 sendgrid.env
 e2e/simulation/
+
+# Self-hosted street map (scripts/fetch-map-tiles.sh): ~100+ MB of OpenStreetMap data.
+tiles/*.pmtiles

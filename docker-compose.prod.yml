@@ -19,6 +19,8 @@ services:
     volumes: !override
       - ./Caddyfile.prod:/etc/caddy/Caddyfile:ro
       - ./frontend:/srv/frontend:ro
+      # The street map file (scripts/fetch-map-tiles.sh). Git-ignored; optional.
+      - ./tiles:/srv/tiles:ro
       - caddy_data:/data
       - caddy_config:/config
     environment:

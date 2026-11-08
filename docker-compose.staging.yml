@@ -15,6 +15,17 @@ services:
   backend:
     env_file: !override
       - .env.staging
+    depends_on:
+      - waafipay-mock
+
+  # A stand-in for the WaafiPay gateway (scripts/waafipay-mock.mjs), so in-app payment can be
+  # walked end to end. Staging only: production refuses any WAAFIPAY_URL but the real one.
+  waafipay-mock:
+    image: node:20-alpine
+    command: ["node", "/mock/waafipay-mock.mjs"]
+    volumes:
+      - ./scripts/waafipay-mock.mjs:/mock/waafipay-mock.mjs:ro
+    restart: unless-stopped
 
   caddy:
     ports: !override

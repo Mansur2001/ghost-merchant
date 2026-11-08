@@ -113,10 +113,12 @@ const ICON = {
   team: '<circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6s7 2 7 6"/><path d="M17 4a4 4 0 0 1 0 8M22 21c0-3-1.5-5-4-5.7"/>',
   audit: '<path d="M5 3h11l3 3v15H5z"/><path d="M9 9h6M9 13h6M9 17h4"/>',
   account: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/>',
+  map: '<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>',
+  catalog: '<path d="M4 7h16l-1.5 12a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2z"/><path d="M9 7a3 3 0 0 1 6 0"/>',
 };
 const SECTIONS = [
-  ['orders', 'Orders'], ['deliveries', 'Deliveries'], ['refunds', 'Refunds'],
-  ['drivers', 'Drivers'], ['team', 'Team', 'admin'], ['audit', 'Audit log', 'admin'], ['account', 'Account'],
+  ['orders', 'Orders'], ['map', 'Live map'], ['deliveries', 'Deliveries'], ['refunds', 'Refunds'],
+  ['drivers', 'Drivers'], ['catalog', 'Catalog'], ['team', 'Team', 'admin'], ['audit', 'Audit log', 'admin'], ['account', 'Account'],
 ];
 let panel = 'orders';
 const counts = {};
@@ -136,6 +138,8 @@ function setPanel(id) {
   renderNav();
   if (id === 'deliveries') loadDeliveries();
   if (id === 'audit') loadAudit();
+  if (id === 'map') loadMap();
+  if (id === 'catalog') loadCatalogAdmin();
 }
 function setCount(id, n) {
   if ((counts[id] || 0) === n) return;
@@ -145,7 +149,7 @@ function setCount(id, n) {
 document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => setPanel(b.dataset.goto)));
 
 // List + detail plumbing: which item is open in each section, and the phone-width toggle.
-const selected = { orders: null, deliveries: null, refunds: null, drivers: null, team: null };
+const selected = { orders: null, deliveries: null, refunds: null, drivers: null, team: null, catalog: null };
 function markSelected(listEl, key) {
   listEl.querySelectorAll('[data-open]').forEach((r) => r.setAttribute('aria-selected', String(r.dataset.open === key)));
 }
@@ -221,7 +225,7 @@ async function showDash() {
   await loadMe();
   setPanel('orders');
   setStatus(me ? `Signed in as ${me.display_name} (${me.username}) — monitoring live.` : 'Monitoring live.', 'ok');
-  ['orderDetail', 'deliveryDetail', 'refundDetail', 'driverDetail', 'teamDetail'].forEach((id) =>
+  ['orderDetail', 'deliveryDetail', 'refundDetail', 'driverDetail', 'teamDetail', 'catalogDetail'].forEach((id) =>
     emptyDetail($(id), '👈', 'Select an item on the left.'));
   refreshAll();
   connectSocket();
@@ -279,7 +283,7 @@ const STATUS_LABEL = {
 // Chips say what the order needs from someone, not the enum.
 const STATUS_CHIP = {
   PENDING_PAYMENT: ['Awaiting payment', 'pending'], PAID_UNASSIGNED: ['Finding a driver', 'gold'],
-  DISPATCHED: ['Driver at market', 'info'], IN_TRANSIT: ['On the way', 'info'],
+  DISPATCHED: ['Driver assigned', 'info'], IN_TRANSIT: ['On the way', 'info'],
   DELIVERED: ['Delivered', 'ok'], FAILED_REFUND: ['Failed', 'fail'],
 };
 let orderFilter = 'all';
@@ -335,6 +339,7 @@ function renderOrders() {
     ? 'Nothing in this filter.' : 'No active orders. New orders appear here on their own.'}</div>`;
   $('orders').querySelectorAll('[data-open]').forEach((r) => r.addEventListener('click', () => openOrder(r.dataset.open)));
   markSelected($('orders'), selected.orders);
+  if (panel === 'map') renderMap();
 
   // Keep the open order's panel in step: redraw it only if the order itself changed.
   if (selected.orders) {
@@ -353,9 +358,10 @@ function orderRow(o) {
   const [chip, tone] = STATUS_CHIP[o.status] || [o.status, ''];
   const sub = isClaimed(o)
     ? `💰 Customer says they paid${o.claim_wallet ? ` with ${escapeHtml(o.claim_wallet.name)}` : ''} · ${timeAgo(o.payment_claimed_at)}`
-    : `${o.driver_name ? `🛵 ${escapeHtml(o.driver_name)} · ` : ''}${timeAgo(o.created_at)}`;
+    : `${o.driver_name ? `${o.kind === 'RIDE' ? VEHICLE_ICON[o.vehicle] || '🚗' : '🛵'} ${escapeHtml(o.driver_name)} · ` : ''}${timeAgo(o.created_at)}`;
+  const what = o.kind === 'RIDE' ? `${VEHICLE_ICON[o.vehicle] || '🚗'} → ` : '🛍️ ';
   return `<button class="lrow" type="button" data-open="${o.id}">
-      <span class="l1"><span class="mono">#${GMIds.shortId(o.id)}</span><span class="t">${escapeHtml(o.landmark_text || '—')}</span></span>
+      <span class="l1"><span class="mono">#${GMIds.shortId(o.id)}</span><span class="t">${what}${escapeHtml(o.landmark_text || '—')}</span></span>
       <span class="l2">${sub}</span>
       <span class="side"><span class="amt">${money(o.total_amount)}</span><span class="badge ${tone}">${chip}</span></span>
     </button>`;
@@ -374,6 +380,12 @@ function renderOrderDetail(o) {
   el.dataset.key = orderKey(o);
   const [chip, tone] = STATUS_CHIP[o.status] || [o.status, ''];
   const items = (o.items || []).map((it) => escapeHtml(it.text || '')).filter(Boolean).join(', ') || '—';
+  const ride = o.kind === 'RIDE';
+  const job = ride
+    ? `<dt>Job</dt><dd>${VEHICLE_ICON[o.vehicle] || '🚗'} Ride (${escapeHtml(o.vehicle || '')})${o.distance_m ? ` · ${(o.distance_m / 1000).toFixed(1)} km` : ''}</dd>
+       <dt>Pickup</dt><dd>${escapeHtml(o.pickup_text || '—')}</dd><dt>Destination</dt><dd>${escapeHtml(o.landmark_text || '—')}</dd>`
+    : `<dt>Job</dt><dd>🛍️ Delivery${o.pickup_text ? ` from ${escapeHtml(o.pickup_text)}` : ''}${o.distance_m ? ` · ${(o.distance_m / 1000).toFixed(1)} km` : ''}</dd>
+       ${o.fee != null ? `<dt>Price</dt><dd>${money(o.subtotal)} goods + ${money(o.fee)} delivery</dd>` : ''}`;
   const map = o.lat != null && o.lng != null
     ? `<a href="https://www.openstreetmap.org/?mlat=${o.lat}&mlon=${o.lng}#map=18/${o.lat}/${o.lng}" target="_blank" rel="noopener">Open map ↗</a>`
     : '<span class="muted">No GPS pin — landmark only</span>';
@@ -392,9 +404,12 @@ function renderOrderDetail(o) {
       <button data-confirm="${o.id}">Confirm ${money(o.total_amount)} received</button>
       <p class="muted" style="margin:8px 0 0;">The number is checked against every other payment, and your name is recorded with it.</p></div>`;
   } else if (o.status === 'PAID_UNASSIGNED') {
-    action = `<div class="dsec"><h4>Driver</h4><p class="muted" style="margin:0;">Paid. The system gives it to the next free driver automatically — fewest jobs first, then whoever has waited longest. Nobody picks.</p></div>`;
+    action = o.kind === 'RIDE'
+      ? `<div class="dsec"><h4>Driver</h4><p class="muted" style="margin:0;">Paid. The system gives it to the nearest free online ${escapeHtml(o.vehicle || '')} driver within 8 km, as soon as there is one. Nobody picks.</p></div>`
+      : `<div class="dsec"><h4>Driver</h4><p class="muted" style="margin:0;">Paid. The system gives it to the next free driver automatically — fewest jobs first, then whoever has waited longest. Nobody picks.</p></div>`;
   } else if (o.status === 'DISPATCHED' || o.status === 'IN_TRANSIT') {
-    action = `<div class="dsec"><h4>Driver</h4><p style="margin:0;">🛵 ${escapeHtml(o.driver_name || '—')} <span class="muted">· assigned automatically${o.status === 'IN_TRANSIT' ? ' · ✓ items photographed at pickup' : ''}</span></p></div>`;
+    const proven = o.kind === 'RIDE' ? 'rider picked up' : 'items photographed at pickup';
+    action = `<div class="dsec"><h4>Driver</h4><p style="margin:0;">${o.kind === 'RIDE' ? VEHICLE_ICON[o.vehicle] || '🚗' : '🛵'} ${escapeHtml(o.driver_name || '—')} <span class="muted">· assigned automatically${o.status === 'IN_TRANSIT' ? ` · ✓ ${proven}` : ''}</span></p></div>`;
   }
 
   el.innerHTML = `
@@ -404,9 +419,10 @@ function renderOrderDetail(o) {
       ${action}
       <div class="dsec"><h4>Customer</h4><dl class="kv">
         <dt>Driver calls</dt><dd><a href="tel:${escapeHtml(o.user_phone)}">${escapeHtml(o.user_phone)}</a></dd>
-        <dt>Landmark</dt><dd>${escapeHtml(o.landmark_text || '—')}</dd>
+        ${job}
+        ${ride ? '' : `<dt>Landmark</dt><dd>${escapeHtml(o.landmark_text || '—')}</dd>`}
         <dt>Location</dt><dd>${map}</dd>
-        <dt>Items</dt><dd>${items}</dd>
+        ${ride ? '' : `<dt>Items</dt><dd>${items}</dd>`}
         <dt>Placed</dt><dd>${new Date(o.created_at).toLocaleString()}</dd>
       </dl></div>
       <div class="dsec"><h4>Photos</h4><div class="photos" id="odPhotos"></div></div>
@@ -654,8 +670,8 @@ async function loadDrivers() {
   $('driversCount').textContent = `${drivers.length}`;
   $('drivers').innerHTML = drivers.length
     ? drivers.map((d) => `<button class="lrow" type="button" data-open="${d.id}">
-        <span class="l1"><span class="t">${escapeHtml(d.name)}</span></span>
-        <span class="l2">${escapeHtml(d.msisdn)} · ${d.active_orders} active · ${d.delivered_orders} delivered</span>
+        <span class="l1"><span>${VEHICLE_ICON[d.vehicle] || '🛵'}</span><span class="t">${escapeHtml(d.name)}</span></span>
+        <span class="l2">${d.online ? 'online' : 'offline'} · ${escapeHtml(d.msisdn)} · ${d.active_orders} active · ${d.delivered_orders} done</span>
         <span class="side">${d.setup_pending ? '<span class="badge pending">Waiting for setup</span>' : ''}
           <span class="badge ${d.active ? 'ok' : 'fail'}">${d.active ? 'Active' : 'Off'}</span></span>
       </button>`).join('')
@@ -676,9 +692,15 @@ function openDriver(id) {
       <div class="dsec"><h4>Driver</h4><dl class="kv">
         <dt>Phone (sign-in)</dt><dd><a href="tel:${escapeHtml(d.msisdn)}">${escapeHtml(d.msisdn)}</a></dd>
         <dt>Setup</dt><dd>${d.setup_pending ? 'Code sent — waiting for them to choose a PIN' : 'PIN set'}</dd>
+        <dt>Vehicle</dt><dd>${VEHICLE_ICON[d.vehicle] || ''} ${escapeHtml(d.vehicle)}</dd>
+        <dt>Online</dt><dd>${d.online ? 'Yes' : 'No'}${d.located_at ? ` · last position ${timeAgo(d.located_at)}` : ' · no position yet'}</dd>
         <dt>Now</dt><dd>${d.active_orders} active</dd>
         <dt>All time</dt><dd>${d.delivered_orders} delivered</dd>
       </dl></div>
+      ${me?.is_admin ? `<div class="dsec"><h4>Vehicle</h4>
+        <p class="muted" style="margin:0 0 8px;">Rides go to a driver with the vehicle the rider chose. Motorbikes get deliveries only.</p>
+        <select id="drvVehicle">${['bajaj', 'car', 'moto'].map((v) => `<option value="${v}" ${d.vehicle === v ? 'selected' : ''}>${VEHICLE_ICON[v]} ${v}</option>`).join('')}</select>
+        <button class="secondary" id="drvVehicleSave" type="button">Save vehicle</button></div>` : ''}
       ${me?.is_admin && d.active ? `<div class="dsec"><h4>${d.setup_pending ? 'Re-send setup code' : 'Reset PIN'}</h4>
         <p class="muted" style="margin:0 0 8px;">A new code goes by email; their current PIN keeps working until they set a new one.</p>
         <label for="drvCodeEmail">Email${d.has_email ? ' (leave blank to use the one on file)' : ''}</label>
@@ -693,6 +715,14 @@ function openDriver(id) {
     const email = $('drvCodeEmail').value.trim();
     const out = await api(`/operator/staff/driver/${d.id}/setup-code`, { method: 'POST', body: JSON.stringify(email ? { email } : {}) });
     setupCodeToast(out, d.name);
+    await loadDrivers();
+    openDriver(id);
+  });
+  const veh = $('drvVehicleSave');
+  if (veh) veh.addEventListener('click', async () => {
+    const out = await api(`/operator/drivers/${d.id}/vehicle`, { method: 'POST', body: JSON.stringify({ vehicle: $('drvVehicle').value }) });
+    if (out.error) return toast(out.error);
+    toast('Vehicle saved ✓');
     await loadDrivers();
     openDriver(id);
   });
@@ -734,6 +764,175 @@ $('newDriverBtn').addEventListener('click', () => {
     if (res.account?.id) openDriver(String(res.account.id));
   });
 });
+
+// ═══════════════ Live map ═══════════════
+// Where every driver last reported, and what they carry. Positions arrive over the socket
+// (driver_location) a few seconds apart; nothing here is a history.
+let opMap = null;
+let positions = new Map(); // driverId -> row
+let jobPins = new Set();
+const VEHICLE_ICON = { bajaj: '🛺', car: '🚗', moto: '🏍️' };
+async function loadMap() {
+  const res = await api('/operator/map');
+  if (res.error) return;
+  positions = new Map((res.drivers || []).map((d) => [String(d.driver_id), d]));
+  if (!opMap) opMap = GMMap.create($('opMap'), { zoom: 13 });
+  opMap.refresh();
+  renderMap(true);
+}
+const fresh = (d) => Date.now() - new Date(d.updated_at).getTime() < 3 * 60 * 1000;
+function renderMap(fit = false) {
+  if (!opMap) return;
+  const rows = [...positions.values()].sort((a, b) => (b.online - a.online) || a.name.localeCompare(b.name));
+  for (const d of rows) {
+    opMap.pin(`d${d.driver_id}`, d, { kind: d.online && fresh(d) ? 'driver' : 'me', title: d.name });
+  }
+  // Live jobs: their start and end pins, so the desk sees who is going where. Pins of jobs
+  // that finished since the last draw are taken off.
+  const live = orders.filter((x) => ['PAID_UNASSIGNED', 'DISPATCHED', 'IN_TRANSIT'].includes(x.status));
+  const keep = new Set(live.flatMap((o) => [`s${o.id}`, `e${o.id}`]));
+  for (const k of jobPins) if (!keep.has(k)) opMap.remove(k);
+  jobPins = keep;
+  for (const o of live) {
+    if (o.pickup_lat != null) opMap.pin(`s${o.id}`, { lat: o.pickup_lat, lng: o.pickup_lng }, { kind: o.kind === 'RIDE' ? 'pickup' : 'market', title: `#${GMIds.shortId(o.id)}` });
+    if (o.lat != null) opMap.pin(`e${o.id}`, { lat: o.lat, lng: o.lng }, { kind: 'dropoff', title: `#${GMIds.shortId(o.id)} ${o.landmark_text || ''}` });
+  }
+  const online = rows.filter((d) => d.online && fresh(d)).length;
+  $('mapSummary').textContent = `${online} online now · ${rows.length} with a recent position`;
+  $('mapDrivers').innerHTML = rows.length ? rows.map((d) => `
+    <button class="lrow" type="button" data-pan="${d.driver_id}">
+      <span class="l1"><span>${VEHICLE_ICON[d.vehicle] || '🛵'}</span><span class="t">${escapeHtml(d.name)}</span></span>
+      <span class="l2">${d.jobs.length ? d.jobs.map((j) => `${j.kind === 'RIDE' ? 'ride' : 'delivery'} #${GMIds.shortId(j.id)}`).join(', ') : 'no job'} · ${timeAgo(d.updated_at)}</span>
+      <span class="side"><span class="badge ${d.online && fresh(d) ? 'ok' : ''}">${d.online ? (fresh(d) ? 'Online' : 'No signal') : 'Offline'}</span></span>
+    </button>`).join('') : '<div class="pane-empty"><div class="big">🗺️</div>No driver has shared a position yet. Drivers appear when they go online.</div>';
+  $('mapDrivers').querySelectorAll('[data-pan]').forEach((b) => b.addEventListener('click', () => {
+    const d = positions.get(b.dataset.pan);
+    if (d) opMap.fit([d]);
+  }));
+  if (fit && rows.length) opMap.fit(rows);
+}
+function onDriverLocation(m) {
+  const d = positions.get(String(m.driverId));
+  if (d) Object.assign(d, { lat: m.lat, lng: m.lng, updated_at: m.at, online: true });
+  else return panel === 'map' && loadMap(); // someone new came online
+  if (panel === 'map') renderMap();
+}
+
+// ═══════════════ Catalog & places ═══════════════
+// Admins edit; everyone can read. Nothing is deleted — "Hide" keeps old orders readable — and
+// every change is in the audit log with its before and after.
+let catalogData = { categories: [], places: [] };
+async function loadCatalogAdmin() {
+  const res = await api('/operator/catalog');
+  if (res.error) return toast(res.error);
+  catalogData = res;
+  renderCatalogList();
+}
+function renderCatalogList() {
+  const off = (x) => (x.active === false ? ' <span class="badge">hidden</span>' : '');
+  const cats = catalogData.categories.map((c) => `
+    <div class="group-head">${escapeHtml(c.icon || '')} ${escapeHtml(c.name_en)} · ${c.items.length}</div>
+    <button class="lrow" type="button" data-cat="${c.id}"><span class="l1"><span class="t">Category: ${escapeHtml(c.name_en)} / ${escapeHtml(c.name_so)}</span>${off(c)}</span></button>
+    ${c.items.map((i) => `<button class="lrow" type="button" data-item="${i.id}">
+      <span class="l1"><span class="t">${escapeHtml(i.name_en)}</span>${off(i)}</span>
+      <span class="l2">${escapeHtml(i.name_so)} · ${escapeHtml(i.unit_en || '')}</span>
+      <span class="side"><span class="amt">${money(i.price)}</span></span></button>`).join('')}`).join('');
+  const places = `<div class="group-head">Places · ${catalogData.places.length}</div>${catalogData.places.map((p) => `
+    <button class="lrow" type="button" data-place="${p.id}">
+      <span class="l1"><span class="t">${escapeHtml(p.name_en)}</span>${off(p)}</span>
+      <span class="l2">${escapeHtml(p.kind)} · ${escapeHtml(p.city)} · ${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}</span></button>`).join('')}`;
+  $('catalogList').innerHTML = cats + places;
+  $('catalogList').querySelectorAll('[data-item]').forEach((b) => b.addEventListener('click', () => editItem(Number(b.dataset.item))));
+  $('catalogList').querySelectorAll('[data-cat]').forEach((b) => b.addEventListener('click', () => editCategory(Number(b.dataset.cat))));
+  $('catalogList').querySelectorAll('[data-place]').forEach((b) => b.addEventListener('click', () => editPlace(Number(b.dataset.place))));
+}
+const findItem = (id) => catalogData.categories.flatMap((c) => c.items).find((i) => i.id === id);
+const field = (id, label, value = '', attrs = '') =>
+  `<label for="${id}">${label}</label><input id="${id}" value="${escapeHtml(value ?? '')}" ${attrs} ${me?.is_admin ? '' : 'disabled'} />`;
+const activeBox = (on) => `<label style="display:flex;gap:8px;align-items:center;"><input id="cActive" type="checkbox" style="width:auto;min-height:0;" ${on !== false ? 'checked' : ''} ${me?.is_admin ? '' : 'disabled'} /> Shown to customers</label>`;
+function catalogPane(title, body, onSave) {
+  const el = $('catalogDetail');
+  el.innerHTML = `<div class="pane-head">${backBtn('catalogWs')}<strong>${title}</strong></div>
+    <div class="pane-body"><div class="dsec">${body}</div></div>
+    ${me?.is_admin ? '<div class="pane-foot"><button id="cSave" type="button">Save</button></div>' : ''}`;
+  bindBack(el);
+  showDetail('catalogWs', true);
+  const save = $('cSave');
+  if (save) save.addEventListener('click', async () => {
+    save.disabled = true;
+    const res = await onSave();
+    save.disabled = false;
+    if (res?.error) return toast(res.error);
+    toast('Saved ✓ — recorded in the audit log');
+    loadCatalogAdmin();
+  });
+}
+const val = (id) => $(id).value.trim();
+const send = (method, path, body) => api(path, { method, body: JSON.stringify(body) });
+
+function editItem(id) {
+  const i = id ? findItem(id) : null;
+  const options = catalogData.categories.map((c) => `<option value="${c.id}" ${i && i.category_id === c.id ? 'selected' : ''}>${escapeHtml(c.name_en)}</option>`).join('');
+  catalogPane(i ? escapeHtml(i.name_en) : 'New item', `
+    <label for="cCat">Category</label><select id="cCat" ${me?.is_admin ? '' : 'disabled'}>${options}</select>
+    ${field('cNameEn', 'Name (English)', i?.name_en)}${field('cNameSo', 'Name (Somali — plain words)', i?.name_so)}
+    ${field('cUnitEn', 'Unit (English, e.g. 5 kg)', i?.unit_en)}${field('cUnitSo', 'Unit (Somali)', i?.unit_so)}
+    ${field('cPrice', 'Price (USD) — what the customer pays for one', i ? Number(i.price).toFixed(2) : '', 'type="number" step="0.01" min="0.01"')}
+    ${field('cSort', 'Order in the list', i?.sort ?? 0, 'type="number" min="0"')}
+    ${activeBox(i?.active)}
+    <p class="muted" style="margin:8px 0 0;">A price change applies to new carts only; placed orders keep the price they were bought at.</p>`,
+  () => {
+    const body = {
+      category_id: Number($('cCat').value), name_en: val('cNameEn'), name_so: val('cNameSo'),
+      unit_en: val('cUnitEn'), unit_so: val('cUnitSo'), price: Number($('cPrice').value), sort: Number($('cSort').value || 0),
+      active: $('cActive').checked,
+    };
+    return i ? send('PATCH', `/operator/catalog/items/${i.id}`, body) : send('POST', '/operator/catalog/items', body);
+  });
+}
+function editCategory(id) {
+  const c = id ? catalogData.categories.find((x) => x.id === id) : null;
+  catalogPane(c ? escapeHtml(c.name_en) : 'New category', `
+    ${field('cNameEn', 'Name (English)', c?.name_en)}${field('cNameSo', 'Name (Somali)', c?.name_so)}
+    ${field('cIcon', 'Icon (one emoji)', c?.icon, 'maxlength="8"')}${field('cSort', 'Order', c?.sort ?? 0, 'type="number" min="0"')}
+    ${activeBox(c?.active)}`,
+  () => {
+    const body = { name_en: val('cNameEn'), name_so: val('cNameSo'), icon: val('cIcon'), sort: Number($('cSort').value || 0), active: $('cActive').checked };
+    return c ? send('PATCH', `/operator/catalog/categories/${c.id}`, body) : send('POST', '/operator/catalog/categories', body);
+  });
+}
+function editPlace(id) {
+  const p = id ? catalogData.places.find((x) => x.id === id) : null;
+  const kinds = ['market', 'landmark', 'district'].map((k) => `<option ${p?.kind === k ? 'selected' : ''}>${k}</option>`).join('');
+  catalogPane(p ? escapeHtml(p.name_en) : 'New place', `
+    <label for="cKind">Kind</label><select id="cKind" ${me?.is_admin ? '' : 'disabled'}>${kinds}</select>
+    ${field('cNameEn', 'Name (English)', p?.name_en)}${field('cNameSo', 'Name (Somali)', p?.name_so)}
+    ${field('cCity', 'City', p?.city || 'Mogadishu')}
+    <label>Position — tap the map or drag the pin to the exact spot</label>
+    <div class="op-map-small" id="placeMap"></div>
+    <div class="btn-row">${field('cLat', 'Latitude', p?.lat, 'type="number" step="0.000001"')}${field('cLng', 'Longitude', p?.lng, 'type="number" step="0.000001"')}</div>
+    ${field('cSort', 'Order', p?.sort ?? 0, 'type="number" min="0"')}
+    ${activeBox(p?.active)}
+    <p class="muted" style="margin:8px 0 0;">Markets set where deliveries are bought and so the delivery fee. Check every pin on the ground before launch.</p>`,
+  () => {
+    const body = {
+      kind: $('cKind').value, name_en: val('cNameEn'), name_so: val('cNameSo'), city: val('cCity'),
+      lat: Number($('cLat').value), lng: Number($('cLng').value), sort: Number($('cSort').value || 0), active: $('cActive').checked,
+    };
+    return p ? send('PATCH', `/operator/places/${p.id}`, body) : send('POST', '/operator/places', body);
+  });
+  const m = GMMap.create($('placeMap'), { center: p || GMMap.MOGADISHU, zoom: 15 });
+  const setPos = (q) => {
+    $('cLat').value = q.lat.toFixed(6);
+    $('cLng').value = q.lng.toFixed(6);
+    m.pin('p', q, { kind: 'place', draggable: Boolean(me?.is_admin), onMove: setPos });
+  };
+  if (p) setPos(p);
+  if (me?.is_admin) m.onTap(setPos);
+}
+$('newItemBtn').addEventListener('click', () => editItem(null));
+$('newCatBtn').addEventListener('click', () => editCategory(null));
+$('newPlaceBtn').addEventListener('click', () => editPlace(null));
 
 // ═══════════════ Team (admin): access requests + operators ═══════════════
 // Two separate steps, on purpose: Approve records the decision; "Create account" mints the
@@ -1000,6 +1199,11 @@ function connectSocket() {
     const m = JSON.parse(ev.data);
     if (m.type === 'authenticated') return ws.send(JSON.stringify({ type: 'subscribe_operator' }));
     if (m.type === 'auth_error') return logout();
+    if (m.type === 'driver_location') return onDriverLocation(m);
+    if (m.type === 'payment_attempt') {
+      if (m.status === 'unknown') setStatus(`⚠ Wallet payment for order #${GMIds.shortId(m.orderId)} could not be confirmed — check the merchant account.`, 'warn');
+      return;
+    }
     if (m.type === 'message') {
       if (selected.orders && String(m.orderId) === String(selected.orders) && m.message) appendThread(m.message);
       // A customer's "I didn't get it" lands as a system line; the review queue must show it.

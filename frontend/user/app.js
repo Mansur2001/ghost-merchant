@@ -32,6 +32,7 @@ function clearSession() {
   localStorage.removeItem(PHONE_KEY);
   localStorage.removeItem(CONTACT_KEY);
   localStorage.removeItem('gm_last');
+  localStorage.removeItem('gm_cart');
 }
 
 // Every request carries the bearer token. A 401 means the session died (expired, or the
@@ -64,13 +65,14 @@ const STATES = [
   'IN_TRANSIT',
   'DELIVERED',
 ];
-const label = (s) => t(`st.${s}`);
+// Rides say "Driver on the way", deliveries "Driver getting your items": same states, own words.
+const isRide = (o) => o && o.kind === 'RIDE';
+const label = (s, o = order) => t(isRide(o) ? `st.ride.${s}` : `st.${s}`);
 // Server errors arrive in English; show them in the customer's language.
 const errText = (res) => (res.retryAfter
   ? t('auth.retry', { err: GMI18n.err(res.error), s: res.retryAfter })
   : GMI18n.err(res.error));
 
-let coords = null; // { lat, lng }
 let order = null;
 let pendingOrderId = null; // client-minted UUID, held across retries
 let ws = null;
@@ -401,32 +403,491 @@ function badgeClass(s) {
   return s === 'FAILED_REFUND' ? 'fail' : s === 'PENDING_PAYMENT' ? 'pending' : 'paid';
 }
 
-// ── Geolocation (silent capture + landmark mask, per SRS 3.5) ──
-$('locBtn').addEventListener('click', () => {
-  $('locStatus').textContent = t('loc.finding');
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      $('locStatus').textContent = t('loc.ok', { m: Math.round(pos.coords.accuracy) });
-    },
-    () => {
-      $('locStatus').textContent = t('loc.fail');
-    },
-    { enableHighAccuracy: true, timeout: 10000 }
-  );
+// ── Places: the fixed list (markets, landmarks, districts) that search runs over ──
+// Somali addresses are landmarks, not street numbers, so search is over places people name —
+// no geocoder, no vendor. Fetched once per session.
+let placesCache = null;
+async function loadPlaces() {
+  if (placesCache) return placesCache;
+  const res = await api('/places');
+  placesCache = res.places || [];
+  return placesCache;
+}
+const so = () => GMI18n.lang() === 'so';
+const placeName = (p) => (so() ? p.name_so : p.name_en) || p.name_en;
+const fold = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+function searchPlaces(q) {
+  const f = fold(q).trim();
+  if (f.length < 2) return [];
+  return (placesCache || []).filter((p) => fold(p.name_en).includes(f) || fold(p.name_so).includes(f)).slice(0, 8);
+}
+// Results as buttons; `onPick(place)` sets the point.
+function renderPlaceResults(box, list, onPick) {
+  box.replaceChildren(...list.map((p) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'place-result';
+    const name = document.createElement('span');
+    name.textContent = placeName(p);
+    const sub = document.createElement('span');
+    sub.className = 'muted';
+    sub.textContent = p.city;
+    b.append(name, sub);
+    b.addEventListener('click', () => { box.replaceChildren(); onPick(p); });
+    return b;
+  }));
+}
+// What the server is told about a point: the place id when one was chosen (so the server uses
+// ITS coordinates), otherwise the pin.
+const pointBody = (p) => (p.placeId ? { placeId: p.placeId } : { lat: p.lat, lng: p.lng });
+const pointText = (p) => (p.placeId ? p.label
+  : p.gps ? t('ride.myLocation', { m: p.accuracy }) : t('ride.pinned'));
+
+// A phone indoors in Mogadishu is often 100 m+ out. Above this, ask for the pin to be dragged.
+const UNSURE_M = 120;
+
+function vehicleName(v) { return t(`veh.${v}`); }
+const VEHICLE_ICON = { bajaj: '🛺', car: '🚗', moto: '🏍️' };
+
+// ── Ride booking ──
+const ride = { pickup: null, dropoff: null, picking: 'pickup', vehicle: null, quote: null, map: null, seq: 0 };
+let ridePhoneE164 = null;
+const refreshRidePhone = SomPhone.attach({
+  input: $('ridePhone'),
+  hint: $('ridePhoneHint'),
+  onChange: (r) => { ridePhoneE164 = r.valid ? r.e164 : null; },
 });
 
-// ── Create order ──
-// The owner is never sent: the server takes the account from the verified session. `phone` is
-// only the number the driver calls.
-$('submitBtn').addEventListener('click', async () => {
-  const request = $('request').value.trim();
-  const totalAmount = parseFloat($('amount').value);
-  const landmark = $('landmark').value.trim();
+function setPicking(which) {
+  ride.picking = which;
+  $('ridePick').querySelectorAll('[data-point]').forEach((b) =>
+    b.setAttribute('aria-pressed', b.dataset.point === which ? 'true' : 'false'));
+}
+$('ridePick').querySelectorAll('[data-point]').forEach((b) => b.addEventListener('click', () => setPicking(b.dataset.point)));
 
+function setRidePoint(which, p) {
+  ride[which] = p;
+  ride.map.pin(which, p, {
+    kind: which,
+    draggable: true,
+    onMove: (q) => setRidePoint(which, { lat: q.lat, lng: q.lng }),
+  });
+  if (which === 'pickup') {
+    ride.map.accuracy('acc', p.accuracy ? p : null, p.accuracy);
+    $('pickupText').textContent = pointText(p);
+  } else {
+    $('dropoffText').textContent = pointText(p);
+  }
+  // The rider is usually standing at the pickup: once it's set, the next tap is the destination.
+  if (which === 'pickup' && !ride.dropoff) setPicking('dropoff');
+  ride.map.line('route', ride.pickup, ride.dropoff);
+  if (ride.pickup && ride.dropoff) ride.map.fit([ride.pickup, ride.dropoff]);
+  quoteRide();
+}
+
+async function locateForRide() {
+  $('pickupText').textContent = t('ride.locating');
+  try {
+    const fix = await GMLocation.best({ onProgress: (f) => ride.map.pin('pickup', f, { kind: 'pickup' }) });
+    setRidePoint('pickup', { lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy, gps: true });
+    ride.map.fit([ride.pickup, ride.dropoff].filter(Boolean));
+    $('rideMapHint').textContent = fix.accuracy > UNSURE_M ? t('ride.unsure', { m: fix.accuracy }) : t('ride.tapHint');
+  } catch (e) {
+    $('pickupText').textContent = t('ride.pickup.none');
+    toast(t(e.reason === 'denied' ? 'loc.denied' : 'loc.fail'));
+  }
+}
+
+function openRide() {
+  showView('rideView', 'home');
+  if (!ride.map) {
+    ride.map = GMMap.create($('rideMap'));
+    ride.map.onTap((p) => setRidePoint(ride.picking, p));
+    loadPlaces();
+  }
+  ride.map.refresh();
+  if (!$('ridePhone').value) { $('ridePhone').value = localStorage.getItem(CONTACT_KEY) || ''; refreshRidePhone(); }
+  if (!ride.pickup) locateForRide();
+}
+$('goRide').addEventListener('click', openRide);
+$('rideBack').addEventListener('click', () => goTab('home'));
+$('rideLocate').addEventListener('click', locateForRide);
+
+let searchTimer;
+$('placeSearch').addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(async () => {
+    await loadPlaces();
+    renderPlaceResults($('placeResults'), searchPlaces($('placeSearch').value), (p) => {
+      $('placeSearch').value = '';
+      setRidePoint(ride.picking, { lat: p.lat, lng: p.lng, placeId: p.id, label: placeName(p) });
+    });
+  }, 150);
+});
+
+async function quoteRide() {
+  ride.quote = null;
+  renderRideOptions();
+  if (!ride.pickup || !ride.dropoff) return;
+  const seq = ++ride.seq;
+  $('rideOptions').innerHTML = `<p class="muted">${t('ride.quoting')}</p>`;
+  const res = await api('/quote', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind: 'RIDE', pickup: pointBody(ride.pickup), dropoff: pointBody(ride.dropoff) }),
+  });
+  if (seq !== ride.seq) return; // the pin moved again meanwhile: a newer quote is on its way
+  if (res.error) { $('rideOptions').innerHTML = ''; $('rideOptions').textContent = GMI18n.err(res.error); return; }
+  ride.quote = res.quote;
+  if (!ride.vehicle || !ride.quote.options.some((o) => o.vehicle === ride.vehicle)) {
+    // Default to the cheapest one that has a driver nearby, else the cheapest.
+    const withDriver = ride.quote.options.filter((o) => o.available > 0);
+    ride.vehicle = (withDriver[0] || ride.quote.options[0]).vehicle;
+  }
+  renderRideOptions();
+}
+
+function renderRideOptions() {
+  const q = ride.quote;
+  const box = $('rideOptions');
+  if (!q) {
+    if (!ride.pickup || !ride.dropoff) box.innerHTML = `<p class="muted">${t('ride.setBoth')}</p>`;
+    $('rideBook').disabled = true;
+    $('rideBook').textContent = t('ride.book');
+    return;
+  }
+  box.replaceChildren(...q.options.map((o) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ride-option';
+    b.setAttribute('aria-pressed', o.vehicle === ride.vehicle ? 'true' : 'false');
+    b.innerHTML = `<span class="ro-icon">${VEHICLE_ICON[o.vehicle] || '🚗'}</span>
+      <span class="ro-body"><strong></strong><span class="muted ro-sub"></span></span>
+      <strong class="mono ro-price">$${Number(o.total).toFixed(2)}</strong>`;
+    b.querySelector('strong').textContent = vehicleName(o.vehicle);
+    b.querySelector('.ro-sub').textContent = [
+      t('ride.min', { n: q.minutes }), GMMap.formatDistance(q.distance_m),
+      o.available > 0 ? t('ride.nearby', { n: o.available }) : t('ride.noneNearby'),
+    ].join(' · ');
+    b.addEventListener('click', () => { ride.vehicle = o.vehicle; renderRideOptions(); });
+    return b;
+  }));
+  const chosen = q.options.find((o) => o.vehicle === ride.vehicle);
+  if (chosen && chosen.available === 0) {
+    const warn = document.createElement('p');
+    warn.className = 'callout warn';
+    warn.textContent = t('ride.noneWarn', { v: vehicleName(chosen.vehicle) });
+    box.appendChild(warn);
+  }
+  $('rideBook').disabled = !chosen;
+  $('rideBook').textContent = chosen ? t('ride.bookFor', { v: vehicleName(chosen.vehicle), p: Number(chosen.total).toFixed(2) }) : t('ride.book');
+}
+
+let pendingRideId = null;
+$('rideBook').addEventListener('click', async () => {
   if (!token) return showView('authView');
-  if (!request) return toast(t('start.err.request'));
-  if (!(totalAmount >= 0)) return toast(t('start.err.amount'));
+  if (!ride.pickup || !ride.dropoff) return toast(t('ride.err.points'));
+  const chosen = ride.quote?.options.find((o) => o.vehicle === ride.vehicle);
+  if (!chosen) return toast(t('ride.err.vehicle'));
+  if (!ridePhoneE164) return toast(t('err.phone'));
+  $('rideBook').disabled = true;
+  pendingRideId = pendingRideId || GMIds.newId();
+  const res = await api('/orders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      kind: 'RIDE',
+      id: pendingRideId,
+      vehicle: ride.vehicle,
+      pickup: pointBody(ride.pickup),
+      dropoff: pointBody(ride.dropoff),
+      pickupNote: $('pickupNote').value.trim(),
+      landmark: ride.dropoff.placeId ? ride.dropoff.label : '',
+      phone: ridePhoneE164,
+      expectedTotal: chosen.total,
+    }),
+  });
+  $('rideBook').disabled = false;
+  if (res.error) {
+    // The fare moved under us (tariff edited): show the new one, never book at a price unseen.
+    if (res.quote) { ride.quote = res.quote; renderRideOptions(); }
+    return toast(GMI18n.err(res.error));
+  }
+  pendingRideId = null;
+  localStorage.setItem(CONTACT_KEY, ridePhoneE164);
+  order = res.order;
+  localStorage.setItem('gm_last', JSON.stringify({ orderId: order.id }));
+  ride.dropoff = null;
+  ride.map.remove('dropoff');
+  ride.map.remove('route');
+  $('dropoffText').textContent = t('ride.dropoff.none');
+  $('pickupNote').value = '';
+  ride.quote = null;
+  enterOrderView(res);
+});
+
+// ── Catalog + cart ──
+// The cart lives on this handset (gm_cart) as { itemId: qty }; the server prices it at
+// checkout from the live catalog, so a stale price here can't be what anyone pays.
+const CART_KEY = 'gm_cart';
+let catalog = null;
+let activeCat = null;
+let cart = {};
+try { cart = JSON.parse(localStorage.getItem(CART_KEY) || '{}') || {}; } catch { cart = {}; }
+function saveCart() {
+  try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch { /* private mode */ }
+  renderCartBar();
+}
+const itemById = (id) => {
+  for (const c of catalog || []) for (const i of c.items) if (i.id === Number(id)) return i;
+  return null;
+};
+const itemName = (i) => (so() ? i.name_so : i.name_en) || i.name_en;
+const itemUnit = (i) => (so() ? i.unit_so : i.unit_en) || i.unit_en || '';
+
+async function loadCatalog(force = false) {
+  if (catalog && !force) return catalog;
+  const res = await api('/catalog');
+  if (res.error) { toast(GMI18n.err(res.error)); return catalog || []; }
+  catalog = res.categories || [];
+  // Drop lines for items no longer sold.
+  let changed = false;
+  for (const id of Object.keys(cart)) if (!itemById(id)) { delete cart[id]; changed = true; }
+  if (changed) saveCart();
+  return catalog;
+}
+
+function setQty(id, qty) {
+  const n = Math.max(0, Math.min(50, qty));
+  if (n === 0) delete cart[id];
+  else cart[id] = n;
+  saveCart();
+}
+
+function stepper(id) {
+  const wrap = document.createElement('span');
+  wrap.className = 'qty';
+  const qty = cart[id] || 0;
+  if (!qty) {
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'step-add';
+    add.textContent = t('shop.add');
+    add.addEventListener('click', () => { setQty(id, 1); rerenderQty(); });
+    wrap.appendChild(add);
+    return wrap;
+  }
+  const minus = document.createElement('button');
+  minus.type = 'button';
+  minus.textContent = '−';
+  minus.setAttribute('aria-label', '−');
+  minus.addEventListener('click', () => { setQty(id, qty - 1); rerenderQty(); });
+  const n = document.createElement('span');
+  n.className = 'step-n';
+  n.textContent = qty;
+  const plus = document.createElement('button');
+  plus.type = 'button';
+  plus.textContent = '+';
+  plus.setAttribute('aria-label', '+');
+  plus.addEventListener('click', () => { setQty(id, qty + 1); rerenderQty(); });
+  wrap.append(minus, n, plus);
+  return wrap;
+}
+
+function rerenderQty() {
+  if (!$('shopView').classList.contains('hidden')) renderCatalog();
+  if (!$('startView').classList.contains('hidden')) { renderCartLines(); quoteDelivery(); }
+}
+
+function renderCatalog() {
+  const cats = catalog || [];
+  if (!activeCat || !cats.some((c) => c.id === activeCat)) activeCat = cats[0]?.id ?? null;
+  $('catChips').replaceChildren(...cats.map((c) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cat-chip';
+    b.setAttribute('aria-pressed', c.id === activeCat ? 'true' : 'false');
+    b.textContent = `${c.icon || ''} ${so() ? c.name_so : c.name_en}`.trim();
+    b.addEventListener('click', () => { activeCat = c.id; renderCatalog(); });
+    return b;
+  }));
+  const cat = cats.find((c) => c.id === activeCat);
+  if (!cat) { $('catItems').innerHTML = `<p class="muted">${t('shop.empty')}</p>`; return; }
+  $('catItems').replaceChildren(...cat.items.map((i) => {
+    const row = document.createElement('div');
+    row.className = 'cat-item';
+    const body = document.createElement('span');
+    body.className = 'cat-body';
+    const name = document.createElement('strong');
+    name.textContent = itemName(i);
+    const sub = document.createElement('span');
+    sub.className = 'muted';
+    sub.textContent = [itemUnit(i), `$${Number(i.price).toFixed(2)}`].filter(Boolean).join(' · ');
+    body.append(name, sub);
+    row.append(body, stepper(i.id));
+    return row;
+  }));
+}
+
+function cartSummary() {
+  let count = 0;
+  let cents = 0;
+  for (const [id, qty] of Object.entries(cart)) {
+    const i = itemById(id);
+    if (!i) continue;
+    count += qty;
+    cents += Math.round(Number(i.price) * 100) * qty;
+  }
+  return { count, cents };
+}
+function renderCartBar() {
+  const { count, cents } = cartSummary();
+  $('cartBar').classList.toggle('hidden', count === 0);
+  $('cartCount').textContent = t('shop.items', { n: count });
+  $('cartSum').textContent = (cents / 100).toFixed(2);
+}
+
+async function openShop() {
+  showView('shopView', 'home');
+  if (!catalog) $('catItems').innerHTML = `<p class="muted">${t('shop.loading')}</p>`;
+  await loadCatalog();
+  renderCatalog();
+  renderCartBar();
+}
+$('goShop').addEventListener('click', openShop);
+$('shopBack').addEventListener('click', () => goTab('home'));
+$('cartOpen').addEventListener('click', () => openCheckout());
+$('shopCustom').addEventListener('click', () => openCheckout({ custom: true }));
+$('checkoutBack').addEventListener('click', openShop);
+
+// ── Checkout ──
+const drop = { point: null, map: null, quote: null, seq: 0 };
+
+function renderCartLines() {
+  const ids = Object.keys(cart).filter((id) => itemById(id));
+  if (!ids.length) {
+    $('cartLines').innerHTML = `<p class="muted" style="margin:0;">${t('cart.empty')}</p>`;
+    return;
+  }
+  $('cartLines').replaceChildren(...ids.map((id) => {
+    const i = itemById(id);
+    const row = document.createElement('div');
+    row.className = 'cat-item';
+    const body = document.createElement('span');
+    body.className = 'cat-body';
+    const name = document.createElement('strong');
+    name.textContent = itemName(i);
+    const sub = document.createElement('span');
+    sub.className = 'muted';
+    sub.textContent = `${itemUnit(i)} · $${(Number(i.price) * cart[id]).toFixed(2)}`;
+    body.append(name, sub);
+    row.append(body, stepper(Number(id)));
+    return row;
+  }));
+}
+
+function setDropPoint(p) {
+  drop.point = p;
+  drop.map.pin('dropoff', p, { kind: 'dropoff', draggable: true, onMove: (q) => setDropPoint({ lat: q.lat, lng: q.lng }) });
+  drop.map.accuracy('acc', p.accuracy ? p : null, p.accuracy);
+  $('locStatus').textContent = p.placeId ? p.label
+    : p.gps && p.accuracy > UNSURE_M ? t('ride.unsure', { m: p.accuracy })
+      : p.gps ? t('loc.ok', { m: p.accuracy }) : t('ride.pinned');
+  if (p.placeId && !$('landmark').value.trim()) $('landmark').value = p.label;
+  quoteDelivery();
+}
+
+async function openCheckout({ custom = false } = {}) {
+  if (!token) { afterSignIn = 'home'; return showView('authView', 'home'); }
+  showView('startView', 'home');
+  await loadCatalog();
+  renderCartLines();
+  if (custom) { $('customBox').open = true; $('request').focus(); }
+  if (!drop.map) {
+    drop.map = GMMap.create($('dropMap'), { zoom: 13 });
+    drop.map.onTap((p) => setDropPoint(p));
+    loadPlaces();
+  }
+  drop.map.refresh();
+  if (drop.point) drop.map.fit([drop.point]);
+  prefillOrderPhone(localStorage.getItem(CONTACT_KEY));
+  quoteDelivery();
+}
+
+function deliveryBody() {
+  const lines = Object.entries(cart).filter(([id]) => itemById(id)).map(([itemId, qty]) => ({ itemId: Number(itemId), qty }));
+  const text = $('request').value.trim();
+  const budget = parseFloat($('budget').value);
+  const body = { kind: 'DELIVERY', cart: { lines } };
+  if (text || budget) body.cart.custom = { text, budget };
+  if (drop.point) body.dropoff = pointBody(drop.point);
+  return body;
+}
+
+let quoteTimer;
+function quoteDelivery() {
+  clearTimeout(quoteTimer);
+  quoteTimer = setTimeout(runDeliveryQuote, 250);
+}
+async function runDeliveryQuote() {
+  drop.quote = null;
+  const body = deliveryBody();
+  const empty = !body.cart.lines.length && !body.cart.custom;
+  const show = (sub, fee, total, note) => {
+    $('qSubtotal').textContent = sub; $('qFee').textContent = fee; $('qTotal').textContent = total;
+    $('qNote').textContent = note || '';
+  };
+  if (empty) return show('—', '—', '—', t('cart.empty'));
+  if (!drop.point) return show('—', '—', '—', t('quote.needPlace'));
+  const seq = ++drop.seq;
+  const res = await api('/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (seq !== drop.seq) return;
+  if (res.error) {
+    // A half-typed custom line is not worth a red error while typing; say it only on submit.
+    if (res.status === 409) { await loadCatalog(true); renderCartLines(); }
+    return show('—', '—', '—', GMI18n.err(res.error));
+  }
+  drop.quote = res.quote;
+  const q = res.quote;
+  const from = q.pickup ? t('quote.from', { m: q.pickup.label, d: GMMap.formatDistance(q.distance_m) }) : '';
+  show(q.subtotal, q.fee, q.total, from);
+}
+['request', 'budget'].forEach((id) => $(id).addEventListener('input', quoteDelivery));
+
+$('locBtn').addEventListener('click', async () => {
+  $('locStatus').textContent = t('loc.finding');
+  try {
+    const fix = await GMLocation.best({ onProgress: (f) => drop.map.pin('dropoff', f, { kind: 'dropoff' }) });
+    setDropPoint({ lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy, gps: true });
+    drop.map.fit([drop.point]);
+  } catch (e) {
+    $('locStatus').textContent = t(e.reason === 'denied' ? 'loc.denied' : 'loc.fail');
+  }
+});
+
+$('dropSearch').addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(async () => {
+    await loadPlaces();
+    renderPlaceResults($('dropResults'), searchPlaces($('dropSearch').value), (p) => {
+      $('dropSearch').value = '';
+      setDropPoint({ lat: p.lat, lng: p.lng, placeId: p.id, label: placeName(p) });
+      drop.map.fit([drop.point]);
+    });
+  }, 150);
+});
+
+// ── Place the delivery order ──
+// The owner is never sent: the server takes the account from the verified session. `phone` is
+// only the number the driver calls. The price is the server's; expectedTotal is what the
+// customer saw, and a mismatch is refused rather than charged.
+$('submitBtn').addEventListener('click', async () => {
+  const body = deliveryBody();
+  const landmark = $('landmark').value.trim();
+  if (!token) return showView('authView');
+  if (!body.cart.lines.length && !body.cart.custom) return toast(t('err.cartEmpty'));
+  if (body.cart.custom && !body.cart.custom.text) return toast(t('start.err.request'));
+  if (!drop.point) return toast(t('quote.needPlace'));
   if (!orderPhoneE164) return toast(t('err.phone'));
   if (!landmark) return toast(t('start.err.landmark'));
 
@@ -439,32 +900,36 @@ $('submitBtn').addEventListener('click', async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        id: pendingOrderId,
-        phone: orderPhoneE164,
-        items: [{ text: request }],
-        totalAmount,
-        lat: coords?.lat ?? null,
-        lng: coords?.lng ?? null,
-        landmark,
+        ...body, id: pendingOrderId, phone: orderPhoneE164, landmark,
+        ...(drop.quote ? { expectedTotal: drop.quote.total } : {}),
       }),
     });
-    if (res.error) throw new Error(res.error);
+    if (res.error) {
+      if (res.quote) { drop.quote = res.quote; $('qTotal').textContent = res.quote.total; }
+      if (res.status === 409 && !res.quote) { await loadCatalog(true); renderCartLines(); }
+      throw new Error(res.error);
+    }
     order = res.order;
     pendingOrderId = null; // consumed
     localStorage.setItem(CONTACT_KEY, orderPhoneE164);
     localStorage.setItem('gm_last', JSON.stringify({ orderId: order.id }));
-    enterOrderView(res);
     const file = $('refPhoto').files[0];
-    // The form is done with: the next order starts clean.
+    const customText = body.cart.custom?.text;
+    // The cart is done with: the next order starts clean.
+    cart = {};
+    saveCart();
     $('request').value = '';
-    $('amount').value = '';
+    $('budget').value = '';
     $('landmark').value = '';
-    // Seed the thread with the user's request.
-    await api(`/orders/${order.id}/messages`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ body: request }),
-    });
+    $('customBox').open = false;
+    enterOrderView(res);
+    if (customText) {
+      await api(`/orders/${order.id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: customText }),
+      });
+    }
     // Optional reference photo → MinIO.
     $('refPhoto').value = '';
     $('refCapture').classList.remove('done');
@@ -483,16 +948,144 @@ function enterOrderView(payment) {
   showView('orderView', 'orders');
   $('orderId').textContent = GMIds.shortId(order.id);
   $('orderTotal').textContent = Number(order.total_amount).toFixed(2);
-  $('orderItems').textContent = (order.items || []).map((it) => it.text || '').filter(Boolean).join(', ') || '—';
-  $('orderLandmark').textContent = order.landmark_text || '—';
+  renderOrderDetails();
   renderPayment(payment || {});
   renderTimeline(order.status);
   updateBadge(order.status);
   loadThread();
   loadPhotos(order.id);
   refreshEvidence();
+  renderOrderMap();
+  loadAttempt();
   if (!ws) connectSocket();
   else if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'subscribe', orderId: order.id }));
+}
+
+function renderOrderDetails() {
+  if (isRide(order)) {
+    $('orderItemsLabel').textContent = t('order.from');
+    $('orderItems').textContent = order.pickup_text || t('ride.pinned');
+    $('orderLandmarkLabel').textContent = t('order.to');
+  } else {
+    $('orderItemsLabel').textContent = t('order.items');
+    $('orderItems').textContent = (order.items || []).map((it) => it.text || '').filter(Boolean).join(', ') || '—';
+    $('orderLandmarkLabel').textContent = t('order.landmark');
+  }
+  $('orderLandmark').textContent = order.landmark_text || '—';
+}
+
+// ── Tracking map: where the job starts, where it ends, and the driver's live dot ──
+let orderMap = null;
+let driverAt = null;
+function renderOrderMap() {
+  const start = order.pickup_lat != null ? { lat: order.pickup_lat, lng: order.pickup_lng } : null;
+  const end = order.lat != null ? { lat: order.lat, lng: order.lng } : null;
+  const card = $('orderMapCard');
+  const live = ['DISPATCHED', 'IN_TRANSIT'].includes(order.status);
+  if (!start && !end) { card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+  if (!orderMap) orderMap = GMMap.create($('orderMap'));
+  orderMap.refresh();
+  orderMap.pin('start', start, { kind: isRide(order) ? 'pickup' : 'market' });
+  orderMap.pin('end', end, { kind: 'dropoff' });
+  orderMap.line('route', start, end);
+  if (!live) { driverAt = null; orderMap.remove('driver'); $('driverStrip').classList.add('hidden'); }
+  orderMap.fit([start, end, driverAt].filter(Boolean));
+  if (live) loadDriverLocation();
+}
+async function loadDriverLocation() {
+  const res = await api(`/orders/${order.id}/driver-location`);
+  if (res.location) showDriver(res.location);
+}
+function showDriver(loc) {
+  if (!order || !orderMap || !['DISPATCHED', 'IN_TRANSIT'].includes(order.status)) return;
+  const first = !driverAt;
+  driverAt = { lat: loc.lat, lng: loc.lng, name: loc.name || driverAt?.name, vehicle: loc.vehicle || driverAt?.vehicle };
+  orderMap.pin('driver', driverAt, { kind: 'driver' });
+  // Where the driver is headed next: the rider's pickup, else the door.
+  const target = isRide(order) && order.status === 'DISPATCHED'
+    ? { lat: order.pickup_lat, lng: order.pickup_lng } : { lat: order.lat, lng: order.lng };
+  const d = GMMap.distance(driverAt, target);
+  const minutes = Math.max(1, Math.ceil(((d * 1.3) / 1000 / 18) * 60));
+  $('driverIc').textContent = VEHICLE_ICON[driverAt.vehicle] || '🛵';
+  $('driverName').textContent = driverAt.name || '';
+  $('driverEta').textContent = ` · ${t('drv.eta', { d: GMMap.formatDistance(d), n: minutes })}`;
+  $('driverStrip').classList.remove('hidden');
+  if (first) orderMap.fit([driverAt, target]);
+}
+
+// ── Cancel (before a driver has it) ──
+$('cancelBtn').addEventListener('click', async () => {
+  const b = $('cancelBtn');
+  if (b.dataset.armed !== '1') {
+    b.dataset.armed = '1';
+    b.textContent = t('order.cancelConfirm');
+    setTimeout(() => { b.dataset.armed = ''; b.textContent = t('order.cancel'); }, 5000);
+    return;
+  }
+  b.dataset.armed = '';
+  b.disabled = true;
+  const res = await api(`/orders/${order.id}/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  b.disabled = false;
+  b.textContent = t('order.cancel');
+  if (res.error) return toast(GMI18n.err(res.error));
+  order = { ...order, ...res.order };
+  updateBadge(order.status);
+  toast(t('order.cancelled'));
+});
+
+// ── Pay in the app (WaafiPay: EVC Plus, Zaad, Sahal) ──
+// The customer's phone gets a prompt and they approve with their PIN; the gateway's approval
+// is what marks the order paid. Answers arrive over the socket as payment_attempt.
+let payPhoneE164 = null;
+const refreshPayPhone = SomPhone.attach({
+  input: $('payPhone'),
+  hint: $('payPhoneHint'),
+  onChange: (r) => { payPhoneE164 = r.valid && r.country === 'SO' ? r.e164 : null; },
+});
+let attemptState = null;
+function renderAppPay(payment) {
+  const wallets = payment.appPay || [];
+  const show = wallets.length > 0 && order && order.status === 'PENDING_PAYMENT';
+  $('appPay').classList.toggle('hidden', !show);
+  if (!show) return;
+  if (!$('payPhone').value && /^\+252/.test(order.user_phone || '')) {
+    $('payPhone').value = order.user_phone.replace(/^\+252/, '');
+    refreshPayPhone();
+  }
+  const busy = attemptState === 'pending';
+  $('appPayButtons').replaceChildren(...wallets.map((w) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.disabled = busy;
+    b.textContent = t('apppay.btn', { amt: Number(order.total_amount).toFixed(2), wallet: w.name });
+    b.addEventListener('click', () => payInApp(w.id));
+    return b;
+  }));
+  const st = $('appPayStatus');
+  st.classList.toggle('hidden', !attemptState);
+  st.className = 'callout' + (attemptState === 'declined' || attemptState === 'unknown' ? ' warn' : '') + (attemptState ? '' : ' hidden');
+  if (attemptState) st.textContent = t(`apppay.${attemptState}`);
+}
+async function payInApp(wallet) {
+  if (!payPhoneE164) return toast(t('err.payPhone'));
+  attemptState = 'pending';
+  renderAppPay(lastPayment);
+  const res = await api(`/orders/${order.id}/pay`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ wallet, phone: payPhoneE164 }),
+  });
+  if (res.error) { attemptState = null; renderAppPay(lastPayment); return toast(GMI18n.err(res.error)); }
+  attemptState = res.attempt?.status || 'pending';
+  renderAppPay(lastPayment);
+}
+async function loadAttempt() {
+  attemptState = null;
+  if (!order || order.status !== 'PENDING_PAYMENT' || !(lastPayment.appPay || []).length) return;
+  const res = await api(`/orders/${order.id}/payment`);
+  if (res.attempt && String(res.attempt.orderId) === String(order.id)) attemptState = res.attempt.status;
+  renderAppPay(lastPayment);
 }
 
 // ── Delivery code + proof ──
@@ -506,6 +1099,8 @@ async function loadHandoff() {
   }
   const res = await api(`/orders/${order.id}/handoff`);
   if (!res.code) { card.classList.add('hidden'); return; }
+  card.querySelector('.section-title').textContent = t(isRide(order) ? 'code.title.ride' : 'code.title');
+  $('codeHelp').textContent = t(isRide(order) ? 'code.help.ride' : 'code.help');
   $('handoffCode').replaceChildren(...res.code.split('').map((d) => {
     const span = document.createElement('span');
     span.textContent = d;
@@ -516,6 +1111,9 @@ async function loadHandoff() {
 
 const PROOF_TEXT = {
   'pickup:photo': 'proof.pickup',
+  'pickup:code': 'proof.ridePickup',
+  'pickup:no_code': 'proof.rideNoCode',
+  'delivery:dropoff': 'proof.dropoff',
   'delivery:code': 'proof.code',
   'delivery:photo_no_code': 'proof.noCode',
 };
@@ -527,8 +1125,9 @@ async function loadProofs() {
   $('proofList').replaceChildren(...proofs.map((p) => {
     const li = document.createElement('li');
     const ic = document.createElement('span');
-    ic.className = 'ic' + (p.method === 'photo_no_code' ? ' warn' : '');
-    ic.textContent = p.method === 'photo_no_code' ? '!' : '✓';
+    const weak = p.method === 'photo_no_code' || p.method === 'no_code';
+    ic.className = 'ic' + (weak ? ' warn' : '');
+    ic.textContent = weak ? '!' : '✓';
     const body = document.createElement('span');
     const when = new Date(p.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     body.textContent = `${t(PROOF_TEXT[`${p.step}:${p.method}`] || 'proof.pickup')} · ${when}`;
@@ -539,7 +1138,7 @@ async function loadProofs() {
   const delivery = proofs.find((p) => p.step === 'delivery');
   const disputed = Boolean(delivery?.flags?.includes('customer_disputed'));
   const recent = delivery && Date.now() - new Date(delivery.created_at).getTime() < 72 * 3600 * 1000;
-  $('disputeBox').classList.toggle('hidden', !delivery || disputed || !recent);
+  $('disputeBox').classList.toggle('hidden', !delivery || disputed || !recent || isRide(order));
   $('disputeNote').classList.toggle('hidden', !disputed);
 }
 
@@ -609,6 +1208,7 @@ function renderPayment(payment) {
   box.classList.toggle('hidden', !wallets.length);
   // The server's paymentNote is English; the method alone says which message applies.
   note.textContent = wallets.length ? t(wallets.length > 1 ? 'pay.pick' : 'pay.note') : t('pay.manual');
+  renderAppPay(payment);
 }
 
 function chosenWallet() {
@@ -721,7 +1321,16 @@ function connectSocket() {
       renderTimeline(m.to);
       updateBadge(m.to);
       refreshEvidence();
+      // Assigned, released or finished: the driver (and who it is) may have changed.
+      resumeOrderQuietly();
       if (m.to === 'DELIVERED') loadPhotos(order.id);
+    } else if (m.type === 'driver_location') {
+      if (!order || String(m.orderId) !== String(order.id)) return;
+      showDriver(m);
+    } else if (m.type === 'payment_attempt') {
+      if (!order || String(m.orderId) !== String(order.id)) return;
+      attemptState = m.status;
+      renderAppPay(lastPayment);
     } else if (m.type === 'payment_confirmed') {
       if (!order || String(m.orderId) !== String(order.id)) return;
       toast(t('pay.confirmed'));
@@ -732,6 +1341,15 @@ function connectSocket() {
       if (m.message && m.message.sender === 'system') loadPhotos(order.id);
     }
   };
+}
+
+// Re-read the order after a state change (driver id, timestamps) without leaving the screen.
+async function resumeOrderQuietly() {
+  if (!order) return;
+  const res = await api(`/orders/${order.id}`);
+  if (!res.order || String(res.order.id) !== String(order.id)) return;
+  order = res.order;
+  renderOrderMap();
 }
 
 // ── Timeline + badge ──
@@ -757,7 +1375,7 @@ function renderHero(status) {
   const isFail = status === 'FAILED_REFUND';
   const idx = STATES.indexOf(status);
   $('statusTitle').textContent = label(status);
-  $('statusSub').textContent = t(`st.sub.${status}`);
+  $('statusSub').textContent = t(isRide(order) ? `st.ride.sub.${status}` : `st.sub.${status}`);
   const track = $('track');
   track.className = 'track' + (isFail ? ' fail' : '');
   track.innerHTML = STATES.map((s, i) => {
@@ -782,6 +1400,8 @@ function updateBadge(status) {
     $('payNote').classList.remove('hidden');
   }
   renderPaidClaim(status);
+  $('cancelBtn').classList.toggle('hidden', !['PENDING_PAYMENT', 'PAID_UNASSIGNED'].includes(status));
+  if (status !== 'PENDING_PAYMENT') $('appPay').classList.add('hidden');
 }
 
 // ── "I've paid" ──
@@ -905,9 +1525,9 @@ $('pwSetBtn').addEventListener('click', async () => {
 // ── Navigation: bottom tabs ──
 // Home = the new-order screen when signed in, the landing page when not. Orders and Account
 // need a session, so they send a signed-out visitor to sign-in first and come back after.
-const VIEWS = ['landingView', 'joinView', 'authView', 'startView', 'orderView', 'resumeView', 'faqView', 'accountView'];
+const VIEWS = ['landingView', 'joinView', 'authView', 'homeView', 'rideView', 'shopView', 'startView', 'orderView', 'resumeView', 'faqView', 'accountView'];
 const TAB_OF = {
-  landingView: 'home', joinView: 'home', authView: null, startView: 'home',
+  landingView: 'home', joinView: 'home', authView: null, homeView: 'home', rideView: 'home', shopView: 'home', startView: 'home',
   orderView: 'orders', resumeView: 'orders', faqView: 'help', accountView: 'account',
 };
 let afterSignIn = null;
@@ -932,7 +1552,7 @@ function goTab(tab, { start = false } = {}) {
   }
   if (tab === 'home') {
     $('signedInAs').textContent = myPhone || '';
-    return showView('startView');
+    return showView('homeView');
   }
   if (tab === 'orders') return openOrders();
   if (tab === 'account') {
@@ -970,11 +1590,11 @@ function showResumeList(orders) {
   $('resumeList').innerHTML = orders.length
     ? orders.map((o) => `
         <button class="tile" type="button" data-id="${o.id}">
-          <span class="tile-icon">${ORDER_ICON[o.status] || '•'}</span>
+          <span class="tile-icon">${isRide(o) ? (VEHICLE_ICON[o.vehicle] || '🚗') : ORDER_ICON[o.status] || '•'}</span>
           <span class="tile-body">
             <span class="tile-title">$${Number(o.total_amount).toFixed(2)}
-              <span class="badge ${badgeClass(o.status)}">${label(o.status)}</span></span>
-            <span class="tile-sub">${esc((o.items || [])[0]?.text || o.landmark_text || '')}</span>
+              <span class="badge ${badgeClass(o.status)}">${label(o.status, o)}</span></span>
+            <span class="tile-sub">${esc(isRide(o) ? `${t('order.ride')} → ${o.landmark_text || ''}` : (o.items || []).map((i) => i.text).filter(Boolean).join(', ') || o.landmark_text || '')}</span>
             <span class="tile-sub">#${GMIds.shortId(o.id)} · ${new Date(o.created_at).toLocaleDateString()}</span>
           </span>
           <span class="chev">›</span>
@@ -1151,7 +1771,11 @@ $('joinIdBack').addEventListener('change', updateIdHint);
 // Static text is redone by GMI18n.apply(); this redraws what the script rendered itself.
 document.addEventListener('gm:lang', () => {
   if (!$('emailBox').classList.contains('hidden')) renderEmailBox();
+  if (!$('shopView').classList.contains('hidden')) renderCatalog();
+  if (!$('startView').classList.contains('hidden')) renderCartLines();
+  if (ride.quote) renderRideOptions();
   if (order) {
+    renderOrderDetails();
     renderPayment(lastPayment);
     renderTimeline(order.status);
     updateBadge(order.status);
@@ -1161,7 +1785,7 @@ document.addEventListener('gm:lang', () => {
   if (resendLeft > 0 || !$('codeStep').classList.contains('hidden')) renderResend();
   if (lastSyncStats) renderSyncState(lastSyncStats);
   // Re-run the live phone hints in the new language.
-  ['phone', 'joinPhone'].forEach((id) => $(id).dispatchEvent(new Event('input')));
+  ['phone', 'joinPhone', 'orderPhone', 'ridePhone', 'payPhone'].forEach((id) => $(id).dispatchEvent(new Event('input')));
   if (!$('resumeView').classList.contains('hidden')) openOrders();
   updateIdHint();
   $('otpStatus').textContent = '';

@@ -14,7 +14,7 @@ test('create an account with a password, sign out, sign back in — no email nee
   await page.fill('#pwPass', PASSWORD);
   await page.fill('#pwPass2', PASSWORD);
   await page.click('#pwBtn');
-  await expect(page.locator('#startView')).toBeVisible();
+  await expect(page.locator('#homeView')).toBeVisible();
   await expect(page.locator('#signedInAs')).toHaveText(email);
 
   await page.locator('.tabbar [data-tab="account"]').click();
@@ -29,7 +29,7 @@ test('create an account with a password, sign out, sign back in — no email nee
   await expect(page.locator('#pwStatus')).toHaveText('Wrong email or password.');
   await page.fill('#pwPass', PASSWORD);
   await page.click('#pwBtn');
-  await expect(page.locator('#startView')).toBeVisible();
+  await expect(page.locator('#homeView')).toBeVisible();
 });
 
 test('a squatter\'s password dies when the real owner signs in with an emailed code', async ({ browser }, testInfo) => {
@@ -44,7 +44,7 @@ test('a squatter\'s password dies when the real owner signs in with an emailed c
   await squatter.fill('#pwPass', 'squatters secret 1');
   await squatter.fill('#pwPass2', 'squatters secret 1');
   await squatter.click('#pwBtn');
-  await expect(squatter.locator('#startView')).toBeVisible();
+  await expect(squatter.locator('#homeView')).toBeVisible();
 
   // The real owner: "Forgot your password?" -> emailed code -> lands on setting a new one.
   const owner = await openApp(browser, testInfo);
@@ -74,5 +74,5 @@ test('a squatter\'s password dies when the real owner signs in with an emailed c
   await expect(later.locator('#pwStatus')).toHaveText('Wrong email or password.');
   await later.fill('#pwPass', PASSWORD);
   await later.click('#pwBtn');
-  await expect(later.locator('#startView')).toBeVisible();
+  await expect(later.locator('#homeView')).toBeVisible();
 });

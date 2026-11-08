@@ -51,11 +51,12 @@ const PATHS = {
 // Named operator accounts (P0 #5). Two of them on purpose: the whole point of the change is
 // that order_events.actor can tell two people apart, and a one-row roster can't demo that.
 const OPERATORS = SEED_OPERATORS;
-// What each seeded driver drives, whether they are online, and where they are. Amina is busy
-// with deliveries, Bashir (car) is free near Hamar Weyne, Cali (bajaj) has a rider on the way.
+// What each seeded driver drives, whether they are online, and where they are. Amina (busy with
+// deliveries) and Bashir (car, free) start OFFLINE, so the paid order stays "waiting for a
+// driver" until someone goes online — the way a shift starts. Cali (bajaj) has a rider.
 const DRIVER_STATE = [
-  { vehicle: 'bajaj', online: true, at: { lat: 2.0472, lng: 45.3190 } },
-  { vehicle: 'car', online: true, at: { lat: 2.0340, lng: 45.3405 } },
+  { vehicle: 'bajaj', online: false, at: { lat: 2.0472, lng: 45.3190 } },
+  { vehicle: 'car', online: false, at: { lat: 2.0340, lng: 45.3405 } },
   { vehicle: 'bajaj', online: true, at: { lat: 2.0301, lng: 45.3060 } },
 ];
 const DRIVERS = SEED_DRIVERS.map((d, i) => ({ ...d, ...DRIVER_STATE[i] }));

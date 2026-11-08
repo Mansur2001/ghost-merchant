@@ -11,8 +11,58 @@ export const SEED = {
   drivers: {
     Amina: { msisdn: '619876543', pin: '1234', name: 'Amina' },
     Bashir: { msisdn: '651112223', pin: '5678', name: 'Bashir' },
+    Cali: { msisdn: '631234567', pin: '2468', name: 'Cali' },
   },
 };
+
+// Dispatch only picks drivers who are ONLINE (the seed starts them offline, like a shift that
+// hasn't begun). Put the delivery drivers on, with a fresh position, over the API.
+export async function driversOnline(request, names = ['Amina', 'Bashir'], at = { lat: 2.0469, lng: 45.3182 }) {
+  for (const name of names) {
+    const d = SEED.drivers[name];
+    // eslint-disable-next-line no-await-in-loop
+    const login = await request.post('/api/driver/login', { data: { msisdn: `+252${d.msisdn}`, pin: d.pin } });
+    // eslint-disable-next-line no-await-in-loop
+    const { token } = await login.json();
+    const headers = { Authorization: `Bearer ${token}` };
+    // eslint-disable-next-line no-await-in-loop
+    await request.post('/api/driver/online', { headers, data: { online: true } });
+    // eslint-disable-next-line no-await-in-loop
+    await request.post('/api/driver/location', { headers, data: { ...at, accuracy: 15 } });
+  }
+}
+
+// A customer's phone with location on, at a door in Mogadishu.
+export const CUSTOMER_PHONE = { permissions: ['geolocation'], geolocation: { latitude: 2.0390, longitude: 45.3260 } };
+
+// Shop: add the first `n` items of the first category, open the cart, set the door by GPS,
+// and place the order. Returns { orderId, total }.
+export async function placeDelivery(page, { n = 2, custom = null, landmark = 'Staging landmark — green gate', photo = null, phone = null } = {}) {
+  await page.click('#goShop');
+  for (let i = 0; i < n; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await page.locator('#catItems .step-add').first().click();
+  }
+  // Nothing from the catalog: the way in is the "Something else?" tile (the cart bar is hidden).
+  await page.click(n > 0 ? '#cartOpen' : '#shopCustom');
+  await expect(page.locator('#startView')).toBeVisible();
+  if (custom) {
+    if (!(await page.locator('#customBox').evaluate((d) => d.open))) await page.locator('#customBox summary').click();
+    await page.fill('#request', custom.text);
+    await page.fill('#budget', String(custom.budget));
+    if (photo) await page.setInputFiles('#refPhoto', photo);
+  }
+  await page.click('#locBtn');
+  await expect(page.locator('#locStatus')).toContainText('±');
+  await page.fill('#landmark', landmark);
+  if (phone) await page.fill('#orderPhone', phone);
+  await expect(page.locator('#qTotal')).toHaveText(/^\d+\.\d{2}$/);
+  const total = (await page.locator('#qTotal').textContent()).trim();
+  await page.click('#submitBtn');
+  await expect(page.locator('#orderView')).toBeVisible();
+  const orderId = await page.evaluate(() => JSON.parse(localStorage.getItem('gm_last')).orderId);
+  return { orderId, total };
+}
 
 const digits = (n) => Array.from({ length: n }, () => Math.floor(Math.random() * 10)).join('');
 // Fresh numbers per run, so per-number rate limits and cooldowns never carry over.
@@ -50,7 +100,7 @@ export async function signInCustomer(page, national, country = 'SO') {
   const code = await codeIn(page.locator('#otpStatus'));
   await page.fill('#codeInput', code);
   await page.click('#verifyBtn');
-  await expect(page.locator('#startView')).toBeVisible();
+  await expect(page.locator('#homeView')).toBeVisible();
 }
 
 export async function signInOperator(page, { username, password }) {
