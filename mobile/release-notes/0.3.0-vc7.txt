@@ -1,0 +1,16 @@
+<en-US>
+0.3.0 (build 7)
+• Rides: book a bajaj or a car on the map. You see the price before you book.
+• Watch your driver come on the map. Give your code when you get in.
+• Food & shopping: pick meals and groceries, add them to your cart, and see the full price.
+• Help: ask a question and get an answer straight away, or talk to a person.
+• Drivers: go online to get jobs, see each job on a map.
+</en-US>
+<so>
+0.3.0 (nooca 7)
+• Safar: ku dalbo bajaaj ama gaari khariidadda. Qiimaha waad aragtaa kahor intaadan dalban.
+• Khariidadda ku eeg darawalka oo kuu imanaya. Koodhkaaga sii marka aad fuusho.
+• Cunto iyo adeeg: dooro cunto iyo raashin, dambiisha ku dar, oo arag qiimaha oo dhan.
+• Caawimaad: su'aal weydii oo isla markiiba jawaab hel, ama la hadal qof.
+• Darawallada: diyaar u noqo shaqo, shaqo kastana khariidadda ka arag.
+</so>
