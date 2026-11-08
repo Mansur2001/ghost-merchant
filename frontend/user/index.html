@@ -515,24 +515,7 @@
       <!-- Help -->
       <section id="faqView" class="hidden">
         <div class="screen-head"><h2 data-i18n="faq.title">FAQ</h2></div>
-        <!-- Help chat: FAQ answers first, then a small model on our own server. It only explains;
-             "Talk to a person" goes to the order chat with an operator. -->
-        <div class="card" id="helpChat">
-          <div class="between">
-            <div class="section-title" style="margin:0;" data-i18n="help.title">Ask us</div>
-            <span class="muted" id="helpAbout" style="font-size:12px;"></span>
-          </div>
-          <div class="thread" id="helpThread"></div>
-          <div class="composer">
-            <input id="helpInput" type="text" maxlength="500" data-i18n-ph="help.ph" placeholder="Ask a question…" />
-            <button id="helpSend" type="button" aria-label="Send">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-            </button>
-          </div>
-          <p class="muted" style="font-size:12px;margin:8px 0 0;" data-i18n="help.note">Automatic answers. They can't change your order or money.</p>
-          <button class="secondary" id="helpHuman" type="button" data-i18n="help.human">Talk to a person</button>
-          <div class="muted hidden" id="helpContact" style="margin-top:8px;"></div>
-        </div>
+        <button class="secondary" id="openChat" type="button" style="margin:0 0 14px;" data-i18n="help.open">Chat with us</button>
         <details open><summary data-i18n="faq.what.q"></summary>
           <p class="muted" data-i18n-html="faq.what.a"></p></details>
         <details><summary data-i18n="faq.pay.q"></summary>
@@ -547,6 +530,39 @@
           <p class="muted" data-i18n-html="faq.track.a"></p></details>
       </section>
     </main>
+
+    <!-- Help chat: the standard support widget — a launcher in the corner that opens a panel
+         (a bottom sheet on a phone). FAQ answers first, then the model; it only explains, and
+         "Talk to a person" goes to the order chat with an operator. -->
+    <button class="chat-launcher hidden" id="chatLauncher" type="button" aria-controls="chatPanel" aria-expanded="false"
+            data-i18n-title="help.launcher" title="Help chat">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/><path d="M8.5 11h.01M12 11h.01M15.5 11h.01"/></svg>
+    </button>
+    <section class="chat-panel" id="chatPanel" role="dialog" aria-modal="false" aria-labelledby="chatPanelTitle" hidden>
+      <header class="chat-head">
+        <div class="chat-title">
+          <strong id="chatPanelTitle" data-i18n="help.title">Ask us</strong>
+          <span class="muted" id="helpAbout"></span>
+        </div>
+        <button class="iconbtn" id="chatMin" type="button" data-i18n-title="help.minimize" title="Minimize">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+      </header>
+      <div class="thread chat-thread" id="helpThread" aria-live="polite"></div>
+      <footer class="chat-foot">
+        <div class="composer">
+          <input id="helpInput" type="text" maxlength="500" data-i18n-ph="help.ph" placeholder="Ask a question…" />
+          <button id="helpSend" type="button" aria-label="Send">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+        <div class="chat-actions">
+          <span class="muted" data-i18n="help.note">Automatic answers. They can't change your order or money.</span>
+          <button class="linkbtn" id="helpHuman" type="button" data-i18n="help.human">Talk to a person</button>
+        </div>
+        <div class="muted hidden" id="helpContact"></div>
+      </footer>
+    </section>
 
     <nav class="tabbar" aria-label="Main">
       <div class="tabbar-inner">

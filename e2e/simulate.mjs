@@ -249,8 +249,8 @@ await step(rider.page, 'Rider', 'Sees the end', '“Arrived” and “Picked up 
   await waitText(rider.page.locator('#statusTitle'), /Arrived/);
   await waitText(rider.page.locator('#proofList'), /Picked up with your code/);
 });
-await step(rider.page, 'Rider', 'Asks the help chat “How do I get my money back?”', 'An answer from the FAQ, and “Talk to a person”', async () => {
-  await rider.page.click('.tabbar [data-tab="help"]');
+await step(rider.page, 'Rider', 'Taps the chat button and asks “How do I get my money back?”', 'The chat panel opens; an answer from the FAQ, and “Talk to a person”', async () => {
+  await rider.page.click('#chatLauncher');
   await rider.page.fill('#helpInput', 'How do I get my money back?');
   await rider.page.click('#helpSend');
   await waitText(rider.page.locator('#helpThread .msg').last(), /cancel/);

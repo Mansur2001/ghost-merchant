@@ -615,9 +615,37 @@ body.op { height: 100vh; height: 100dvh; overflow: hidden; }
   #mapWs > .list { display: flex; }
 }
 
-/* ── Help chat ── */
-#helpThread { max-height: 320px; min-height: 80px; }
-#helpHuman.pulse { border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-soft); }
+/* ── Help chat: launcher + panel (bottom sheet on a phone) ── */
+.chat-launcher {
+  position: fixed; right: 16px; bottom: calc(82px + env(safe-area-inset-bottom)); z-index: 30;
+  width: 56px; height: 56px; min-height: 0; margin: 0; padding: 0; border-radius: 50%;
+  background: var(--gold); color: var(--on-gold); box-shadow: 0 6px 20px rgba(0, 0, 0, .3);
+}
+.chat-launcher svg { width: 26px; height: 26px; }
+.chat-panel {
+  position: fixed; right: 16px; bottom: calc(82px + env(safe-area-inset-bottom)); z-index: 40;
+  width: min(380px, calc(100vw - 32px)); height: min(560px, calc(100vh - 140px));
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow), 0 16px 48px rgba(0, 0, 0, .35);
+  animation: chat-in .18s ease-out;
+}
+.chat-panel[hidden] { display: none; }
+.chat-head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 12px 16px; border-bottom: 1px solid var(--line); }
+.chat-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.chat-title .muted { font-size: 12px; }
+.chat-head .iconbtn { margin: 0; }
+.chat-thread { flex: 1; min-height: 0; max-height: none; overflow-y: auto; padding: 12px; }
+.chat-foot { border-top: 1px solid var(--line); padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
+.chat-foot .composer { margin: 0; }
+.chat-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; font-size: 12px; }
+.chat-actions .linkbtn { width: auto; margin: 0; white-space: nowrap; font-size: 13px; }
+#helpHuman.pulse { color: var(--gold); text-decoration: underline; }
+@keyframes chat-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .chat-panel { animation: none; } }
+/* A phone: a bottom sheet over the tab bar, the page still visible above it. */
+@media (max-width: 600px) {
+  .chat-panel { left: 0; right: 0; bottom: 0; width: 100%; height: 78vh; height: 78dvh; border-radius: 18px 18px 0 0; border-bottom: 0; }
+}
 /* Leaflet's panes use z-index 400–1000; without their own stacking context they paint over the
    sticky app bar and the tab bar while the page scrolls. */
 .map, .op-map, .op-map-small { position: relative; z-index: 0; isolation: isolate; }

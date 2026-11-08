@@ -1537,14 +1537,37 @@ function helpLine(role, text) {
   $('helpThread').scrollTop = $('helpThread').scrollHeight;
   return div;
 }
-function openHelp(orderId = null) {
+// The widget: a launcher in the corner on the screens without their own bottom button, a
+// panel that opens over the page (a bottom sheet on a phone). Esc or the chevron collapses it.
+const NO_LAUNCHER = ['landingView', 'joinView', 'authView', 'rideView', 'shopView', 'startView'];
+let currentView = null;
+function updateLauncher() {
+  const open = !$('chatPanel').hidden;
+  $('chatLauncher').classList.toggle('hidden', open || !token || NO_LAUNCHER.includes(currentView));
+}
+function openChat(orderId = null) {
+  if (!token) return;
   if (helpOrderId !== orderId) { helpHistory = []; $('helpThread').replaceChildren(); }
   helpOrderId = orderId;
   $('helpAbout').textContent = orderId ? `${t('order.num')}${GMIds.shortId(orderId)}` : '';
-  $('helpChat').classList.toggle('hidden', !token);
   if (!$('helpThread').children.length) helpLine('assistant', t('help.hello'));
-  showView('faqView');
+  $('chatPanel').hidden = false;
+  $('chatLauncher').setAttribute('aria-expanded', 'true');
+  updateLauncher();
+  setTimeout(() => $('helpInput').focus(), 0);
 }
+function closeChat() {
+  if ($('chatPanel').hidden) return;
+  $('chatPanel').hidden = true;
+  $('chatLauncher').setAttribute('aria-expanded', 'false');
+  updateLauncher();
+  if (!$('chatLauncher').classList.contains('hidden')) $('chatLauncher').focus();
+}
+// From a screen: the order on it, if any, is what the chat is about.
+$('chatLauncher').addEventListener('click', () => openChat(currentView === 'orderView' ? order?.id || null : null));
+$('chatMin').addEventListener('click', closeChat);
+$('openChat').addEventListener('click', () => openChat(null));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeChat(); });
 async function sendHelp() {
   const message = $('helpInput').value.trim();
   if (!message || !token) return;
@@ -1565,11 +1588,12 @@ async function sendHelp() {
 }
 $('helpSend').addEventListener('click', sendHelp);
 $('helpInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendHelp(); });
-$('orderHelp').addEventListener('click', () => openHelp(order?.id || null));
+$('orderHelp').addEventListener('click', () => openChat(order?.id || null));
 // A person: on an order, its chat (operators read it live); otherwise the owner's contact.
 $('helpHuman').addEventListener('click', async () => {
   $('helpHuman').classList.remove('pulse');
   if (helpOrderId) {
+    closeChat();
     await resumeOrder(helpOrderId);
     $('chatInput').focus();
     $('chatInput').scrollIntoView({ block: 'center' });
@@ -1706,6 +1730,10 @@ let afterSignIn = null;
 function showView(id, tab) {
   VIEWS.forEach((v) => $(v).classList.add('hidden'));
   $(id).classList.remove('hidden');
+  currentView = id;
+  // A screen with its own bottom button (Book, Place order) shouldn't sit under the panel.
+  if (NO_LAUNCHER.includes(id)) closeChat();
+  updateLauncher();
   const active = tab || TAB_OF[id];
   document.querySelectorAll('.tabbar [data-tab]').forEach((b) => {
     if (b.dataset.tab === active) b.setAttribute('aria-current', 'page');
@@ -1714,7 +1742,7 @@ function showView(id, tab) {
   window.scrollTo(0, 0);
 }
 function goTab(tab, { start = false } = {}) {
-  if (tab === 'help') return openHelp(null);
+  if (tab === 'help') return showView('faqView');
   if (!token) {
     if (tab === 'home' && !start) return showView('landingView');
     afterSignIn = tab;

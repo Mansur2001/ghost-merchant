@@ -545,6 +545,9 @@
       'err.walletCap': 'Your wallet is full.',
       'err.walletOff': 'The wallet is not available.',
       'err.wdOpen': 'You already have a withdrawal waiting.',
+      'help.open': 'Chat with us',
+      'help.minimize': 'Minimize',
+      'help.launcher': 'Help chat',
     },
 
     so: {
@@ -1075,6 +1078,9 @@
       'err.walletCap': 'Boorsadaadu waa buuxdaa.',
       'err.walletOff': 'Boorsada lama heli karo.',
       'err.wdOpen': 'Waxaad haysataa codsi lacag bixis ah oo sugaya.',
+      'help.open': 'Nala sheekeyso',
+      'help.minimize': 'Yaree',
+      'help.launcher': 'Caawimaad',
     },
   };
 
