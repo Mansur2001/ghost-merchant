@@ -548,6 +548,8 @@
       'help.open': 'Chat with us',
       'help.minimize': 'Minimize',
       'help.launcher': 'Help chat',
+      'loc.outside': 'Your phone is not in Somalia right now. Tap the map or search a place to set it.',
+      'drv.loc.outside': 'Your phone is outside Somalia — riders cannot be matched to you from here.',
     },
 
     so: {
@@ -1081,6 +1083,8 @@
       'help.open': 'Nala sheekeyso',
       'help.minimize': 'Yaree',
       'help.launcher': 'Caawimaad',
+      'loc.outside': 'Taleefankaagu hadda Soomaaliya kuma jiro. Khariidadda riix ama raadi meel si aad u doorato.',
+      'drv.loc.outside': 'Taleefankaagu Soomaaliya wuu ka baxsan yahay — halkan safar laguuma soo diri karo.',
     },
   };
 

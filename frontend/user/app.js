@@ -488,7 +488,18 @@ function setRidePoint(which, p) {
 async function locateForRide() {
   $('pickupText').textContent = t('ride.locating');
   try {
-    const fix = await GMLocation.best({ onProgress: (f) => ride.map.pin('pickup', f, { kind: 'pickup' }) });
+    const fix = await GMLocation.best({
+      onProgress: (f) => { if (GMMap.inArea(f)) ride.map.pin('pickup', f, { kind: 'pickup' }); },
+    });
+    if (!GMMap.inArea(fix)) {
+      // Not in Somalia (or a broken fix): leave the map on the city and ask for the point.
+      ride.map.remove('pickup');
+      ride.map.fit([GMMap.MOGADISHU]);
+      setPicking('pickup');
+      $('pickupText').textContent = t('ride.pickup.none');
+      $('rideMapHint').textContent = t('loc.outside');
+      return;
+    }
     setRidePoint('pickup', { lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy, gps: true });
     ride.map.fit([ride.pickup, ride.dropoff].filter(Boolean));
     $('rideMapHint').textContent = fix.accuracy > UNSURE_M ? t('ride.unsure', { m: fix.accuracy }) : t('ride.tapHint');
@@ -502,7 +513,7 @@ function openRide() {
   showView('rideView', 'home');
   if (!ride.map) {
     ride.map = GMMap.create($('rideMap'));
-    ride.map.onTap((p) => setRidePoint(ride.picking, p));
+    ride.map.onTap((p) => { if (GMMap.inArea(p)) setRidePoint(ride.picking, p); });
     loadPlaces();
   }
   ride.map.refresh();
@@ -805,7 +816,7 @@ async function openCheckout({ custom = false } = {}) {
   if (custom) { $('customBox').open = true; $('request').focus(); }
   if (!drop.map) {
     drop.map = GMMap.create($('dropMap'), { zoom: 13 });
-    drop.map.onTap((p) => setDropPoint(p));
+    drop.map.onTap((p) => { if (GMMap.inArea(p)) setDropPoint(p); });
     loadPlaces();
   }
   drop.map.refresh();
@@ -857,7 +868,14 @@ async function runDeliveryQuote() {
 $('locBtn').addEventListener('click', async () => {
   $('locStatus').textContent = t('loc.finding');
   try {
-    const fix = await GMLocation.best({ onProgress: (f) => drop.map.pin('dropoff', f, { kind: 'dropoff' }) });
+    const fix = await GMLocation.best({
+      onProgress: (f) => { if (GMMap.inArea(f)) drop.map.pin('dropoff', f, { kind: 'dropoff' }); },
+    });
+    if (!GMMap.inArea(fix)) {
+      $('locStatus').textContent = t('loc.outside');
+      drop.map.fit([drop.point || GMMap.MOGADISHU]);
+      return;
+    }
     setDropPoint({ lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy, gps: true });
     drop.map.fit([drop.point]);
   } catch (e) {

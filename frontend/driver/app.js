@@ -202,6 +202,8 @@ $('onlineBtn').addEventListener('click', async () => {
   if (me.online) startSharing(); else stopSharing();
 });
 function sendFix(fix) {
+  // Outside Somalia the server refuses the position anyway; say so instead of "sharing".
+  if (!GMMap.inArea(fix)) { lastFix = null; $('locLine').textContent = t('drv.loc.outside'); return; }
   lastFix = fix;
   const frame = { lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy, heading: fix.heading, speed: fix.speed };
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'location', ...frame }));

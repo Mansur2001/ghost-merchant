@@ -165,8 +165,15 @@
     return 'geo:' + q + '?q=' + q + (label ? '(' + encodeURIComponent(label) + ')' : '');
   }
 
+  // Inside the area we serve? A phone abroad (a tester in Seattle) or a broken fix (0, 0) is
+  // not a pickup, a door or a driver position.
+  function inArea(p) {
+    return Boolean(p) && p.lat >= BOUNDS[0][0] && p.lat <= BOUNDS[1][0] && p.lng >= BOUNDS[0][1] && p.lng <= BOUNDS[1][1];
+  }
+
   global.GMMap = {
     available: function () { return Boolean(L); },
+    inArea: inArea,
     create: create,
     distance: distance,
     formatDistance: formatDistance,
