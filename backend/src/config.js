@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import { parseTariff } from './domain/pricing.js';
 import { parseWaafiPay } from './domain/waafipay.js';
 import { parseAssistant } from './domain/assistant.js';
+import { parseWalletSettings } from './domain/walletSettings.js';
 import { parseWallets } from './domain/wallets.js';
 dotenv.config();
 
@@ -87,6 +88,9 @@ export const config = {
   // with their PIN; the approval confirms the order. Unset = not offered. Half-set refuses to
   // boot (domain/waafipay.js). Works in either PAYMENT_CONFIRMATION mode.
   waafipay: parseWaafiPay(process.env),
+
+  // Customer wallet (stored value). OFF unless WALLET_ENABLED=true: a licensing decision.
+  wallet: parseWalletSettings(process.env),
 
   // Fares and delivery fees (domain/pricing.js). Defaults in code; each overridable.
   pricing: parseTariff(process.env),

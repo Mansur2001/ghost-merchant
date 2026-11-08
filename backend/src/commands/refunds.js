@@ -8,6 +8,7 @@
 //   order goes FAILED_REFUND  ->  a row with status 'owed'
 //   operator sends the money  ->  'settled', with the telecom reference of the RETURN transfer
 //   nothing was ever paid     ->  'waived', with a reason
+import { refundToWallet } from './wallet.js';
 import { prisma, withCriticalTransaction, inTransaction } from '../db/prisma.js';
 
 export class RefundError extends Error {
@@ -30,6 +31,21 @@ export async function openRefundIfOwed({ orderId, reason, createdBy }, { client 
     });
     const amount = paid._sum.amount;
     if (!amount || Number(amount) <= 0) return null;
+
+    // Paid from the customer's wallet: it goes straight back there, settled by the system in
+    // this same transaction — there is nothing for a person to send.
+    const fromWallet = await tx.transaction.aggregate({
+      where: { order_id: orderId, matched: true, provider: 'wallet' },
+      _sum: { amount: true },
+    });
+    if (fromWallet._sum.amount && Number(fromWallet._sum.amount) > 0) {
+      const done = await tx.refund.findFirst({ where: { order_id: orderId } });
+      if (done) return done;
+      const order = await tx.order.findUnique({ where: { id: orderId }, select: { user_id: true } });
+      return refundToWallet(tx, {
+        orderId, userId: order.user_id, amountCents: Math.round(Number(fromWallet._sum.amount) * 100), reason,
+      });
+    }
 
     // A partial unique index enforces one OPEN refund per order; check first so a re-run of
     // the same transition reads as a no-op rather than an error.

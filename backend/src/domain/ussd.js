@@ -29,7 +29,7 @@ export function appPayWallets(waafi = config.waafipay) {
 }
 
 export function buildPaymentInstruction(order, wallets = config.payment.wallets, waafi = config.waafipay) {
-  return { ...ussdInstruction(order, wallets), appPay: appPayWallets(waafi) };
+  return { ...ussdInstruction(order, wallets), appPay: appPayWallets(waafi), walletPay: config.wallet.enabled };
 }
 
 function ussdInstruction(order, wallets) {

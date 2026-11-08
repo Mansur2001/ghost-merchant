@@ -364,6 +364,11 @@
             <span class="muted" data-i18n="pay.amount">Amount</span>
             <strong class="mono" style="font-size:20px;">$<span id="orderTotal"></span></strong>
           </div>
+          <!-- Pay from the wallet balance (when the wallet is on and holds enough). -->
+          <div id="walletPayBox" class="hidden">
+            <button id="walletPayBtn" type="button"></button>
+            <hr class="sep" />
+          </div>
           <!-- Pay in the app (WaafiPay): a prompt on your phone, approved with your PIN. -->
           <div id="appPay" class="hidden">
             <label for="payPhone" style="margin-top:0;" data-i18n="apppay.phone">Wallet number that pays</label>
@@ -456,6 +461,33 @@
           <button class="danger-ghost" id="signOutBtn" type="button" data-i18n="start.signout">Sign out</button>
         </div>
         <!-- Email accounts: a password, so signing in never waits on an email. -->
+        <!-- Wallet (only when the server has it on): top up through the gateway, pay orders,
+             cash out. Nobody at GuriKaabe can add or take money by hand. -->
+        <div class="card hidden" id="walletCard">
+          <div class="between">
+            <div class="section-title" style="margin:0;" data-i18n="wallet.title">Wallet</div>
+            <strong class="mono" style="font-size:22px;">$<span id="walletBalance">0.00</span></strong>
+          </div>
+          <label for="topupAmount" data-i18n="wallet.topup.amount">Add money (USD)</label>
+          <input id="topupAmount" type="number" inputmode="decimal" step="0.01" min="1" placeholder="10.00" />
+          <label for="topupPhone" data-i18n="apppay.phone">Wallet number that pays</label>
+          <input id="topupPhone" type="tel" inputmode="tel" placeholder="90 123 4567" />
+          <div class="phone-hint muted" id="topupPhoneHint"></div>
+          <div id="topupButtons"></div>
+          <p class="callout hidden" id="topupStatus"></p>
+          <details class="bare" style="margin-top:12px;">
+            <summary class="muted" data-i18n="wallet.withdraw">Take money out</summary>
+            <label for="wdAmount" data-i18n="wallet.withdraw.amount">Amount (USD)</label>
+            <input id="wdAmount" type="number" inputmode="decimal" step="0.01" min="1" />
+            <label for="wdPhone" data-i18n="wallet.withdraw.phone">Send it to</label>
+            <input id="wdPhone" type="tel" inputmode="tel" placeholder="61 234 5678" />
+            <div class="phone-hint muted" id="wdPhoneHint"></div>
+            <button class="secondary" id="wdBtn" type="button" data-i18n="wallet.withdraw.btn">Request withdrawal</button>
+          </details>
+          <div class="section-title" style="margin-top:14px;" data-i18n="wallet.history">History</div>
+          <ul class="wallet-history" id="walletHistory"></ul>
+        </div>
+
         <div class="card hidden" id="pwSetBox">
           <div class="section-title" id="pwSetTitle" data-i18n="acct.pw.title.set">Set a password</div>
           <p class="callout hidden" id="pwResetNote" data-i18n="acct.pw.reset">You signed in with a code. Set a new password now.</p>

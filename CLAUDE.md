@@ -19,7 +19,8 @@ Change the owner with `backend/scripts/set-owner.mjs` on the server, never by ed
 
 ### Business posture — read before proposing features
 
-**The model: GuriKaabe is the merchant of record, not an escrow or a wallet.** The customer
+**The model: GuriKaabe is the merchant of record, not an escrow or a wallet.** (A customer
+wallet now exists for the client, switched off by default — invariant 6.) The customer
 buys from GuriKaabe: one price per order (goods + delivery fee + margin), paid upfront to
 GuriKaabe's merchant wallet. The driver buys the goods with the **company's float** (GuriKaabe's
 own operating money), delivers, and the company keeps the fee. Revenue is the fee and margin on
@@ -114,9 +115,17 @@ customer's page flips to paid live.`
    pre-encoded. A bare `#` reaching the browser makes Android truncate the dial string.
    Each wallet's template is validated at boot (`domain/wallets.js`), so a bare `#` refuses to
    start rather than reaching a customer.
-6. **No stored value.** No wallet, no balance, no top-up, no platform-initiated transfer from
-   customer money. Payments land in GuriKaabe's merchant wallet, one per order; the backend
-   *records* each confirmed payment against its order and nothing else.
+6. **No stored value — unless the owner switches the wallet on.** By default: no balance, no
+   top-up; payments land in GuriKaabe's merchant wallet, one per order. The client asked for a
+   customer wallet anyway (2026-11-07), so it exists behind `WALLET_ENABLED` (default off):
+   holding balances is e-money, which normally needs a licence — turning it on is the owner's
+   legal decision, not a deploy. When on (`commands/wallet.js`): the append-only ledger
+   (`wallet_entries`, DB trigger) is the truth; balances never go below zero (CHECK) or above
+   `WALLET_MAX_BALANCE`; money comes IN only through the gateway (top-up reference UNIQUE in
+   `transactions`) or as a refund of a wallet-paid order (credited in the failing transaction,
+   refund row settled by `system:wallet`); it goes OUT only to pay one order (partial UNIQUE)
+   or as a withdrawal an ADMIN sends and records with its reference. No route credits a
+   balance by hand.
 7. **Domain events are written in the same transaction as the state they describe.** Commands
    call `enqueue(client, EVENT, payload)` with the transaction's client — never `publish()`
    directly (`events/outbox.js`). Publishing after COMMIT is two steps with a crash-shaped gap
@@ -583,7 +592,7 @@ Guards (`db/seedSafety.js`), because the seed truncates everything and its passw
 ## Testing
 
 ```bash
-cd backend && npm install && npm test   # 497 Jest unit tests, ESM via --experimental-vm-modules
+cd backend && npm install && npm test   # 512 Jest unit tests, ESM via --experimental-vm-modules
 ./scripts/verify/run-all.sh             # live suites over real HTTP + WebSocket
 ```
 

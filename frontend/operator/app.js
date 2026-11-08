@@ -612,6 +612,67 @@ async function loadRefunds() {
     ${refundsClosed.length ? `<div class="group-head">Recently closed · ${refundsClosed.length}</div>${refundsClosed.map((r) => row(r, false)).join('')}` : ''}`;
   $('refunds').querySelectorAll('[data-open]').forEach((r) => r.addEventListener('click', () => openRefund(r.dataset.open)));
   markSelected($('refunds'), selected.refunds);
+  if (me?.is_admin) loadWithdrawals();
+}
+
+// ── Wallet withdrawals (admin; only when the wallet is on) ──
+// The money left the customer's balance when they asked. The admin sends it from the business
+// wallet and records the reference — or rejects it, and it goes back to their balance.
+let withdrawals = { open: [], recent: [] };
+async function loadWithdrawals() {
+  const res = await api('/operator/withdrawals');
+  if (res.error) return;
+  withdrawals = res;
+  if (!res.open.length && !res.recent.length) return;
+  const row = (w) => `<button class="lrow" type="button" data-wd="${w.id}">
+      <span class="l1"><span class="t">💳 Withdrawal to ${escapeHtml(w.payout_phone)}</span></span>
+      <span class="l2">${escapeHtml(w.account || '')} · ${timeAgo(w.created_at)}</span>
+      <span class="side"><span class="amt">${money(w.amount)}</span><span class="badge ${w.status === 'requested' ? 'fail' : 'ok'}">${w.status === 'requested' ? 'To send' : escapeHtml(w.status)}</span></span>
+    </button>`;
+  $('refunds').insertAdjacentHTML('afterbegin', `
+    <div class="group-head">Wallet withdrawals to send · ${res.open.length}</div>
+    ${res.open.map(row).join('') || '<div class="pane-empty">None waiting.</div>'}
+    ${res.recent.length ? `<div class="group-head">Withdrawals decided · ${res.recent.length}</div>${res.recent.map(row).join('')}` : ''}`);
+  $('refunds').querySelectorAll('[data-wd]').forEach((b) => b.addEventListener('click', () => openWithdrawal(b.dataset.wd)));
+}
+function openWithdrawal(id) {
+  const w = [...withdrawals.open, ...withdrawals.recent].find((x) => x.id === id);
+  if (!w) return;
+  const el = $('refundDetail');
+  const open = w.status === 'requested';
+  el.innerHTML = `
+    <div class="pane-head">${backBtn('refundsWs')}<strong>Withdrawal ${money(w.amount)}</strong></div>
+    <div class="pane-body"><div class="dsec"><dl class="kv">
+      <dt>Send to</dt><dd><a href="tel:${escapeHtml(w.payout_phone)}">${escapeHtml(w.payout_phone)}</a></dd>
+      <dt>Account</dt><dd>${escapeHtml(w.account || '—')}</dd>
+      <dt>Asked</dt><dd>${new Date(w.created_at).toLocaleString()}</dd>
+      ${open ? '' : `<dt>Decided</dt><dd>${escapeHtml(w.status)} by ${escapeHtml(w.decided_by || '')}${w.reference ? ` · ref ${escapeHtml(w.reference)}` : ''}${w.note ? ` · ${escapeHtml(w.note)}` : ''}</dd>`}
+    </dl></div>
+    ${open ? `<div class="dsec"><h4>Sent it</h4>
+      <p class="muted" style="margin:0 0 8px;">Send ${money(w.amount)} from the business wallet to ${escapeHtml(w.payout_phone)}, then enter the transaction number.</p>
+      <label for="wdRef">Transaction number of the payout</label><input id="wdRef" autocapitalize="characters" />
+      <button id="wdPaid" type="button">Record as sent</button></div>
+    <div class="dsec"><h4>Reject</h4>
+      <label for="wdNote">Why (the customer sees this)</label><input id="wdNote" />
+      <button class="danger-ghost" id="wdReject" type="button">Reject — return it to their balance</button></div>` : ''}
+    </div>`;
+  bindBack(el);
+  showDetail('refundsWs', true);
+  if (!open) return;
+  $('wdPaid').addEventListener('click', async () => {
+    const res = await api(`/operator/withdrawals/${w.id}/paid`, { method: 'POST', body: JSON.stringify({ reference: $('wdRef').value.trim() }) });
+    if (res.error) return toast(res.error);
+    toast('Recorded ✓');
+    await loadRefunds();
+    emptyDetail(el, '✓', 'Recorded.');
+  });
+  twoTap($('wdReject'), 'Tap again to reject', async () => {
+    const res = await api(`/operator/withdrawals/${w.id}/reject`, { method: 'POST', body: JSON.stringify({ note: $('wdNote').value.trim() }) });
+    if (res.error) return toast(res.error);
+    toast('Rejected — returned to their balance');
+    await loadRefunds();
+    emptyDetail(el, '✓', 'Rejected.');
+  });
 }
 function openRefund(id) {
   selected.refunds = id;

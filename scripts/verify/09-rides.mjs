@@ -29,7 +29,7 @@ const WS_URL = `${BASE.replace(/^http/, 'ws')}/ws`;
 const dc = 'docker compose -p gurikaabe-staging --env-file .env.staging -f docker-compose.yml -f docker-compose.staging.yml';
 const sh = (cmd, input) => execSync(cmd, { cwd: ROOT, encoding: 'utf8', input }).trim();
 // The query goes in on stdin, so its quotes never meet the shell's.
-const sql = (q) => sh(`${dc} exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA'`, q);
+const sql = (q) => sh(`${dc} exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA'`, q);
 const money = (v) => Number(v).toFixed(2);
 
 let pass = 0;
@@ -259,6 +259,66 @@ chk('driver gave the job back', rel.status === 200);
 chk('released ride is not given back to the same driver', sql(`SELECT coalesce(driver_id::text, 'none') FROM orders WHERE id = '${caliRide}'`) !== sql("SELECT id::text FROM drivers WHERE name = 'Cali'"));
 chk('release is audited', sql("SELECT count(*) FROM audit_log WHERE action = 'order.released'") === '1');
 chk("another driver can't release someone else's job", (await call(`/driver/orders/${caliRide}/release`, { method: 'POST', token: amina, body: { reason: 'x y z' } })).status === 404);
+
+console.log('\n── customer wallet (staging has WALLET_ENABLED=true) ──');
+const w0 = await call('/wallet', { token: bob });
+chk('wallet starts empty', w0.body.wallet?.enabled === true && w0.body.wallet.balance === '0.00');
+const tooBig = await call('/wallet/topup', { method: 'POST', token: bob, body: { amount: 900, wallet: 'sahal', phone: '901234567' } });
+chk('a top-up over the limit is refused before any prompt', tooBig.status === 400);
+const top = await call('/wallet/topup', { method: 'POST', token: bob, body: { amount: 20, wallet: 'sahal', phone: '901234567' } });
+chk('top-up prompt sent', top.status === 202);
+const credited = await waitFor(async () => {
+  const w = (await call('/wallet', { token: bob })).body.wallet;
+  return w && w.balance === '20.00' ? w : null;
+});
+chk('approved top-up credited exactly once, with a ledger row', Boolean(credited) && credited.entries.length === 1 && credited.entries[0].kind === 'topup');
+chk('the top-up is recorded as a payment with its gateway reference', sql("SELECT count(*) FROM transactions WHERE order_id IS NULL AND provider = 'waafipay'") === '1');
+const declinedTop = await call('/wallet/topup', { method: 'POST', token: bob, body: { amount: 5, wallet: 'sahal', phone: '901230000' } });
+await waitFor(async () => (await call('/wallet', { token: bob })).body.wallet.lastTopup?.status === 'declined');
+chk('a refused top-up credits nothing', declinedTop.status === 202 && (await call('/wallet', { token: bob })).body.wallet.balance === '20.00');
+// Pay an order from the wallet.
+const wq = await call('/quote', { method: 'POST', token: bob, body: { kind: 'DELIVERY', cart: { lines: [{ itemId: rice.id, qty: 1 }] }, dropoff: door } });
+const wOrder = randomUUID();
+await call('/orders', { method: 'POST', token: bob, body: { kind: 'DELIVERY', id: wOrder, cart: { lines: [{ itemId: rice.id, qty: 1 }] }, dropoff: door, landmark: 'Wallet door', phone: '+252651234567' } });
+chk("alice can't pay bob's order from her wallet", (await call(`/orders/${wOrder}/pay-wallet`, { method: 'POST', token: alice, body: {} })).status === 404);
+const paidW = await call(`/orders/${wOrder}/pay-wallet`, { method: 'POST', token: bob, body: {} });
+const afterPay = (await call('/wallet', { token: bob })).body.wallet;
+chk('order paid from the wallet; balance down by the total', paidW.status === 200 && paidW.body.order.status !== 'PENDING_PAYMENT'
+  && Number(afterPay.balance) === Number((20 - Number(wq.body.quote.total)).toFixed(2)));
+chk('paying the same order twice is refused, nothing taken', (await call(`/orders/${wOrder}/pay-wallet`, { method: 'POST', token: bob, body: {} })).status === 409
+  && (await call('/wallet', { token: bob })).body.wallet.balance === afterPay.balance);
+// The order fails: the money goes straight back to the wallet, refund settled by the system.
+await call(`/operator/orders/${wOrder}/refund`, { method: 'POST', token: op, body: { reason: 'out of stock' } });
+const afterRefund = await waitFor(async () => {
+  const w = (await call('/wallet', { token: bob })).body.wallet;
+  return w.balance === '20.00' ? w : null;
+});
+chk('a failed wallet-paid order is refunded to the wallet at once', Boolean(afterRefund)
+  && sql(`SELECT status || '/' || settled_by FROM refunds WHERE order_id = '${wOrder}'`) === 'settled/system:wallet');
+// Not enough money.
+const big = randomUUID();
+await call('/orders', { method: 'POST', token: bob, body: { kind: 'DELIVERY', id: big, cart: { lines: [{ itemId: rice.id, qty: 20 }] }, dropoff: door, landmark: 'x', phone: '+252651234567' } });
+chk('an order larger than the balance is refused, nothing taken', (await call(`/orders/${big}/pay-wallet`, { method: 'POST', token: bob, body: {} })).status === 409
+  && (await call('/wallet', { token: bob })).body.wallet.balance === '20.00');
+// Withdraw: taken at request; rejected -> returned; requested again -> paid with a reference.
+const wd = await call('/wallet/withdrawals', { method: 'POST', token: bob, body: { amount: 15, phone: '901234567' } });
+chk('withdrawal requested; the amount leaves the balance at once', wd.status === 201 && (await call('/wallet', { token: bob })).body.wallet.balance === '5.00');
+chk('a second withdrawal while one waits is refused', (await call('/wallet/withdrawals', { method: 'POST', token: bob, body: { amount: 1, phone: '901234567' } })).status === 409);
+chk('an ordinary operator cannot pay out', (await call(`/operator/withdrawals/${wd.body.withdrawal.id}/paid`, { method: 'POST', token: hodan, body: { reference: 'X1' } })).status === 403);
+const rej = await call(`/operator/withdrawals/${wd.body.withdrawal.id}/reject`, { method: 'POST', token: op, body: { note: 'wrong number' } });
+chk('rejected -> back in the balance', rej.status === 200 && (await call('/wallet', { token: bob })).body.wallet.balance === '20.00');
+const wd2 = await call('/wallet/withdrawals', { method: 'POST', token: bob, body: { amount: 10, phone: '901234567' } });
+chk('paying out needs the reference', (await call(`/operator/withdrawals/${wd2.body.withdrawal.id}/paid`, { method: 'POST', token: op, body: {} })).status === 400);
+const paidOut = await call(`/operator/withdrawals/${wd2.body.withdrawal.id}/paid`, { method: 'POST', token: op, body: { reference: 'SAHAL998877' } });
+chk('paid out with the reference, audited; decided twice is refused', paidOut.status === 200
+  && sql("SELECT count(*) FROM audit_log WHERE action = 'wallet.withdrawal.paid'") === '1'
+  && (await call(`/operator/withdrawals/${wd2.body.withdrawal.id}/reject`, { method: 'POST', token: op, body: { note: 'x' } })).status === 409);
+const ledgerSum = sql('SELECT coalesce(sum(amount_cents),0) FROM wallet_entries');
+const balSum = sql('SELECT coalesce(sum(balance_cents),0) FROM wallet_accounts');
+chk('the ledger adds up to the balances', ledgerSum === balSum, `${ledgerSum} vs ${balSum}`);
+let ledgerEdit = 'refused';
+try { sql('UPDATE wallet_entries SET amount_cents = 999999'); ledgerEdit = 'allowed'; } catch { /* the trigger refused */ }
+chk('the wallet ledger cannot be edited', ledgerEdit === 'refused');
 
 console.log('\n── operator map ──');
 const map = await call('/operator/map', { token: op });

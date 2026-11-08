@@ -1209,6 +1209,7 @@ function renderPayment(payment) {
   // The server's paymentNote is English; the method alone says which message applies.
   note.textContent = wallets.length ? t(wallets.length > 1 ? 'pay.pick' : 'pay.note') : t('pay.manual');
   renderAppPay(payment);
+  renderWalletPay();
 }
 
 function chosenWallet() {
@@ -1401,7 +1402,7 @@ function updateBadge(status) {
   }
   renderPaidClaim(status);
   $('cancelBtn').classList.toggle('hidden', !['PENDING_PAYMENT', 'PAID_UNASSIGNED'].includes(status));
-  if (status !== 'PENDING_PAYMENT') $('appPay').classList.add('hidden');
+  if (status !== 'PENDING_PAYMENT') { $('appPay').classList.add('hidden'); $('walletPayBox').classList.add('hidden'); }
 }
 
 // ── "I've paid" ──
@@ -1589,6 +1590,110 @@ $('helpHuman').addEventListener('click', async () => {
   el.classList.remove('hidden');
 });
 
+// ── Wallet (WALLET_ENABLED on the server) ──
+// Money comes in only through the gateway prompt, and goes out only to pay an order or as a
+// withdrawal an admin sends. The balance shown is the server's; nothing is computed here.
+let walletState = null;
+let topupPhoneE164 = null;
+let wdPhoneE164 = null;
+SomPhone.attach({ input: $('topupPhone'), hint: $('topupPhoneHint'), onChange: (r) => { topupPhoneE164 = r.valid && r.country === 'SO' ? r.e164 : null; } });
+SomPhone.attach({ input: $('wdPhone'), hint: $('wdPhoneHint'), onChange: (r) => { wdPhoneE164 = r.valid && r.country === 'SO' ? r.e164 : null; } });
+const WALLET_KIND = { topup: 'wallet.k.topup', order_payment: 'wallet.k.order', refund: 'wallet.k.refund', withdrawal: 'wallet.k.withdrawal', withdrawal_reversal: 'wallet.k.reversal' };
+async function loadWallet() {
+  const res = await api('/wallet');
+  walletState = res.wallet || null;
+  renderWallet();
+  return walletState;
+}
+function renderWallet() {
+  const w = walletState;
+  $('walletCard').classList.toggle('hidden', !w?.enabled);
+  if (!w?.enabled) return;
+  $('walletBalance').textContent = w.balance;
+  const wallets = lastPayment.appPay?.length ? lastPayment.appPay : [{ id: 'evc', name: 'EVC Plus' }, { id: 'zaad', name: 'Zaad' }, { id: 'sahal', name: 'Sahal' }];
+  const busy = w.lastTopup?.status === 'pending';
+  $('topupButtons').replaceChildren(...wallets.map((x) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'secondary';
+    b.disabled = busy;
+    b.textContent = t('wallet.topup.btn', { wallet: x.name });
+    b.addEventListener('click', () => topUp(x.id));
+    return b;
+  }));
+  const st = $('topupStatus');
+  const s = w.lastTopup && Date.now() - new Date(w.lastTopup.created_at).getTime() < 15 * 60 * 1000 ? w.lastTopup.status : null;
+  st.classList.toggle('hidden', !s);
+  if (s) {
+    st.className = 'callout' + (s === 'declined' || s === 'unknown' ? ' warn' : '');
+    st.textContent = t(`wallet.topup.${s}`, { amt: w.lastTopup.amount });
+  }
+  $('walletHistory').replaceChildren(...(w.entries.length ? w.entries.map((e) => {
+    const li = document.createElement('li');
+    const what = document.createElement('span');
+    what.textContent = `${t(WALLET_KIND[e.kind] || e.kind)} · ${new Date(e.created_at).toLocaleDateString()}`;
+    const amt = document.createElement('strong');
+    amt.className = 'mono ' + (Number(e.amount) > 0 ? 'plus' : 'minus');
+    amt.textContent = `${Number(e.amount) > 0 ? '+' : ''}${e.amount}`;
+    li.append(what, amt);
+    return li;
+  }) : [Object.assign(document.createElement('li'), { className: 'muted', textContent: t('wallet.empty') })]));
+}
+let topupPoll = null;
+async function topUp(walletId) {
+  const amount = parseFloat($('topupAmount').value);
+  if (!(amount > 0)) return toast(t('wallet.err.amount'));
+  if (!topupPhoneE164) return toast(t('err.payPhone'));
+  const res = await api('/wallet/topup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount, wallet: walletId, phone: topupPhoneE164 }) });
+  if (res.error) return toast(GMI18n.err(res.error));
+  $('topupAmount').value = '';
+  await loadWallet();
+  // The answer comes when the customer approves on the phone: look again for up to two minutes.
+  clearInterval(topupPoll);
+  const until = Date.now() + 120000;
+  topupPoll = setInterval(async () => {
+    const w = await loadWallet();
+    if (!w || w.lastTopup?.status !== 'pending' || Date.now() > until) clearInterval(topupPoll);
+  }, 2500);
+}
+$('wdBtn').addEventListener('click', async () => {
+  const amount = parseFloat($('wdAmount').value);
+  if (!(amount >= 1)) return toast(t('wallet.err.amount'));
+  if (!wdPhoneE164) return toast(t('err.payPhone'));
+  $('wdBtn').disabled = true;
+  const res = await api('/wallet/withdrawals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount, phone: wdPhoneE164 }) });
+  $('wdBtn').disabled = false;
+  if (res.error) return toast(GMI18n.err(res.error));
+  $('wdAmount').value = '';
+  toast(t('wallet.withdraw.sent'));
+  loadWallet();
+});
+// On an unpaid order: one tap, when the balance covers it.
+async function renderWalletPay() {
+  const box = $('walletPayBox');
+  const show = Boolean(lastPayment.walletPay) && order && order.status === 'PENDING_PAYMENT';
+  box.classList.add('hidden');
+  if (!show) return;
+  const w = walletState || await loadWallet();
+  if (!w?.enabled) return;
+  const enough = Number(w.balance) >= Number(order.total_amount);
+  $('walletPayBtn').disabled = !enough;
+  $('walletPayBtn').textContent = enough
+    ? t('wallet.pay', { amt: Number(order.total_amount).toFixed(2), bal: w.balance })
+    : t('wallet.pay.short', { bal: w.balance });
+  box.classList.remove('hidden');
+}
+$('walletPayBtn').addEventListener('click', async () => {
+  $('walletPayBtn').disabled = true;
+  const res = await api(`/orders/${order.id}/pay-wallet`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  $('walletPayBtn').disabled = false;
+  if (res.error) return toast(GMI18n.err(res.error));
+  order = { ...order, ...res.order };
+  updateBadge(order.status);
+  walletState = null;
+  toast(t('pay.confirmed'));
+});
+
 // ── Navigation: bottom tabs ──
 // Home = the new-order screen when signed in, the landing page when not. Orders and Account
 // need a session, so they send a signed-out visitor to sign-in first and come back after.
@@ -1626,6 +1731,7 @@ function goTab(tab, { start = false } = {}) {
     showSignedIn();
     loadEmailBox();
     loadPasswordBox();
+    loadWallet();
     return showView('accountView');
   }
 }
@@ -1852,7 +1958,8 @@ document.addEventListener('gm:lang', () => {
   if (resendLeft > 0 || !$('codeStep').classList.contains('hidden')) renderResend();
   if (lastSyncStats) renderSyncState(lastSyncStats);
   // Re-run the live phone hints in the new language.
-  ['phone', 'joinPhone', 'orderPhone', 'ridePhone', 'payPhone'].forEach((id) => $(id).dispatchEvent(new Event('input')));
+  if (walletState) renderWallet();
+  ['phone', 'joinPhone', 'orderPhone', 'ridePhone', 'payPhone', 'topupPhone', 'wdPhone'].forEach((id) => $(id).dispatchEvent(new Event('input')));
   if (!$('resumeView').classList.contains('hidden')) openOrders();
   updateIdHint();
   $('otpStatus').textContent = '';

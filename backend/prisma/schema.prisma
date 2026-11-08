@@ -44,6 +44,10 @@ model User {
   password_reset_until DateTime? @db.Timestamptz(6)
   orders       Order[]
   email_challenge EmailChallenge?
+  wallet       WalletAccount?
+  wallet_entries WalletEntry[]
+  wallet_withdrawals WalletWithdrawal[]
+  payment_attempts PaymentAttempt[]
 
   @@map("users")
 }
@@ -486,7 +490,10 @@ model CatalogItem {
 /// One pending per order (partial UNIQUE in the migration). Approved -> confirmPayment.
 model PaymentAttempt {
   id         String   @id @db.Uuid
-  order_id   String   @db.Uuid
+  /// Null for a wallet top-up (purpose 'topup', user_id set).
+  order_id   String?  @db.Uuid
+  user_id    Int?
+  purpose    String   @default("order")
   provider   String
   wallet     String
   payer      String
@@ -497,8 +504,56 @@ model PaymentAttempt {
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
 
-  order Order @relation(fields: [order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  order Order? @relation(fields: [order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user  User?  @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([order_id, created_at], map: "idx_payment_attempts_order")
   @@map("payment_attempts")
+}
+
+/// A customer's running balance. The ledger (WalletEntry) is the truth; this is its total,
+/// changed only together with a ledger row, never below zero (CHECK). Feature: WALLET_ENABLED.
+model WalletAccount {
+  user_id       Int      @id
+  balance_cents BigInt   @default(0)
+  updated_at    DateTime @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("wallet_accounts")
+}
+
+/// Append-only (DB trigger). Every movement of a customer's balance, with the balance after it.
+model WalletEntry {
+  id                  BigInt   @id @default(autoincrement())
+  user_id             Int
+  amount_cents        BigInt
+  balance_after_cents BigInt
+  kind                String
+  order_id            String?  @db.Uuid
+  reference           String?
+  actor               String
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([user_id, id], map: "idx_wallet_entries_user")
+  @@map("wallet_entries")
+}
+
+model WalletWithdrawal {
+  id           BigInt    @id @default(autoincrement())
+  user_id      Int
+  amount_cents BigInt
+  payout_phone String
+  status       String    @default("requested")
+  reference    String?
+  note         String?
+  decided_by   String?
+  decided_at   DateTime? @db.Timestamptz(6)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("wallet_withdrawals")
 }

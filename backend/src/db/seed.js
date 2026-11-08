@@ -116,6 +116,7 @@ async function seed() {
     await tx.$executeRawUnsafe(`
       TRUNCATE outbox, otp_codes, staff_invites, order_photos, order_events, messages, transactions,
                refunds, access_requests, order_proofs, delivery_handoffs, audit_log, payment_attempts,
+               wallet_entries, wallet_withdrawals, wallet_accounts,
                driver_locations, orders, drivers, users, operators, catalog_items, catalog_categories, places
       RESTART IDENTITY CASCADE
     `);

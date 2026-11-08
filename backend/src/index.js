@@ -166,6 +166,10 @@ async function boot() {
     ? `[payments] in-app wallet prompts on (${waafi.wallets.join(', ')}) via ${new URL(waafi.url).host}`
     : '[payments] in-app wallet prompts off (no WaafiPay credentials) — USSD links and "I\'ve paid" only');
 
+  console.warn(config.wallet.enabled
+    ? `[wallet] customer wallet ON — GuriKaabe holds customer balances (stored value; max $${(config.wallet.maxBalanceCents / 100).toFixed(2)} each)`
+    : '[wallet] customer wallet off (WALLET_ENABLED unset)');
+
   if (config.pricing.errors.length) {
     config.pricing.errors.forEach((e) => console.error(`FATAL: tariff ${e}`));
     process.exit(1);

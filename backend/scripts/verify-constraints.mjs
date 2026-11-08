@@ -19,6 +19,8 @@ const REQUIRED_INDEXES = {
   idx_refunds_owed: 'the reconciliation queue',
   idx_order_proofs_review: "the operator's queue of deliveries to check",
   idx_payment_attempts_one_pending: 'one wallet prompt at a time per order (no double charge)',
+  idx_payment_attempts_one_pending_topup: 'one top-up prompt at a time per customer',
+  idx_wallet_entries_order_once: 'an order is paid from, and refunded to, a wallet at most once',
 };
 
 const REQUIRED_CHECKS = {
@@ -31,6 +33,9 @@ const REQUIRED_CHECKS = {
   orders_amount_parts_check: 'subtotal + fee is the total the customer pays',
   catalog_items_price_check: 'a catalog price is positive',
   payment_attempts_status_check: 'payment attempt status is one of the known values',
+  wallet_accounts_balance_check: 'a wallet balance can never go below zero',
+  wallet_entries_sign_check: 'credits are positive and debits negative, by kind',
+  payment_attempts_purpose_check: 'an attempt pays an order or tops up a wallet, never neither',
   refunds_amount_check: 'a refund can never be negative',
   refunds_status_check: 'refund status is one of owed/settled/waived',
   users_has_login: 'every customer account can be signed in to (phone or email)',

@@ -64,6 +64,11 @@ ensure_env_keys() {
     echo "WAAFIPAY_API_KEY=API-STAGING-ONLY"
     echo "WAAFIPAY_URL=http://waafipay-mock:8099/asm"
   } >> "$ENV_FILE"
+  grep -q '^WALLET_ENABLED=' "$ENV_FILE" || {
+    echo
+    echo "# STAGING: customer wallet on (production keeps it off until the owner decides)."
+    echo "WALLET_ENABLED=true"
+  } >> "$ENV_FILE"
 }
 
 wait_healthy() {

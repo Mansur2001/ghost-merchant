@@ -20,8 +20,10 @@ Branch `feature/rides-catalog-maps`. Not deployed yet: waiting for the owner's g
 
 ## Decided
 
-- **No cash on delivery, no customer wallet / top-up.** Everything prepaid to the merchant
-  wallet; drivers never hold customer money. A wallet needs an e-money licence.
+- **No cash on delivery.** Everything prepaid; drivers never hold customer money.
+- **Customer wallet: built at the client's request, shipped OFF** (`WALLET_ENABLED`). Top-up
+  via WaafiPay, pay orders, automatic refund to wallet, admin-paid withdrawals; append-only
+  ledger. Holding balances is e-money (licence question) — the owner decides when to switch on.
 - **Help-chat model is hosted, not on the VPS.** Tried qwen2.5:1.5b on CPU in staging: 45–70 s
   per answer. Owner asked for a cheap hosted option: Groq (Llama 3.3 70B), free tier then
   per-token; their terms say no training on inputs. Turn on Zero Data Retention in the console.
@@ -29,12 +31,14 @@ Branch `feature/rides-catalog-maps`. Not deployed yet: waiting for the owner's g
 
 ## Tests
 
-- 497 unit, 22 Playwright (incl. rides, cancel/refund, help chat), live `09-rides.mjs` 63 checks,
+- 512 unit, 23 Playwright (incl. rides, cancel/refund, help chat, wallet), live `09-rides.mjs` 82 checks,
   `staging.sh simulate` 65 steps (now starts with a ride paid in the app).
 - Bugs the tests found: 0 m GPS accuracy treated as "unknown"; driver job view missing ride
   fields; stale position used as delivery evidence; map layers over the app header.
 
 ## Open threads
+
+0. **Wallet licence** before `WALLET_ENABLED=true` in production.
 
 1. **Deploy**: owner's go. Then on the server: `./scripts/fetch-map-tiles.sh` (street map).
 2. **Check starter data on the ground**: place pins are approximate, catalog prices are

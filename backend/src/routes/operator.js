@@ -26,6 +26,8 @@ import { markProofReviewed, ProofError } from '../commands/proofs.js';
 import { getDriversWithStats, getDriverById, getDriverPositions } from '../queries/drivers.js';
 import { getCatalog, getPlaces } from '../queries/catalog.js';
 import { createEntry, updateEntry, CatalogError } from '../commands/catalog.js';
+import { markWithdrawalPaid, rejectWithdrawal, WalletError } from '../commands/wallet.js';
+import { listWithdrawals } from '../queries/wallet.js';
 import { STATUS } from '../domain/stateMachine.js';
 import { wakeOutbox, outboxHealth } from '../events/outbox.js';
 import {
@@ -569,6 +571,35 @@ operatorRouter.post('/operator/catalog/items', adminOnly, createRoute('item'));
 operatorRouter.patch('/operator/catalog/items/:id', adminOnly, updateRoute('item'));
 operatorRouter.post('/operator/places', adminOnly, createRoute('place'));
 operatorRouter.patch('/operator/places/:id', adminOnly, updateRoute('place'));
+
+// ── Wallet withdrawals (admin). The admin sends the money from the business wallet, then
+// records its reference; or rejects it and the amount returns to the customer's balance. ──
+function withdrawalError(err, res, next) {
+  if (err instanceof WalletError) return res.status(err.status).json({ error: err.message });
+  next(err);
+}
+operatorRouter.get('/operator/withdrawals', adminOnly, async (req, res, next) => {
+  try {
+    res.json(await listWithdrawals());
+  } catch (err) {
+    next(err);
+  }
+});
+operatorRouter.post('/operator/withdrawals/:id/paid', adminOnly, async (req, res, next) => {
+  try {
+    res.json({ withdrawal: serializeWithdrawal(await markWithdrawalPaid({ id: req.params.id, reference: req.body?.reference, actor: actorLabel(req.auth) })) });
+  } catch (err) {
+    withdrawalError(err, res, next);
+  }
+});
+operatorRouter.post('/operator/withdrawals/:id/reject', adminOnly, async (req, res, next) => {
+  try {
+    res.json({ withdrawal: serializeWithdrawal(await rejectWithdrawal({ id: req.params.id, note: req.body?.note, actor: actorLabel(req.auth) })) });
+  } catch (err) {
+    withdrawalError(err, res, next);
+  }
+});
+const serializeWithdrawal = (w) => ({ id: String(w.id), status: w.status, reference: w.reference, note: w.note });
 
 // GET /api/operator/audit — the append-only decision log, newest first. Admins only: it names
 // staff and customers' orders, and it is the record a dispute is settled with.

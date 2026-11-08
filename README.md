@@ -115,7 +115,7 @@ workflows across all three apps: `./scripts/staging.sh up`, then `./scripts/stag
 Every command you'll reuse is in **[`COMMANDS.md`](COMMANDS.md)**.
 
 ```bash
-cd backend && npm test          # 497 Jest unit tests, no database required
+cd backend && npm test          # 512 Jest unit tests, no database required
 ./scripts/verify/run-all.sh     # live end-to-end suites against the running stack
 ```
 

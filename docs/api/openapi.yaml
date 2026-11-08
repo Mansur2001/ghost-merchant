@@ -72,6 +72,8 @@ tags:
     description: No token needed.
   - name: Customer — account
   - name: Customer — orders
+  - name: Customer — wallet
+    description: Stored value, OFF unless WALLET_ENABLED=true. In only through the gateway; out only to pay an order or as an admin-paid withdrawal.
   - name: Orders (shared)
     description: Any caller allowed to see the order — its customer, its assigned driver, or an operator.
   - name: Driver
@@ -611,6 +613,50 @@ paths:
                   handoff: { type: boolean }
         "404": { $ref: "#/components/responses/NotFound" }
         "429": { description: Too many questions, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/wallet:
+    get:
+      tags: [Customer — wallet]
+      summary: My wallet — balance, recent movements, withdrawals, last top-up
+      responses:
+        "200": { description: Wallet (enabled false = the feature is off), content: { application/json: { schema: { type: object, properties: { wallet: { type: object } } } } } }
+
+  /api/wallet/topup:
+    post:
+      tags: [Customer — wallet]
+      summary: Top up through WaafiPay (a prompt on the phone); credited when the gateway approves
+      description: Only the gateway can credit a balance; nobody at the desk can. One pending top-up per customer. 10 per 15 minutes.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [amount, wallet, phone], properties: { amount: { type: number }, wallet: { type: string, enum: [evc, zaad, sahal] }, phone: { type: string } } } } }
+      responses:
+        "202": { description: Prompt sent, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { description: Wallet or gateway off, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: Over the balance cap, or the last answer was unclear, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/wallet/withdrawals:
+    post:
+      tags: [Customer — wallet]
+      summary: Cash out — taken from the balance now; an admin sends it and records the reference
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [amount, phone], properties: { amount: { type: number, minimum: 1 }, phone: { type: string } } } } }
+      responses:
+        "201": { description: Requested, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { description: Wallet off, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: Not enough balance, or one already waiting, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/orders/{id}/pay-wallet:
+    post:
+      tags: [Customer — wallet]
+      summary: Pay this order from the wallet balance (all or nothing, same transaction as the payment)
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200": { description: Paid (and dispatched if a driver is free), content: { application/json: { schema: { type: object, properties: { order: { $ref: "#/components/schemas/Order" } } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Not enough balance, or already paid, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   /api/catalog:
     get:
@@ -1476,6 +1522,38 @@ paths:
         "200": { $ref: "#/components/responses/StaffCreated" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/AdminsOnly" }
+
+  /api/operator/withdrawals:
+    get:
+      tags: [Admin]
+      summary: Wallet withdrawals waiting to be paid, and recently decided
+      responses:
+        "200": { description: Lists, content: { application/json: { schema: { type: object } } } }
+        "403": { description: Admins only, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/operator/withdrawals/{id}/paid:
+    post:
+      tags: [Admin]
+      summary: Record that the money was sent from the business wallet (reference required)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [reference], properties: { reference: { type: string } } } } } }
+      responses:
+        "200": { description: Paid, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { description: Admins only, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: Already decided, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/operator/withdrawals/{id}/reject:
+    post:
+      tags: [Admin]
+      summary: Reject — the amount goes back to the customer's balance (reason required)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [note], properties: { note: { type: string } } } } } }
+      responses:
+        "200": { description: Rejected and returned, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { description: Admins only, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: Already decided, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   /api/operator/drivers/{driverId}/vehicle:
     post:

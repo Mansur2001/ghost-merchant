@@ -15,6 +15,9 @@ import { getDriverLocationForOrder } from '../queries/drivers.js';
 import { PricingError } from '../domain/pricing.js';
 import { isInfraError } from '../middleware/errorHandler.js';
 import { answer } from '../commands/assistant.js';
+import { startTopup, payOrderFromWallet, requestWithdrawal, WalletError } from '../commands/wallet.js';
+import { runTopup } from '../commands/providerPayments.js';
+import { getWallet } from '../queries/wallet.js';
 import { claimPayment, PaymentError } from '../commands/payments.js';
 import { getOrder, getOrderTimeline, getMessages, getOrdersByUser, getHandoff, getProofs } from '../queries/orders.js';
 import { savePhoto } from '../commands/photos.js';
@@ -223,6 +226,69 @@ ordersRouter.post(
     } catch (err) {
       if (err instanceof PaymentError) return res.status(err.status).json({ error: err.message });
       next(err);
+    }
+  }
+);
+
+// ── Customer wallet (WALLET_ENABLED). Money in only through the gateway; out only to pay an
+// order or as a withdrawal an admin pays. See commands/wallet.js. ──
+function walletError(err, res, next) {
+  if (err instanceof WalletError) return res.status(err.status).json({ error: err.message });
+  next(err);
+}
+
+ordersRouter.get('/wallet', customerOnly, async (req, res, next) => {
+  try {
+    res.json({ wallet: await getWallet(req.auth.uid) });
+  } catch (err) {
+    walletError(err, res, next);
+  }
+});
+
+// POST /api/wallet/topup { amount, wallet, phone } — a WaafiPay prompt; credited when approved.
+ordersRouter.post(
+  '/wallet/topup',
+  customerOnly,
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: 'too many requests' }),
+  async (req, res, next) => {
+    try {
+      const attempt = await startTopup({
+        userId: req.auth.uid, amount: req.body?.amount, wallet: req.body?.wallet, phone: req.body?.phone, run: runTopup,
+      });
+      res.status(202).json({ attempt: { id: attempt.id, status: attempt.status, amount: String(attempt.amount) } });
+    } catch (err) {
+      walletError(err, res, next);
+    }
+  }
+);
+
+// POST /api/orders/:id/pay-wallet — pay this order from the balance, all or nothing.
+ordersRouter.post(
+  '/orders/:id/pay-wallet',
+  customerOnly,
+  requireOrderAccess,
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: 'too many requests' }),
+  async (req, res, next) => {
+    try {
+      const order = await payOrderFromWallet({ orderId: req.params.id, userId: req.auth.uid });
+      res.json({ order });
+    } catch (err) {
+      walletError(err, res, next);
+    }
+  }
+);
+
+// POST /api/wallet/withdrawals { amount, phone } — cash out; an admin sends it and records it.
+ordersRouter.post(
+  '/wallet/withdrawals',
+  customerOnly,
+  rateLimit({ windowMs: 60 * 60 * 1000, max: 5, message: 'too many requests' }),
+  async (req, res, next) => {
+    try {
+      const w = await requestWithdrawal({ userId: req.auth.uid, amount: req.body?.amount, phone: req.body?.phone });
+      res.status(201).json({ withdrawal: { id: String(w.id), status: w.status } });
+    } catch (err) {
+      walletError(err, res, next);
     }
   }
 );

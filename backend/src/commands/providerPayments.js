@@ -26,6 +26,7 @@ import { enqueue, wakeOutbox } from '../events/outbox.js';
 import { confirmPayment, PaymentError } from './payments.js';
 import { postMessage } from './orders.js';
 import { auditAfter } from './audit.js';
+import { applyTopupOutcome } from './wallet.js';
 
 // The customer has this long to approve on their handset before we stop waiting.
 export const GATEWAY_TIMEOUT_MS = 90_000;
@@ -101,10 +102,11 @@ async function callGateway({ attempt, accountNo, kind, settings, fetchImpl }) {
   const body = buildPurchaseRequest({
     settings,
     attemptId: attempt.id,
-    orderId: attempt.order_id,
+    // A top-up has no order: the attempt id is its invoice.
+    orderId: attempt.order_id || attempt.id,
     accountNo,
     amount: Number(attempt.amount).toFixed(2),
-    description: kind === 'RIDE' ? 'GuriKaabe ride' : 'GuriKaabe order',
+    description: kind === 'TOPUP' ? 'GuriKaabe wallet top-up' : kind === 'RIDE' ? 'GuriKaabe ride' : 'GuriKaabe order',
   });
   try {
     const res = await fetchImpl(settings.url, {
@@ -167,7 +169,20 @@ export async function applyOutcome(attempt, outcome) {
   return outcome.status;
 }
 
+// A wallet top-up: the same gateway call, credited by commands/wallet.js.
+export async function runTopup(attempt, accountNo, { settings = config.waafipay, fetchImpl = fetch } = {}) {
+  const outcome = await callGateway({ attempt, accountNo, kind: 'TOPUP', settings, fetchImpl });
+  return applyTopupOutcome(attempt, outcome);
+}
+
 async function markAttempt(attempt, { status, reference = null, detail = null }) {
+  if (!attempt.order_id) {
+    // A top-up: no order thread to write to; the wallet screen reads the attempt itself.
+    await prisma.paymentAttempt.updateMany({
+      where: { id: attempt.id, status: 'pending' }, data: { status, reference, detail, updated_at: new Date() },
+    });
+    return status;
+  }
   await withTransaction(async (tx) => {
     // Only a pending attempt moves: a late duplicate answer must not overwrite a settled one.
     const changed = await tx.paymentAttempt.updateMany({
