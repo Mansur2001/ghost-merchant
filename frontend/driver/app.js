@@ -230,7 +230,7 @@ async function loadQueue() {
       <button class="tile" type="button" data-id="${o.id}">
         <span class="tile-icon">${o.kind === 'RIDE' ? '🛺' : o.status === 'IN_TRANSIT' ? '🛵' : '🛍️'}</span>
         <span class="tile-body">
-          <span class="tile-title">${esc(o.landmark_text || t('drv.noLandmark'))}</span>
+          <span class="tile-title"><span class="t-text">${esc(o.landmark_text || t('drv.noLandmark'))}</span></span>
           <span class="tile-sub">${esc(o.kind === 'RIDE' ? t('drv.ride.tile', { p: o.pickup_text || '' }) : (o.items || []).map((i) => i.text).filter(Boolean).join(', '))}</span>
           <span class="tile-sub">#${GMIds.shortId(o.id)} · $${Number(o.total_amount).toFixed(2)}
             · <strong style="color:var(--gold)">${label(o.status)}</strong></span>
