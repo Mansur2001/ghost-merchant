@@ -76,7 +76,7 @@ async function customerSignsUp(page, email) {
   await page.fill('#pwPass', SIM_PASSWORD);
   await page.fill('#pwPass2', SIM_PASSWORD);
   await page.click('#pwBtn');
-  await page.waitForSelector('#startView', { state: 'visible' });
+  await page.waitForSelector('#homeView', { state: 'visible' });
 }
 
 // The emailed-code way in (proving the address, or "forgot password").
@@ -90,17 +90,26 @@ async function customerSignsInByCode(page, email) {
   const status = await waitText(page.locator('#otpStatus'), /\d{6}/);
   await page.fill('#codeInput', status.match(/\d{6}/)[0]);
   await page.click('#verifyBtn');
-  await page.waitForSelector('#startView', { state: 'visible' });
+  await page.waitForSelector('#homeView', { state: 'visible' });
 }
 
+// From the catalog: two items, plus a custom line with a budget and a photo. The server prices it.
 async function placeOrder(page, { what, amount, landmark, phoneNo }) {
+  await page.click('.tabbar [data-tab="home"]');
+  await page.click('#goShop');
+  await page.locator('#catItems .step-add').first().click();
+  await page.locator('#catItems .step-add').first().click();
+  await page.click('#cartOpen');
+  await page.waitForSelector('#startView', { state: 'visible' });
+  await page.click('#customBox summary');
   await page.fill('#request', what);
-  await page.fill('#amount', amount);
+  await page.fill('#budget', amount);
   await page.setInputFiles('#refPhoto', PHOTO);
   await page.click('#locBtn');
   await waitText(page.locator('#locStatus'), /±/);
   await page.fill('#landmark', landmark);
   await page.fill('#orderPhone', phoneNo);
+  await waitText(page.locator('#qTotal'), /^\d+\.\d{2}$/);
   await page.click('#submitBtn');
   await page.waitForSelector('#orderView', { state: 'visible' });
   const short = (await page.textContent('#orderId')).trim();
@@ -134,13 +143,13 @@ async function payAndDispatch(op, order, ref) {
   await card.click();
   await op.fill(`[data-payref="${order.id}"]`, ref);
   await op.click(`[data-confirm="${order.id}"]`);
-  await waitText(card, /Driver at market/);
+  await waitText(card, /Driver assigned/);
   const txt = await waitText(op.locator('#orderDetail'), /🛵 \w+/);
   return txt.match(/🛵 (\w+)/)[1];
 }
 
 // One phone per driver, signed in as them.
-const DRIVERS = { Amina: ['619876543', '1234'], Bashir: ['651112223', '5678'] };
+const DRIVERS = { Amina: ['619876543', '1234'], Bashir: ['651112223', '5678'], Cali: ['631234567', '2468'] };
 const driverPhones = {};
 async function driverFor(name, geo = DOOR) {
   if (!DRIVERS[name]) throw new Error(`dispatched to unknown driver ${name}`);
@@ -162,6 +171,92 @@ await rm(OUT, { recursive: true, force: true });
 await mkdir(OUT, { recursive: true });
 const stamp = Date.now().toString().slice(-6);
 
+// The shift starts: Amina goes online (she picks up the order already waiting for a driver).
+const shift = await browser.newContext({ ignoreHTTPSErrors: true, baseURL: BASE });
+{
+  const login = await shift.request.post('/api/driver/login', { data: { msisdn: '+252619876543', pin: '1234' } });
+  const { token } = await login.json();
+  const headers = { Authorization: `Bearer ${token}` };
+  await shift.request.post('/api/driver/online', { headers, data: { online: true } });
+  await shift.request.post('/api/driver/location', { headers, data: { lat: 2.0469, lng: 45.3182, accuracy: 15 } });
+}
+
+// ═══ E (first: a ride needs a free car) ═══
+scenario('E. A ride, paid in the app',
+  'A rider books a car from the stadium to the airport, pays with Sahal in the app (staging simulates the gateway), the nearest free car comes, the rider gives their code at pickup, and the trip ends at the airport.');
+const PICKUP = { latitude: 2.0478, longitude: 45.3291 };
+driverPhones.Bashir = await device('phone', { permissions: ['geolocation'], geolocation: { latitude: 2.0471, longitude: 45.3300 } });
+const bas = driverPhones.Bashir;
+await driverLogin(bas.page, ...DRIVERS.Bashir);
+await step(bas.page, 'Driver', 'Bashir (car) signs in and taps “Go online”', '“You are online”, sharing his location', async () => {
+  if ((await bas.page.textContent('#onlineState')).includes('offline')) await bas.page.click('#onlineBtn');
+  await waitText(bas.page.locator('#onlineState'), /You are online/);
+  await waitText(bas.page.locator('#locLine'), /Sharing your location/);
+});
+const rider = await device('phone', { permissions: ['geolocation'], geolocation: PICKUP });
+await emailOnly(rider.page);
+await customerSignsUp(rider.page, `sim-ride-${stamp}@example.com`);
+await step(rider.page, 'Rider', 'Opens the app', 'Home: “Ride” first, then “Food & shopping”', async () => {
+  must(await rider.page.isVisible('#goRide') && await rider.page.isVisible('#goShop'), 'services missing');
+});
+await rider.page.click('#goRide');
+await step(rider.page, 'Rider', 'Taps Ride', 'The map finds them: pickup “My location (±… m)”', async () => {
+  await waitText(rider.page.locator('#pickupText'), /My location/);
+});
+await step(rider.page, 'Rider', 'Searches “Airport” and picks it', 'Fares for bajaj and car, with time, distance and drivers nearby', async () => {
+  await rider.page.fill('#placeSearch', 'Airport');
+  await rider.page.locator('#placeResults .place-result').first().click();
+  await waitText(rider.page.locator('#rideOptions'), /Car/);
+  await waitText(rider.page.locator('#rideOptions .ride-option', { hasText: 'Car' }), /1 nearby/);
+});
+let R;
+await step(rider.page, 'Rider', 'Chooses Car and books', 'Tracking screen “Awaiting payment”, with the route on the map', async () => {
+  await rider.page.locator('#rideOptions .ride-option', { hasText: 'Car' }).click();
+  await rider.page.fill('#ridePhone', '612345678');
+  await rider.page.click('#rideBook');
+  await rider.page.waitForSelector('#orderView', { state: 'visible' });
+  R = { id: await rider.page.evaluate(() => JSON.parse(localStorage.getItem('gm_last')).orderId) };
+  await waitText(rider.page.locator('#statusTitle'), /Awaiting payment/);
+  must(await rider.page.isVisible('#orderMapCard'), 'no map');
+});
+await step(rider.page, 'Rider', 'Taps “Pay with Sahal”, approves on the phone', 'Paid with no operator; the nearest car is sent: “Driver on the way”, Bashir on the map', async () => {
+  await rider.page.fill('#payPhone', '901234567');
+  await rider.page.locator('#appPayButtons button', { hasText: 'Sahal' }).click();
+  await waitText(rider.page.locator('#statusTitle'), /Driver on the way/, 20000);
+  await waitText(rider.page.locator('#driverName'), /Bashir/);
+});
+const rideCode = (await rider.page.textContent('#handoffCode')).trim();
+await step(bas.page, 'Driver', 'Gets the job (phone buzzes) and opens it', 'Map, “Pick up the rider”, the fare — no shopping list', async () => {
+  await bas.page.click('#refreshBtn');
+  await bas.page.locator(`#queue [data-id="${R.id}"]`).click();
+  await waitText(bas.page.locator('#dTargetTitle'), /Pick up the rider/);
+  must(await bas.page.isHidden('#shopCard'), 'shopping list shown for a ride');
+});
+await step(bas.page, 'Driver', `Rider gets in and says the code (${rideCode})`, '“Take the rider to” the airport', async () => {
+  await bas.page.fill('#codeIn', rideCode);
+  await bas.page.click('#rideStartBtn');
+  await waitText(bas.page.locator('#dTargetTitle'), /Take the rider to/);
+});
+await step(rider.page, 'Rider', 'Sees the trip start', '“On your trip”', async () => {
+  await waitText(rider.page.locator('#statusTitle'), /On your trip/);
+});
+await bas.ctx.setGeolocation({ latitude: 2.0144, longitude: 45.3047 });
+await step(bas.page, 'Driver', 'At the airport, taps “End trip”', 'Done; back to the job list', async () => {
+  await bas.page.click('#rideEndBtn');
+  await bas.page.waitForSelector('#queueView', { state: 'visible', timeout: 10000 });
+});
+await step(rider.page, 'Rider', 'Sees the end', '“Arrived” and “Picked up with your code”', async () => {
+  await waitText(rider.page.locator('#statusTitle'), /Arrived/);
+  await waitText(rider.page.locator('#proofList'), /Picked up with your code/);
+});
+await step(rider.page, 'Rider', 'Asks the help chat “How do I get my money back?”', 'An answer from the FAQ, and “Talk to a person”', async () => {
+  await rider.page.click('.tabbar [data-tab="help"]');
+  await rider.page.fill('#helpInput', 'How do I get my money back?');
+  await rider.page.click('#helpSend');
+  await waitText(rider.page.locator('#helpThread .msg').last(), /cancel/);
+  must(await rider.page.isVisible('#helpHuman'), 'no handoff button');
+});
+
 // ═══ A ═══
 scenario('A. A normal order, start to finish',
   'A new customer signs up with only an email, orders, pays from their phone, and receives it. The driver must photograph the goods and get the customer’s code.');
@@ -179,7 +274,7 @@ await step(cust.page, 'Customer', 'Taps “Create account” (email-only server)
 });
 const email = `sim-${stamp}@example.com`;
 await customerSignsUp(cust.page, email);
-await step(cust.page, 'Customer', `Creates an account with ${email} and a password`, 'Lands on New order, signed in — no email had to arrive', async () => {
+await step(cust.page, 'Customer', `Creates an account with ${email} and a password`, 'Lands on Home, signed in — no email had to arrive', async () => {
   await waitText(cust.page.locator('#signedInAs'), new RegExp(email));
 });
 let A;
@@ -204,7 +299,7 @@ await step(op.page, 'Operator', 'Opens the dispatch console and selects the clai
   await card.click();
   must((await op.page.inputValue(`[data-payref="${A.id}"]`)) === `SIM${stamp}`, 'reference not pre-filled');
 });
-await step(op.page, 'Operator', 'Checks the merchant phone and confirms the payment (transaction number required)', 'The SYSTEM assigns a driver at once — “Driver at market”, “assigned automatically”', async () => {
+await step(op.page, 'Operator', 'Checks the merchant phone and confirms the payment (transaction number required)', 'The SYSTEM assigns a driver at once — “Driver assigned”, “assigned automatically”', async () => {
   A.driver = await payAndDispatch(op.page, A, `SIM${stamp}`);
   await waitText(op.page.locator('#orderDetail'), /assigned automatically/);
 });
@@ -269,7 +364,7 @@ await step(cust.page, 'Customer', 'Signs out, then signs back in with email + pa
   await cust.page.fill('#pwEmail', email);
   await cust.page.fill('#pwPass', SIM_PASSWORD);
   await cust.page.click('#pwBtn');
-  await cust.page.waitForSelector('#startView', { state: 'visible' });
+  await cust.page.waitForSelector('#homeView', { state: 'visible' });
   await cust.page.click('.tabbar [data-tab="orders"]');
   await waitText(cust.page.locator('#resumeList'), /Delivered/);
 });
@@ -381,6 +476,8 @@ const custD = await device('phone', { permissions: ['geolocation'], geolocation:
 await emailOnly(custD.page);
 await customerSignsUp(custD.page, `sim-d-${stamp}@example.com`);
 const D = await placeOrder(custD.page, { what: 'Flour 5kg', amount: '6.00', landmark: 'White building', phoneNo: '612345678' });
+// What the customer paid: the server's total for the cart, not a number typed here.
+D.total = `$${(await custD.page.textContent('#orderTotal')).trim()}`;
 await section(op.page, 'orders');
 D.driver = await payAndDispatch(op.page, D, `SIMD${stamp}`);
 drv = await driverFor(D.driver);
@@ -464,7 +561,7 @@ await step(null, 'Customer', 'Disputes an order that was never delivered', 'Refu
 });
 
 // ═══ E ═══
-scenario('E. The order fails after payment',
+scenario('E2. The order fails after payment',
   'The market is out of stock. The driver stops the order with a reason; the customer was already paid up, so the office now owes them money.');
 await drv.page.goto(BASE + '/driver/');
 await drv.page.waitForSelector(`#queue [data-id="${D.id}"]`);
@@ -481,9 +578,9 @@ await step(custD.page, 'Customer', 'Sees the update', '“Cancelled”, with a n
   await waitText(custD.page.locator('#statusSub'), /money owed/);
 });
 await section(op.page, 'refunds');
-await step(op.page, 'Operator', 'Opens Refunds and selects the new one', '$6.00 owed with the driver’s reason — and NO button to mark it paid: only an admin can', async () => {
-  await waitText(op.page.locator('#refunds'), /\$6\.00/);
-  await op.page.locator('#refunds [data-open]', { hasText: '$6.00' }).first().click();
+await step(op.page, 'Operator', 'Opens Refunds and selects the new one', 'The full total owed with the driver’s reason — and NO button to mark it paid: only an admin can', async () => {
+  await waitText(op.page.locator('#refunds'), new RegExp(D.total.replace(/[$.]/g, '\\$&')));
+  await op.page.locator('#refunds [data-open]', { hasText: D.total }).first().click();
   await waitText(op.page.locator('#refundDetail'), /Items not available/);
   await waitText(op.page.locator('#refundDetail'), /Only an admin/);
   must(await op.page.locator('#rfSettle').count() === 0, 'an ordinary operator can settle refunds');
@@ -544,8 +641,8 @@ await step(adm.page, 'Admin', 'Opens Drivers', 'The new driver is on the roster;
   await waitText(adm.page.locator('#drivers'), /Sim Applicant/);
 });
 await section(adm.page, 'refunds');
-await step(adm.page, 'Admin', 'Sends the $6.00 back from the business phone, then records the reference', 'Refund recorded; it moves to “Recently closed”', async () => {
-  await adm.page.locator('#refunds [data-open]', { hasText: '$6.00' }).first().click();
+await step(adm.page, 'Admin', `Sends the ${D.total} back from the business phone, then records the reference`, 'Refund recorded; it moves to “Recently closed”', async () => {
+  await adm.page.locator('#refunds [data-open]', { hasText: D.total }).first().click();
   await adm.page.fill('#rfRef', `RF${stamp}`);
   await adm.page.click('#rfSettle');
   await waitText(adm.page.locator('.toast'), /Refund recorded/);

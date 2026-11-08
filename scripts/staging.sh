@@ -140,10 +140,12 @@ case "${1:-}" in
     ;;
   simulate)
     wait_healthy
+    # From the seed every time, so the day plays out the same way and the report is comparable.
+    seed
     dc exec -T redis sh -c 'redis-cli --scan --pattern "rl:*" | xargs -r redis-cli DEL' >/dev/null || true
     cd e2e
     [ -d node_modules ] || { npm install; npx playwright install chromium; }
-    STAGING_URL="$URL" node simulate.mjs && open simulation/report.html
+    STAGING_URL="$URL" node simulate.mjs && { [ -n "${NO_OPEN:-}" ] || open simulation/report.html; }
     ;;
   *) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

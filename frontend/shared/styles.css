@@ -618,3 +618,6 @@ body.op { height: 100vh; height: 100dvh; overflow: hidden; }
 /* ── Help chat ── */
 #helpThread { max-height: 320px; min-height: 80px; }
 #helpHuman.pulse { border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-soft); }
+/* Leaflet's panes use z-index 400–1000; without their own stacking context they paint over the
+   sticky app bar and the tab bar while the page scrolls. */
+.map, .op-map, .op-map-small { position: relative; z-index: 0; isolation: isolate; }
