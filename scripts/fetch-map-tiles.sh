@@ -46,7 +46,10 @@ echo "── extracting Somalia from build $BUILD (bbox $BBOX, z0-$MAXZOOM) ─�
 mkdir -p tiles
 "$WORK/pmtiles" extract "https://build.protomaps.com/${BUILD}.pmtiles" "$WORK/somalia.pmtiles" \
   --bbox="$BBOX" --maxzoom="$MAXZOOM"
-"$WORK/pmtiles" show "$WORK/somalia.pmtiles" | head -12
+# A summary only. Not piped through head: with pipefail, head closing the pipe early fails
+# the script here — after the download, before the file is moved into place.
+"$WORK/pmtiles" show "$WORK/somalia.pmtiles" > "$WORK/summary.txt" || true
+sed -n '1,12p' "$WORK/summary.txt"
 # Swap in atomically: Caddy may be serving the old file right now.
 mv "$WORK/somalia.pmtiles" "$OUT.new" && mv "$OUT.new" "$OUT"
 chmod 644 "$OUT"
