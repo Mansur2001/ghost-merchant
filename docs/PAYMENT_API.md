@@ -65,11 +65,35 @@ const sig = createHmac('sha256', process.env.PAYMENT_WEBHOOK_SECRET).update(`${t
 | 404 | No such order | Money arrived for nothing: it goes in the audit log as `payment.unmatched` |
 | 409 | Wrong amount, already paid, or the reference was used for another order | Same: `payment.unmatched`. An admin refunds it. Nobody can force it through. |
 
+## WaafiPay: in-app payments (EVC Plus, Zaad, Sahal) — built, waiting for keys
+
+WaafiPay is the gateway for Hormuud (EVC Plus), Telesom (Zaad) and Golis (Sahal); there is no
+public direct Sahal API, so Sahal goes through it. The adapter is `domain/waafipay.js` (wire
+format) and `commands/providerPayments.js` (one attempt's lifecycle). Set the three
+`WAAFIPAY_*` values in `.env` and recreate the backend: customers then see "Pay $X with Sahal".
+
+1. The customer taps it and types the wallet number. We send `API_PURCHASE` (referenceId = our
+   attempt id, invoiceId = the order id, amount = the order total from the database).
+2. WaafiPay pushes a prompt to that phone; the customer approves with their PIN.
+3. The same call returns `APPROVED` with a `transactionId`. `confirmPayment` records it (the
+   transaction id is the UNIQUE reference) and dispatches, in one transaction with the attempt.
+
+Rules: one pending prompt per order (partial UNIQUE index); `5xxx` = declined, try again;
+anything unreadable or a timeout = **unknown**, no new prompt for 10 minutes (the customer
+may have been charged) and the operator checks the merchant account, as with "I've paid".
+Money that can't be applied (order cancelled meanwhile, amount differs) is audited as
+`payment.unmatched` for a refund. This works in either `PAYMENT_CONFIRMATION` mode.
+
+**Before switching it on:** check the field names against the documentation that comes with
+the merchant account (they follow WaafiPay's published `API_PURCHASE` format), and run one
+real $0.10 payment per wallet. Staging uses a simulator (`scripts/waafipay-mock.mjs`;
+payer ending 0000 = declined, 9999 = unreadable).
+
 ## Not built yet (on purpose)
 
-- **The provider adapter itself.** Receiving Sahal's or Hormuud's own callback format,
-  checking it the way they require, and turning it into the call above. Each provider differs
-  and needs their merchant agreement.
+- **Callback adapters for other gateways.** WaafiPay answers synchronously (above). A gateway
+  that calls back instead needs a small adapter that checks its signature and makes the
+  signed call above.
 - **Automatic refunds (B2C payouts).** Refunds stay an admin-recorded ledger until a payout API
   exists. When one does, settle the `refunds` row from its callback the same way.
 - **Paying drivers through the platform.** The platform holds no balance, so it can't advance

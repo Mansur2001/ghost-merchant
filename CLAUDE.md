@@ -85,7 +85,8 @@ customer's page flips to paid live.`
    `assertTransition()`. Illegal transitions throw. Every transition is written to the
    `order_events` audit table.
    `PENDING_PAYMENT → PAID_UNASSIGNED → DISPATCHED → IN_TRANSIT → DELIVERED`; any live state can
-   go to `FAILED_REFUND`.
+   go to `FAILED_REFUND`; `DISPATCHED → PAID_UNASSIGNED` is a driver releasing a job before
+   pickup (re-dispatched, never to them: `orders.released_by`). Rides use the same states.
 2. **Writes touching sensitive data are idempotent — enforced in the DB, not just code.**
    Payments: `transactions.telecom_receipt_id UNIQUE` — the EVC/eDahab transaction reference,
    normalized (`domain/paymentRef.js`), so one real payment can never confirm two orders.
@@ -95,7 +96,8 @@ customer's page flips to paid live.`
 3. **Only a confirmed payment makes an order paid** (`commands/payments.js`
    `confirmPayment`): an operator with the telecom transaction number (REQUIRED) while
    `PAYMENT_CONFIRMATION=operator`, or ONLY the provider's signed callback once it is `api`
-   (docs/PAYMENT_API.md). A customer's "I've paid" (`claimPayment`) is a hint and never changes
+   (docs/PAYMENT_API.md), or — in either mode — WaafiPay's synchronous APPROVED answer to a
+   prompt we sent (`commands/providerPayments.js`, its transaction id as the reference). A customer's "I've paid" (`claimPayment`) is a hint and never changes
    status. Confirming records the payment row, the audit row and the automatic dispatch in the
    SAME transaction as the transition — the refund ledger sums those payment rows.
 4. **A customer is an account (`users.id`), not a phone.** They sign in with a verified phone
@@ -118,7 +120,9 @@ customer's page flips to paid live.`
 7. **Domain events are written in the same transaction as the state they describe.** Commands
    call `enqueue(client, EVENT, payload)` with the transaction's client — never `publish()`
    directly (`events/outbox.js`). Publishing after COMMIT is two steps with a crash-shaped gap
-   between them. Consumers must be idempotent: delivery is at-least-once.
+   between them. Consumers must be idempotent: delivery is at-least-once. The ONE exception is
+   telemetry (`TELEMETRY` in `events/bus.js`): driver positions go straight to the bus, latest
+   wins, a lost one is replaced seconds later.
 8. **Every order-scoped route is authorized, and the rule lives in one file.**
    `domain/access.js` `canAccessOrder()` is the only definition of who may see an order. Adding
    a route under `/orders/:id` without `requireAuth, requireOrderAccess` is a data breach, not a
@@ -157,6 +161,42 @@ The desk coordinates; it does not decide who gets paid, who gets work, or who ge
 - **Audit log** (`audit_log`, `commands/audit.js`): every payment, dispatch, refund, review,
   staff change and delivery check. A DB trigger refuses UPDATE/DELETE on it and on
   `order_events`. Admins read it under *Audit log*.
+
+## Rides, catalog, maps, help chat
+
+GuriKaabe is **rides first, delivery second** (the Yassir model), on one order table
+(`orders.kind` RIDE | DELIVERY) and one state machine. Same merchant-of-record rule: every job
+is prepaid to the business wallet; no cash, no wallet balance.
+
+- **The server prices everything** (`domain/pricing.js`, `commands/checkout.js`). Ride fare =
+  base + per km by vehicle (bajaj, car), fixed at booking. Delivery = catalog items + a custom
+  line's budget + a fee from the market to the door. The client sends what it wants, never
+  what it costs; `expectedTotal` mismatch is a 409 with a fresh quote. `POST /quote` runs the
+  same code. Old app builds still send the legacy typed-total shape; it is kept.
+- **Catalog and places are generic and admin-edited** (`catalog_items`, `places`), audited,
+  never deleted (`active: false`). Starter data (`db/starterCatalog.js`) fills EMPTY tables at
+  boot: placeholder prices, approximate pins — check them before launch.
+- **Ride dispatch** (`domain/dispatch.js` `pickRideDriver`): the nearest ONLINE driver in the
+  chosen vehicle with no job, a fix under 3 min old, within 8 km; 300 m bands, then longest
+  wait. Deliveries keep fewest-jobs rotation but skip offline drivers and anyone carrying a
+  rider. `drivers.online` is the driver's own switch.
+- **Ride proof**: pickup = the rider's 4-digit code (same `delivery_handoffs`, 5 tries) or a
+  reason (flagged); drop-off = the GPS fix vs the destination (flagged if far, never refused).
+- **Locations** (`commands/locations.js`): one row per driver (`driver_locations`), no trail;
+  one write per 4 s; outside Somalia refused. Sent to the customer of that driver's ACTIVE
+  job (re-authorized per order) and to operators. Customers see a driver only while
+  DISPATCHED/IN_TRANSIT. The quote shows a COUNT of drivers nearby, never positions.
+- **Maps**: Leaflet + protomaps-leaflet (vendored in `frontend/shared/vendor/`), street data
+  from ONE self-hosted file `tiles/somalia.pmtiles` (`scripts/fetch-map-tiles.sh`), served by
+  Caddy with range requests. No tile vendor, no key. Without the file: a plain grid with pins.
+  Customer location = GPS watched for the best fix, shown with its accuracy, then a draggable
+  pin or a place search. Road distance: optional OSRM (`ROUTING_URL`), else straight × 1.3.
+- **Help chat** (`domain/assistant.js`): FAQ first (EN + plain Somali), then a hosted open
+  model (Groq by default, any OpenAI-compatible URL) only when `ASSISTANT_URL`+`_API_KEY` are
+  set. It has NO tools and can't act; it sees an order STATE, never phone/place/code; nothing
+  typed is stored; "Talk to a person" = the order chat. Self-hosting on the VPS CPU was tried
+  (45–70 s per answer) and dropped. This is the second bounded vendor exception after Twilio:
+  it carries questions, never money or identities.
 
 ## Proof of delivery: the verification standard
 
@@ -520,6 +560,10 @@ serving the cached old version. This is the #1 "my change isn't showing" gotcha 
 
 ## Seeding
 
+Also: the starter catalog/places, three drivers (Amina bajaj, Bashir car — both OFFLINE so the
+waiting order stays waiting; Cali bajaj, online with a ride), two rides and one priced cart.
+
+
 `backend/src/db/seed.js` (`docker compose exec backend npm run seed`). `TRUNCATE … RESTART
 IDENTITY` then a fixed dataset (`db/seedFixtures.js`), so **every run converges to the same
 state** — reset here whenever data drifts. Covers one order in every state, two drivers
@@ -539,13 +583,16 @@ Guards (`db/seedSafety.js`), because the seed truncates everything and its passw
 ## Testing
 
 ```bash
-cd backend && npm install && npm test   # 410 Jest unit tests, ESM via --experimental-vm-modules
+cd backend && npm install && npm test   # 497 Jest unit tests, ESM via --experimental-vm-modules
 ./scripts/verify/run-all.sh             # live suites over real HTTP + WebSocket
 ```
 
 Pure-domain suites need no DB; `payments` and `outbox` mock the pg transaction and event bus
 (`jest.unstable_mockModule`). `tests/setup/env.js` seeds the env vars `config.js` requires at
 import. Jest is a devDependency — the Docker image (`npm install --omit=dev`) doesn't ship it.
+
+**Rides suite** `scripts/verify/09-rides.mjs` (63 checks over HTTP + WebSocket, against
+staging: it needs the WaafiPay simulator). Run from `backend/` like 05.
 
 **Staging + Playwright** (`./scripts/staging.sh`, `e2e/`): a second Compose project
 (`gurikaabe-staging`, `docker-compose.staging.yml`, `.env.staging`) on 127.0.0.1:8444 with its
