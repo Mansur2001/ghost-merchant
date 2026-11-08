@@ -6,6 +6,7 @@
 // It also answers identically whether or not this person has applied before. A form that says
 // "you already applied" is a way to test whether a given phone number is known to us, and the
 // applicant list includes people who work here.
+import { notifyAfter } from '../commands/push.js';
 import { Router, raw } from 'express';
 import {
   submitAccessRequest,
@@ -41,6 +42,7 @@ signupRouter.post(
     try {
       const { role, name, phone, email, message } = req.body || {};
       const { id } = await submitAccessRequest({ role, name, phone, email, message });
+      notifyAfter([{ to: { role: 'operator', admins: true }, kind: 'op_access', url: '/operator/', tag: 'op-access' }]);
 
       // A short-lived token scoped to THIS request, so the applicant can attach their ID
       // without the request id ever being exposed. Without it the upload endpoint would

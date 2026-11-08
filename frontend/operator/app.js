@@ -212,7 +212,10 @@ $('setupBtn').addEventListener('click', async () => {
   login();
 });
 
-function logout() { sessionStorage.removeItem('opToken'); token = null; location.reload(); }
+function logout() {
+  // This computer stops getting the desk's notifications once nobody is signed in.
+  GMPush.disable(api).catch(() => {}).finally(() => { sessionStorage.removeItem('opToken'); token = null; location.reload(); });
+}
 $('logoutBtn').addEventListener('click', logout);
 
 async function showDash() {
@@ -231,6 +234,7 @@ async function showDash() {
   connectSocket();
   setInterval(pollOutbox, 20000);
   pollOutbox();
+  renderOpPush();
 }
 
 // Resolve who we are from the token. Also catches an account deactivated while the tab sat
@@ -1292,7 +1296,38 @@ function connectSocket() {
   };
 }
 
-if (token) showDash();
+// ── Push notifications (payments to check, disputes, requests) ──
+const OP_PUSH_TEXT = {
+  on: 'On — this computer is notified.', off: 'Off.', denied: 'Blocked in the browser settings for this site.',
+  unavailable: 'Not set up on the server (VAPID keys).', unsupported: 'This browser cannot receive notifications.',
+};
+async function renderOpPush() {
+  const st = await GMPush.state();
+  $('opPushStatus').textContent = OP_PUSH_TEXT[st] || st;
+  $('opPushToggle').textContent = st === 'on' ? 'Turn off' : 'Turn on';
+  $('opPushToggle').disabled = ['denied', 'unavailable', 'unsupported'].includes(st);
+}
+$('opPushToggle').addEventListener('click', async () => {
+  try {
+    if ((await GMPush.state()) === 'on') await GMPush.disable(api);
+    else { await GMPush.enable(api); toast('Notifications on ✓'); }
+  } catch (e) { toast(e.message === 'denied' ? 'The browser blocked notifications.' : 'Could not turn notifications on.'); }
+  renderOpPush();
+});
+function openFromUrl(href) {
+  let u;
+  try { u = new URL(href, location.origin); } catch { return; }
+  const id = u.searchParams.get('order');
+  setPanel('orders');
+  if (id) { refreshAll().then(() => openOrder(id)); }
+}
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (e) => { if (e.data?.type === 'gm:open') openFromUrl(e.data.url); });
+}
+
+if (token) showDash().then(() => {
+  if (new URLSearchParams(location.search).has('order')) { openFromUrl(location.href); history.replaceState(null, '', location.pathname); }
+});
 
 // ── Service worker ──
 // Registered here rather than in an inline <script> so the page can run under a strict

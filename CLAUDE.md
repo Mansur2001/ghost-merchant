@@ -207,6 +207,24 @@ is prepaid to the business wallet; no cash, no wallet balance.
   (45–70 s per answer) and dropped. This is the second bounded vendor exception after Twilio:
   it carries questions, never money or identities.
 
+## Push notifications
+
+`domain/push.js` decides who is told what; `notify/pushSender.js` delivers; `realtime/pushBridge.js`
+turns outbox events into pushes (only on the relay-leader instance, so N instances don't buzz N
+times). Two channels, each off until configured: **Web Push** (our VAPID keys,
+`scripts/vapid-keys.mjs` → `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`; no account anywhere) and
+**FCM** for the Android app (`FCM_SERVICE_ACCOUNT`, the owner's free Firebase project; one
+HTTPS call, no SDK; the app build needs `google-services.json` and sets `GM_FCM`).
+
+- **Lock-screen safe:** text never carries an address, phone, code, amount or chat words (a
+  test fails on any digit). The tap opens the app, which needs the session.
+- **Best effort:** a push is a nudge, never the record; failures are logged and dropped, never
+  retried or allowed to slow the request. A `tag` per order collapses at-least-once repeats.
+- **Owner from the session**, never the body; a device moves to whoever registers it last;
+  sign-out removes it. Endpoints must be https push-service URLs (no SSRF through us).
+- **Never prompted on load:** the permission prompt follows a tap ("Turn on", the one-time
+  offer on a fresh order's screen, the driver's "Notify me of new jobs", the desk's Account).
+
 ## Proof of delivery: the verification standard
 
 | Step | Who | Proof the server requires |
@@ -681,7 +699,7 @@ real text. Production deploy: `docker-compose.prod.yml` (+ `Caddyfile.prod`). Se
 cause (the `ref` still comes through). Real wallet merchant numbers and USSD codes aren't
 configured yet: no wallet is offered until they are (`domain/wallets.js`).
 
-Not started: push notifications.
+Push notifications: Web Push live once VAPID keys are set; the Android app needs Firebase.
 
 **Android release:** `cd mobile && GM_API_BASE=https://app.gurikaabe.com npm run build` (now ends
 with `cap copy android` — before 2026-11-06 it didn't, and every bundle silently carried the

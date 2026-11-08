@@ -51,3 +51,4 @@ tiles/*.pmtiles
 
 # OSRM routing data (scripts/fetch-routing-data.sh): ~650 MB, rebuilt from OpenStreetMap.
 routing/
+mobile/android/app/google-services.json

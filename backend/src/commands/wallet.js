@@ -22,6 +22,7 @@ import { confirmPayment, PaymentError } from './payments.js';
 import { audit, auditAfter } from './audit.js';
 import { wakeOutbox } from '../events/outbox.js';
 import { parseWalletSettings } from '../domain/walletSettings.js';
+import { notifyAfter } from './push.js';
 
 export class WalletError extends Error {
   constructor(message, status = 400) {
@@ -128,6 +129,7 @@ export async function applyTopupOutcome(attempt, outcome, settings = config.wall
       await tx.paymentAttempt.update({ where: { id: attempt.id }, data: { status: 'approved', reference, updated_at: new Date() } });
       await audit({ actor: 'system:waafipay', action: 'wallet.topup', subject: `user:${attempt.user_id}`, detail: { reference, amount: attempt.amount } }, { client: tx });
     });
+    notifyAfter([{ to: { role: 'customer', id: attempt.user_id }, kind: 'topup_ok', url: '/?wallet=1', tag: `wallet-${attempt.id}` }]);
     return 'approved';
   } catch (err) {
     if (!(err instanceof WalletError)) throw err;
@@ -197,6 +199,9 @@ export async function requestWithdrawal({ userId, amount, phone, settings = conf
     await postEntry(tx, { userId, amountCents: -c, kind: 'withdrawal', reference: `WD.${w.id}`, actor: `customer:${userId}` });
     await audit({ actor: `customer:${userId}`, action: 'wallet.withdrawal.requested', subject: `withdrawal:${w.id}`, detail: { amount: dollars(c) } }, { client: tx });
     return w;
+  }).then((w) => {
+    notifyAfter([{ to: { role: 'operator', admins: true }, kind: 'op_withdrawal', url: '/operator/', tag: `wd-${w.id}` }]);
+    return w;
   });
 }
 
@@ -221,6 +226,9 @@ export async function markWithdrawalPaid({ id, reference, actor }) {
     });
     await audit({ actor, action: 'wallet.withdrawal.paid', subject: `withdrawal:${w.id}`, detail: { reference: ref, amount: dollars(w.amount_cents) } }, { client: tx });
     return done;
+  }).then((done) => {
+    notifyAfter([{ to: { role: 'customer', id: done.user_id }, kind: 'withdrawal_paid', url: '/?wallet=1', tag: `wd-${done.id}` }]);
+    return done;
   });
 }
 
@@ -234,6 +242,9 @@ export async function rejectWithdrawal({ id, note, actor }) {
       where: { id: w.id }, data: { status: 'rejected', note: why.slice(0, 300), decided_by: actor, decided_at: new Date() },
     });
     await audit({ actor, action: 'wallet.withdrawal.rejected', subject: `withdrawal:${w.id}`, detail: { note: why } }, { client: tx });
+    return done;
+  }).then((done) => {
+    notifyAfter([{ to: { role: 'customer', id: done.user_id }, kind: 'withdrawal_rejected', url: '/?wallet=1', tag: `wd-${done.id}` }]);
     return done;
   });
 }

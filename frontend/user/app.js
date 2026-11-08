@@ -391,7 +391,9 @@ $('sendCodeBtn').addEventListener('click', requestCode);
 $('resendBtn').addEventListener('click', requestCode);
 $('verifyBtn').addEventListener('click', verifyCode);
 $('codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') verifyCode(); });
-$('signOutBtn').addEventListener('click', () => {
+$('signOutBtn').addEventListener('click', async () => {
+  // The next person on this phone must not get this account's notifications.
+  try { await GMPush.disable(api); } catch { /* best effort */ }
   if (ws) { try { ws.close(); } catch { /* already closed */ } ws = null; }
   order = null;
   clearSession();
@@ -1040,6 +1042,7 @@ function enterOrderView(payment) {
   refreshEvidence();
   renderOrderMap();
   loadAttempt();
+  maybeAskPush();
   if (!ws) connectSocket();
   else if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'subscribe', orderId: order.id }));
 }
@@ -1836,6 +1839,54 @@ $('walletPayBtn').addEventListener('click', async () => {
   toast(t('pay.confirmed'));
 });
 
+// ── Push notifications (shared/push.js) ──
+const PUSH_ASKED = 'gm_push_asked';
+async function renderPush() {
+  const st = await GMPush.state();
+  $('pushCard').classList.toggle('hidden', st === 'unavailable' || st === 'unsupported');
+  $('pushStatus').textContent = t(`push.state.${st}`);
+  $('pushToggle').textContent = t(st === 'on' ? 'push.off' : 'push.on');
+  $('pushToggle').disabled = st === 'denied';
+  $('pushToggle').className = 'small' + (st === 'on' ? ' secondary' : '');
+  return st;
+}
+async function turnPushOn() {
+  try {
+    await GMPush.enable(api);
+    toast(t('push.done'));
+  } catch (e) {
+    toast(t(e.message === 'denied' ? 'push.state.denied' : 'push.fail'));
+  }
+  localStorage.setItem(PUSH_ASKED, '1');
+  $('pushAsk').classList.add('hidden');
+  renderPush();
+}
+$('pushToggle').addEventListener('click', async () => {
+  if ((await GMPush.state()) === 'on') { await GMPush.disable(api); renderPush(); } else turnPushOn();
+});
+$('pushAskYes').addEventListener('click', turnPushOn);
+$('pushAskNo').addEventListener('click', () => { localStorage.setItem(PUSH_ASKED, '1'); $('pushAsk').classList.add('hidden'); });
+// Offered once, on the tracking screen of a fresh order: the moment it is obviously useful.
+async function maybeAskPush() {
+  if (localStorage.getItem(PUSH_ASKED) || !order || ['DELIVERED', 'FAILED_REFUND'].includes(order.status)) return;
+  if ((await GMPush.state()) === 'off') $('pushAsk').classList.remove('hidden');
+}
+
+// A tapped notification opens the app at /?order=<id> (or /?wallet=1); an open app is told
+// by its service worker instead of reloading.
+function openFromUrl(href) {
+  if (!token) return;
+  let u;
+  try { u = new URL(href, location.origin); } catch { return; }
+  const id = u.searchParams.get('order');
+  if (id) { resumeOrder(id); return; }
+  if (u.searchParams.has('wallet')) goTab('account');
+}
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (e) => { if (e.data?.type === 'gm:open') openFromUrl(e.data.url); });
+}
+GMPush.onNativeTap(openFromUrl);
+
 // ── Navigation: bottom tabs ──
 // Home = the new-order screen when signed in, the landing page when not. Orders and Account
 // need a session, so they send a signed-out visitor to sign-in first and come back after.
@@ -1878,6 +1929,7 @@ function goTab(tab, { start = false } = {}) {
     loadEmailBox();
     loadPasswordBox();
     loadWallet();
+    renderPush();
     return showView('accountView');
   }
 }
@@ -1943,6 +1995,12 @@ if (token) { showSignedIn(); goTab('home'); }
 (async function autoResume() {
   try {
     if (!token) return;
+    // Opened from a notification: go where it points, not to the last order.
+    if (new URLSearchParams(location.search).has('order') || new URLSearchParams(location.search).has('wallet')) {
+      openFromUrl(location.href);
+      history.replaceState(null, '', location.pathname);
+      return;
+    }
     const saved = JSON.parse(localStorage.getItem('gm_last') || 'null');
     if (!saved?.orderId) return;
     const res = await api(`/orders/${saved.orderId}`);

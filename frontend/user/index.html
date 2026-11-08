@@ -347,6 +347,15 @@
           <div class="track" id="track"></div>
         </div>
 
+        <!-- Once, after the first order: offer notifications at the moment they make sense. -->
+        <div class="card accent hidden" id="pushAsk">
+          <div style="font-weight:700;" data-i18n="push.ask">Get a notification when your driver is on the way?</div>
+          <div class="btn-row">
+            <button id="pushAskYes" type="button" data-i18n="push.on">Turn on</button>
+            <button class="ghost" id="pushAskNo" type="button" data-i18n="push.notNow">Not now</button>
+          </div>
+        </div>
+
         <!-- Where the driver is, and where the job starts and ends. -->
         <div class="map-card hidden" id="orderMapCard">
           <div class="map" id="orderMap"></div>
@@ -469,6 +478,17 @@
         <!-- Email accounts: a password, so signing in never waits on an email. -->
         <!-- Wallet (only when the server has it on): top up through the gateway, pay orders,
              cash out. Nobody at GuriKaabe can add or take money by hand. -->
+        <!-- Notifications on this phone: asked for only when the person taps. -->
+        <div class="card" id="pushCard">
+          <div class="between">
+            <div>
+              <div class="section-title" style="margin:0;" data-i18n="push.title">Notifications</div>
+              <div class="muted" id="pushStatus" style="font-size:13px;"></div>
+            </div>
+            <button class="small" id="pushToggle" type="button" data-i18n="push.on">Turn on</button>
+          </div>
+        </div>
+
         <div class="card hidden" id="walletCard">
           <div class="between">
             <div class="section-title" style="margin:0;" data-i18n="wallet.title">Wallet</div>
@@ -603,6 +623,7 @@
   <script src="/shared/map.js"></script>
   <script src="/shared/location.js"></script>
   <script src="/shared/nav.js"></script>
+  <script src="/shared/push.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

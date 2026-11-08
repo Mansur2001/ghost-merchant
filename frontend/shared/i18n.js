@@ -585,6 +585,20 @@
       'search.short': 'Type at least 3 letters.',
       'search.searching': 'Searching…',
       'search.none': 'Nothing found. Try another name, or tap the map.',
+      // Push notifications.
+      'push.title': 'Notifications',
+      'push.on': 'Turn on',
+      'push.off': 'Turn off',
+      'push.notNow': 'Not now',
+      'push.ask': 'Get a notification when your driver is on the way?',
+      'push.jobs': 'Notify me of new jobs',
+      'push.done': 'Notifications on ✓',
+      'push.fail': 'Could not turn notifications on.',
+      'push.state.on': 'On for this phone.',
+      'push.state.off': 'Off — you only see updates with the app open.',
+      'push.state.denied': 'Blocked. Allow notifications for GuriKaabe in your phone settings.',
+      'push.state.unavailable': 'Not available yet.',
+      'push.state.unsupported': 'This browser cannot show notifications.',
     },
 
     so: {
@@ -1155,6 +1169,20 @@
       'search.short': 'Ugu yaraan 3 xaraf qor.',
       'search.searching': 'Waa la raadinayaa…',
       'search.none': 'Waxba lama helin. Isku day magac kale, ama khariidadda riix.',
+      // Push notifications.
+      'push.title': 'Ogeysiisyo',
+      'push.on': 'Shid',
+      'push.off': 'Dami',
+      'push.notNow': 'Hadda maya',
+      'push.ask': 'Ma rabtaa ogeysiis marka darawalku soo socdo?',
+      'push.jobs': 'I ogeysii shaqo cusub',
+      'push.done': 'Ogeysiisyada waa shidan yihiin ✓',
+      'push.fail': 'Ogeysiisyada lama shidi karin.',
+      'push.state.on': 'Taleefankan waa u shidan yihiin.',
+      'push.state.off': 'Way dansan yihiin — wararka waxaad arkaysaa marka app-ku furan yahay oo kaliya.',
+      'push.state.denied': 'Waa la xiray. Taleefankaaga goobaha ka oggolow ogeysiisyada GuriKaabe.',
+      'push.state.unavailable': 'Weli lama heli karo.',
+      'push.state.unsupported': 'Browser-kan ogeysiis ma muujin karo.',
     },
   };
 

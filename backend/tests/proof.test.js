@@ -48,7 +48,8 @@ jest.unstable_mockModule('../src/db/prisma.js', () => ({
 }));
 const postMessage = jest.fn(async () => ({}));
 jest.unstable_mockModule('../src/commands/orders.js', () => ({ transitionOrder, postMessage }));
-jest.unstable_mockModule('../src/events/outbox.js', () => ({ wakeOutbox }));
+const enqueue = jest.fn();
+jest.unstable_mockModule('../src/events/outbox.js', () => ({ wakeOutbox, enqueue }));
 
 const { confirmPickup, confirmDelivery, disputeDelivery, ProofError } = await import('../src/commands/proofs.js');
 const proof = await import('../src/domain/proof.js');
@@ -196,6 +197,8 @@ describe('disputeDelivery (customer: "I didn\'t get my order")', () => {
   test('puts a checked delivery back in the review queue and tells the thread', async () => {
     deliveryProof = { id: 7n, flags: [], created_at: new Date(), reviewed_at: new Date() };
     await disputeDelivery({ orderId: ORDER, note: 'nobody came' });
+    // Operators are told (push), in the same transaction as the flag.
+    expect(enqueue).toHaveBeenCalledWith(expect.anything(), 'delivery.disputed', { orderId: ORDER });
     expect(tx.orderProof.update).toHaveBeenCalledWith(expect.objectContaining({
       data: { flags: { push: 'customer_disputed' }, reviewed_at: null, reviewed_by: null },
     }));

@@ -9,7 +9,8 @@
 // roll the attempt count back and make the cap a no-op (CLAUDE.md, Authentication).
 import { prisma, withCriticalTransaction, withTransaction } from '../db/prisma.js';
 import { transitionOrder, postMessage } from './orders.js';
-import { wakeOutbox } from '../events/outbox.js';
+import { enqueue, wakeOutbox } from '../events/outbox.js';
+import { EVENTS } from '../events/bus.js';
 import { STATUS } from '../domain/stateMachine.js';
 import {
   HANDOFF_MAX_ATTEMPTS,
@@ -219,6 +220,7 @@ export async function disputeDelivery({ orderId, note }) {
       { orderId, sender: 'system', body: `Customer says they did not get this order.${said ? ` “${said}”` : ''} An operator will call.` },
       { client: tx }
     );
+    await enqueue(tx, EVENTS.DELIVERY_DISPUTED, { orderId });
     return { already: false };
   });
   if (!outcome.already) wakeOutbox();

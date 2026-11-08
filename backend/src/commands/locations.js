@@ -11,6 +11,9 @@ import { parseFix } from '../domain/proof.js';
 import { inServiceArea } from '../domain/geo.js';
 import { audit } from './audit.js';
 import { dispatchWaitingSoon } from './dispatch.js';
+import { notifyAfter } from './push.js';
+import { ARRIVING_M } from '../domain/push.js';
+import { distanceMeters } from '../domain/geo.js';
 
 // One write per driver per this long; extra pings in between are dropped. A phone sending
 // every second would otherwise be 3,600 writes an hour for a dot that moved 4 m.
@@ -19,6 +22,7 @@ export const MIN_INTERVAL_MS = 4000;
 const DISPATCH_NUDGE_MS = 10_000;
 
 const lastWrite = new Map(); // driverId -> ms
+const arrivingSent = new Set(); // ride ids already told "almost there" (this process)
 let lastNudge = 0;
 
 const clampInt = (v, lo, hi) => {
@@ -47,7 +51,7 @@ export async function recordDriverLocation({ driverId, raw, now = Date.now() }) 
     prisma.driverLocation.upsert({ where: { driver_id: id }, create: { driver_id: id, ...data }, update: data }),
     prisma.order.findMany({
       where: { driver_id: id, status: { in: ['DISPATCHED', 'IN_TRANSIT'] } },
-      select: { id: true },
+      select: { id: true, kind: true, status: true, user_id: true, pickup_lat: true, pickup_lng: true },
     }),
   ]);
 
@@ -61,6 +65,16 @@ export async function recordDriverLocation({ driverId, raw, now = Date.now() }) 
     at: data.updated_at.toISOString(),
     orderIds: jobs.map((j) => j.id),
   });
+
+  // A rider waiting on a corner wants to know the car is nearly there: once per ride.
+  for (const j of jobs) {
+    if (j.kind !== 'RIDE' || j.status !== 'DISPATCHED' || j.pickup_lat == null || arrivingSent.has(j.id)) continue;
+    if (distanceMeters(fix, { lat: j.pickup_lat, lng: j.pickup_lng }) <= ARRIVING_M) {
+      arrivingSent.add(j.id);
+      if (arrivingSent.size > 5000) arrivingSent.delete(arrivingSent.values().next().value);
+      notifyAfter([{ to: { role: 'customer', id: j.user_id }, kind: 'arriving', url: `/?order=${j.id}`, tag: `order-${j.id}-arriving` }]);
+    }
+  }
 
   if (now - lastNudge > DISPATCH_NUDGE_MS) {
     lastNudge = now;

@@ -93,6 +93,10 @@
           </div>
           <p class="muted" id="onlineSub" style="margin:8px 0 0;font-size:13px;" data-i18n="drv.offline.sub">You get no new jobs. Jobs you have stay with you.</p>
           <p class="muted" id="locLine" style="margin:4px 0 0;font-size:13px;"></p>
+          <div class="between hidden" id="pushRow" style="margin-top:8px;">
+            <span class="muted" id="pushStatus" style="font-size:13px;"></span>
+            <button class="small secondary" id="pushToggle" type="button" data-i18n="push.jobs">Notify me of new jobs</button>
+          </div>
         </div>
         <div class="kpis" style="grid-template-columns:1fr 1fr;">
           <div class="kpi gold"><div class="k-label" data-i18n="drv.toPick">To pick up</div><div class="k-value" id="countPick">0</div></div>
@@ -217,6 +221,7 @@
   <script src="/shared/map.js"></script>
   <script src="/shared/location.js"></script>
   <script src="/shared/nav.js"></script>
+  <script src="/shared/push.js"></script>
   <script src="/driver/app.js"></script>
 </body>
 </html>

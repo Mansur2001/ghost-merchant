@@ -28,6 +28,8 @@ export const EVENTS = {
   PAYMENT_CLAIMED: 'payment.claimed',
   // A wallet prompt (WaafiPay) changed state: pending, approved, declined, unknown.
   PAYMENT_ATTEMPT: 'payment.attempt',
+  // A customer said a delivered order never reached them (operators are told).
+  DELIVERY_DISPUTED: 'delivery.disputed',
 };
 
 // Not domain events: high-rate, latest-wins telemetry that goes straight to the bus, never

@@ -3,13 +3,16 @@
 // Sahal), the nearest free car is dispatched, the rider watches it come, gives their code at
 // pickup, and the trip ends at the destination.
 import { test, expect } from '@playwright/test';
-import { openApp, signInCustomer, signInDriver, signInOperator, somaliNumber, SEED, driversOnline, goSection } from './helpers.js';
+import { openApp, signInCustomer, signInDriver, signInOperator, somaliNumber, SEED, driversOnline, goSection, freeDriver } from './helpers.js';
 
 const PICKUP = { latitude: 2.0478, longitude: 45.3291 }; // by the stadium
 
 test('book a car → pay in the app → nearest driver → rider code → drop-off', async ({ browser, request }, testInfo) => {
+  // Three apps and a payment round-trip: give a loaded laptop room (it takes ~20 s on a calm one).
+  test.setTimeout(180_000);
   // Amina goes online first and takes any delivery left waiting, so Bashir (the car) is free.
   await driversOnline(request, ['Amina']);
+  await freeDriver(request, 'Bashir');
   const driver = await openApp(browser, testInfo, { permissions: ['geolocation'], geolocation: { latitude: 2.0471, longitude: 45.3300 } });
   await signInDriver(driver, SEED.drivers.Bashir);
   // The driver's own switch: online shares the phone's position.

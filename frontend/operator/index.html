@@ -232,6 +232,10 @@
                 <label for="pwNew">New password (min 12 characters)</label>
                 <input id="pwNew" type="password" autocomplete="new-password" />
                 <button id="changePw" type="button">Change password</button>
+                <hr class="sep" />
+                <strong>Notifications on this computer</strong>
+                <p class="muted" id="opPushStatus" style="margin:4px 0 0;">Payments to check, disputes, and requests — even with this tab in the background.</p>
+                <button class="secondary" id="opPushToggle" type="button">Turn on</button>
               </div>
             </div>
           </div>
@@ -247,6 +251,7 @@
   <script src="/shared/vendor/leaflet-1.9.4.js"></script>
   <script src="/shared/vendor/protomaps-leaflet-5.1.0.js"></script>
   <script src="/shared/map.js"></script>
+  <script src="/shared/push.js"></script>
   <script src="/operator/app.js"></script>
 </body>
 </html>

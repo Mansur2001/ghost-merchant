@@ -131,3 +131,16 @@ export async function assignedDriver(operator) {
   const name = (await panel.textContent()).match(/🛵 (\w+)/)[1];
   return SEED.drivers[name];
 }
+
+// Earlier tests can leave a driver busy (dispatch is automatic). Stop their active jobs from
+// the desk, so a test that needs that driver free doesn't depend on test order.
+export async function freeDriver(request, name) {
+  const login = await request.post('/api/operator/login', { data: SEED.admin });
+  const { token } = await login.json();
+  const headers = { Authorization: `Bearer ${token}` };
+  const { orders = [] } = await (await request.get('/api/operator/orders', { headers })).json();
+  for (const o of orders.filter((x) => x.driver_name === name && ['DISPATCHED', 'IN_TRANSIT'].includes(x.status))) {
+    // eslint-disable-next-line no-await-in-loop
+    await request.post(`/api/operator/orders/${o.id}/refund`, { headers, data: { reason: 'test setup' } });
+  }
+}

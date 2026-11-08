@@ -152,13 +152,16 @@ function showQueue() {
   $('logoutBtn').classList.remove('hidden');
   loadMe();
   loadQueue();
+  renderPush();
   connectSocket();
   GMQueue.onChange(renderSyncState);
   flushQueue();
 }
 
 // Logout: drop the session token and return to the PIN login screen.
-$('logoutBtn').addEventListener('click', () => {
+$('logoutBtn').addEventListener('click', async () => {
+  // The next driver on this phone must not get this one's jobs.
+  try { await GMPush.disable(api); } catch { /* best effort */ }
   // The queue holds THIS driver's writes; leaving them for the next person to sign in would
   // replay someone else's actions under a new identity.
   GMQueue.clear();
@@ -534,6 +537,29 @@ $('releaseBtn').addEventListener('click', async () => {
   showQueue();
 });
 
+// ── Push notifications: a new job while the app is in the background ──
+async function renderPush() {
+  const st = await GMPush.state();
+  $('pushRow').classList.toggle('hidden', st === 'unavailable' || st === 'unsupported');
+  $('pushStatus').textContent = t(`push.state.${st}`);
+  $('pushToggle').classList.toggle('hidden', st === 'on' || st === 'denied');
+}
+$('pushToggle').addEventListener('click', async () => {
+  try { await GMPush.enable(api); toast(t('push.done')); } catch (e) { toast(t(e.message === 'denied' ? 'push.state.denied' : 'push.fail')); }
+  renderPush();
+});
+function openFromUrl(href) {
+  if (!token) return;
+  let u;
+  try { u = new URL(href, location.origin); } catch { return; }
+  const id = u.searchParams.get('job');
+  if (id) openDetail(id);
+}
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (e) => { if (e.data?.type === 'gm:open') openFromUrl(e.data.url); });
+}
+GMPush.onNativeTap(openFromUrl);
+
 // ── Turn-by-turn navigation ──
 // The route comes from our own OSRM (GET /api/route); the position from this phone, every 2 s
 // while navigating. Off the road line for two readings in a row -> a new route. The screen
@@ -840,7 +866,12 @@ function toast(msg) {
 }
 
 // Auto-resume session.
-if (token) showQueue();
+if (token) {
+  showQueue();
+  // Opened from a "new job" notification.
+  const job = new URLSearchParams(location.search).get('job');
+  if (job) { openDetail(job); history.replaceState(null, '', location.pathname); }
+}
 
 // ── Service worker ──
 // Registered here rather than in an inline <script> so the page can run under a strict

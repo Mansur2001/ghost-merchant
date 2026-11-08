@@ -557,3 +557,21 @@ model WalletWithdrawal {
 
   @@map("wallet_withdrawals")
 }
+
+/// Where to send a push to one device (Web Push endpoint or FCM token). Owner from the session.
+model PushSubscription {
+  id         BigInt    @id @default(autoincrement())
+  role       String
+  subject_id BigInt
+  channel    String
+  endpoint   String    @unique(map: "push_subscriptions_endpoint_key")
+  p256dh     String?
+  auth       String?
+  lang       String    @default("en")
+  failures   Int       @default(0)
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  last_ok_at DateTime? @db.Timestamptz(6)
+
+  @@index([role, subject_id], map: "idx_push_subscriptions_subject")
+  @@map("push_subscriptions")
+}

@@ -2,7 +2,7 @@
   "name": "gurikaabe-mobile",
   "version": "0.1.0",
   "private": true,
-  "description": "GuriKaabe \u2014 Android shell (Capacitor) around the GuriKaabe PWAs.",
+  "description": "GuriKaabe — Android shell (Capacitor) around the GuriKaabe PWAs.",
   "type": "module",
   "scripts": {
     "build": "node build-www.mjs && node configure-android.mjs && cap copy android",
@@ -14,7 +14,8 @@
   },
   "dependencies": {
     "@capacitor/android": "^6.1.2",
-    "@capacitor/core": "^6.1.2"
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/push-notifications": "6.0.4"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.1.2"

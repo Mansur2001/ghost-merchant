@@ -724,6 +724,47 @@ paths:
         "429": { description: Too many searches, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
         "503": { description: Search unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
+  /api/push/config:
+    get:
+      tags: [Public]
+      summary: Which push channels this server can send (the Web Push public key, if any)
+      security: []
+      responses:
+        "200": { description: Config, content: { application/json: { schema: { type: object, properties: { webPush: { type: [string, "null"], description: VAPID public key }, fcm: { type: boolean } } } } } }
+
+  /api/push/subscriptions:
+    post:
+      tags: [Orders (shared)]
+      summary: Register this device for push notifications (owner = the signed-in session)
+      description: |
+        A browser sends its PushSubscription (`subscription`), the Android app its FCM `token`.
+        Re-registering a device moves it to whoever signed in last. Notifications never carry an
+        address, a phone number, a code or a message's words — they show on a lock screen.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subscription: { type: object, properties: { endpoint: { type: string }, keys: { type: object, properties: { p256dh: { type: string }, auth: { type: string } } } } }
+                token: { type: string }
+                lang: { type: string, enum: [en, so] }
+      responses:
+        "201": { description: Registered, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { description: Not signed in, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { description: That channel isn't set up on this server, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    delete:
+      tags: [Orders (shared)]
+      summary: Stop notifications on this device (only the caller's own)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [endpoint], properties: { endpoint: { type: string } } } } }
+      responses:
+        "200": { description: Removed, content: { application/json: { schema: { type: object, properties: { removed: { type: integer } } } } } }
+        "401": { description: Not signed in, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
   /api/catalog:
     get:
       tags: [Public]

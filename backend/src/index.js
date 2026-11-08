@@ -6,6 +6,8 @@ import express from 'express';
 import { config } from './config.js';
 import { ordersRouter } from './routes/orders.js';
 import { mapsRouter } from './routes/maps.js';
+import { pushRouter } from './routes/push.js';
+import { startPushBridge } from './realtime/pushBridge.js';
 import { paymentsWebhookRouter } from './routes/paymentsWebhook.js';
 import { driversRouter } from './routes/drivers.js';
 import { operatorRouter } from './routes/operator.js';
@@ -67,6 +69,7 @@ app.use('/api', signupRouter);
 app.use('/api', staffSetupRouter);
 app.use('/api', ordersRouter);
 app.use('/api', mapsRouter);
+app.use('/api', pushRouter);
 app.use('/api', driversRouter);
 app.use('/api', operatorRouter);
 
@@ -167,6 +170,13 @@ async function boot() {
   console.log(waafi.enabled
     ? `[payments] in-app wallet prompts on (${waafi.wallets.join(', ')}) via ${new URL(waafi.url).host}`
     : '[payments] in-app wallet prompts off (no WaafiPay credentials) — USSD links and "I\'ve paid" only');
+
+  if (config.push.errors.length) {
+    config.push.errors.forEach((e) => console.error(`FATAL: push ${e}`));
+    process.exit(1);
+  }
+  console.log(`[push] web push ${config.push.webpush.enabled ? 'on' : 'off (no VAPID keys)'}, Android app push ${config.push.fcm.enabled ? 'on' : 'off (no FCM_SERVICE_ACCOUNT)'}`);
+  if (startPushBridge()) console.log('[push] sending notifications for order events');
 
   console.warn(config.wallet.enabled
     ? `[wallet] customer wallet ON — GuriKaabe holds customer balances (stored value; max $${(config.wallet.maxBalanceCents / 100).toFixed(2)} each)`
