@@ -10,7 +10,8 @@
 // client could send {type:'subscribe_operator'} and receive a live feed of every order,
 // payment, and message in the system.
 import { WebSocketServer } from 'ws';
-import { EVENTS, subscribe } from '../events/bus.js';
+import { EVENTS, TELEMETRY, subscribe } from '../events/bus.js';
+import { recordDriverLocation } from '../commands/locations.js';
 import { verifyToken, hasIdentity } from '../middleware/auth.js';
 import { canAccessOrder } from '../domain/access.js';
 import { getOrder } from '../queries/orders.js';
@@ -98,6 +99,30 @@ async function broadcastToOrder(orderId, message) {
   }
 
   for (const ws of operators) deliver(ws);
+}
+
+// A driver's position goes to the rooms of the jobs they are on (customers re-authorized per
+// order, as above — a released driver's dot stops at once) and to operators, once each. Not to
+// the driver's own feed: their phone knows where it is.
+async function broadcastLocation(p) {
+  const message = { type: 'driver_location', driverId: p.driverId, lat: p.lat, lng: p.lng,
+    accuracy: p.accuracy, heading: p.heading, at: p.at };
+  const delivered = new Set();
+  for (const orderId of p.orderIds || []) {
+    const set = rooms.get(String(orderId));
+    if (!set || set.size === 0) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const order = await getOrder(orderId).catch(() => null);
+    const live = order && String(order.driver_id) === String(p.driverId)
+      && ['DISPATCHED', 'IN_TRANSIT'].includes(order.status);
+    for (const ws of [...set]) {
+      if (ws.auth?.role === 'driver' || delivered.has(ws)) continue;
+      if (!live || !canAccessOrder(ws.auth, order)) continue;
+      delivered.add(ws);
+      send(ws, { ...message, orderId });
+    }
+  }
+  for (const ws of operators) if (!delivered.has(ws)) send(ws, message);
 }
 
 function leaveRoomOnly(ws, orderId) {
@@ -193,6 +218,12 @@ export function attachSocketServer(httpServer) {
         if (!driverFeeds.has(key)) driverFeeds.set(key, new Set());
         driverFeeds.get(key).add(ws);
         send(ws, { type: 'subscribed_driver' });
+      } else if (msg.type === 'location') {
+        // The driver's own position; the id comes from the token. Throttled and validated in
+        // the command, so a chatty phone costs one write every few seconds at most.
+        if (ws.auth.role !== 'driver') return send(ws, { type: 'error', error: 'forbidden' });
+        recordDriverLocation({ driverId: ws.auth.id, raw: msg })
+          .catch((err) => console.error('[location] not recorded:', err.message));
       }
     });
 
@@ -229,6 +260,10 @@ export function attachSocketServer(httpServer) {
     broadcastToOrder(p.orderId, { type: 'message', ...p })
   ));
   subscribe(EVENTS.ORDER_CREATED, (p) => sendTo(operators, { type: 'order_created', ...p }));
+  subscribe(EVENTS.PAYMENT_ATTEMPT, bridge((p) =>
+    broadcastToOrder(p.orderId, { type: 'payment_attempt', ...p })
+  ));
+  subscribe(TELEMETRY.DRIVER_LOCATION, bridge(broadcastLocation));
   // Operators only: it's a prompt to go and check the merchant phone.
   subscribe(EVENTS.PAYMENT_CLAIMED, (p) => sendTo(operators, { type: 'payment_claimed', ...p }));
 

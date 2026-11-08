@@ -13,6 +13,9 @@ import { putObject } from '../storage/objectStore.js';
 import { SEED_OPERATORS, SEED_DRIVERS, SEED_CUSTOMERS } from './seedFixtures.js';
 import { seedRefusal } from './seedSafety.js';
 import { buildProof } from '../domain/proof.js';
+import { ensureStarterCatalog } from './starterCatalog.js';
+import { priceCart, deliveryFeeCents, rideFareCents, fromCents } from '../domain/pricing.js';
+import { estimateRoadMeters } from '../domain/geo.js';
 
 // Rows this seed would never have created: evidence that real (or at least someone's) data
 // lives here. Checked BEFORE the truncate, outside its transaction.
@@ -48,7 +51,14 @@ const PATHS = {
 // Named operator accounts (P0 #5). Two of them on purpose: the whole point of the change is
 // that order_events.actor can tell two people apart, and a one-row roster can't demo that.
 const OPERATORS = SEED_OPERATORS;
-const DRIVERS = SEED_DRIVERS;
+// What each seeded driver drives, whether they are online, and where they are. Amina is busy
+// with deliveries, Bashir (car) is free near Hamar Weyne, Cali (bajaj) has a rider on the way.
+const DRIVER_STATE = [
+  { vehicle: 'bajaj', online: true, at: { lat: 2.0472, lng: 45.3190 } },
+  { vehicle: 'car', online: true, at: { lat: 2.0340, lng: 45.3405 } },
+  { vehicle: 'bajaj', online: true, at: { lat: 2.0301, lng: 45.3060 } },
+];
+const DRIVERS = SEED_DRIVERS.map((d, i) => ({ ...d, ...DRIVER_STATE[i] }));
 const USERS = SEED_CUSTOMERS;
 
 // driverIdx is a 1-based index into DRIVERS (null = unassigned).
@@ -71,7 +81,18 @@ const ORDERS = [
   { status: 'FAILED_REFUND', phone: '+252771234567', amount: '12.00', driverIdx: null,
     landmark: 'Market entrance gate 3', lat: 2.0410, lng: 45.3300,
     items: [{ text: 'Bulk order: 25kg rice sack' }] },
+  // Rides: fare from the tariff, pickup -> destination.
+  { kind: 'RIDE', status: 'DISPATCHED', phone: '+252771234567', driverIdx: 3, vehicle: 'bajaj',
+    pickup: { lat: 2.0295, lng: 45.3045, text: 'KM4 junction — outside the pharmacy' },
+    landmark: 'Lido Beach', lat: 2.0570, lng: 45.3625, items: [] },
+  { kind: 'RIDE', status: 'PENDING_PAYMENT', phone: '+252651234567', driverIdx: null, vehicle: 'car',
+    pickup: { lat: 2.0480, lng: 45.3288, text: 'Mogadishu Stadium' },
+    landmark: 'Aden Adde Airport', lat: 2.0144, lng: 45.3047, items: [] },
 ];
+
+// The first pending delivery is a priced cart from the starter catalog (the new checkout);
+// the rest keep the legacy typed-request shape older app builds created.
+const SEED_CART = { lines: [{ itemId: 7, qty: 1 }, { itemId: 11, qty: 1 }, { itemId: 12, qty: 1 }] };
 
 async function seed() {
   const refusal = seedRefusal({
@@ -93,9 +114,13 @@ async function seed() {
     // both slower and easy to get subtly wrong as the schema grows.
     await tx.$executeRawUnsafe(`
       TRUNCATE outbox, otp_codes, staff_invites, order_photos, order_events, messages, transactions,
-               refunds, access_requests, order_proofs, delivery_handoffs, audit_log, orders, drivers, users, operators
+               refunds, access_requests, order_proofs, delivery_handoffs, audit_log, payment_attempts,
+               driver_locations, orders, drivers, users, operators, catalog_items, catalog_categories, places
       RESTART IDENTITY CASCADE
     `);
+    await ensureStarterCatalog(tx);
+    const catalog = new Map((await tx.catalogItem.findMany()).map((i) => [i.id, i]));
+    const bakaara = await tx.place.findFirst({ where: { name_en: 'Bakaara Market' } });
 
     const userIds = {};
     for (const phone_number of USERS) {
@@ -117,15 +142,41 @@ async function seed() {
     for (const d of DRIVERS) {
       // eslint-disable-next-line no-await-in-loop
       const created = await tx.driver.create({
-        data: { name: d.name, msisdn: d.msisdn, pin_hash: hashSecret(d.pin), pin_set_at: new Date() },
+        data: {
+          name: d.name, msisdn: d.msisdn, pin_hash: hashSecret(d.pin), pin_set_at: new Date(),
+          vehicle: d.vehicle, online: d.online,
+        },
         select: { id: true },
       });
       driverIds.push(created.id);
+      // eslint-disable-next-line no-await-in-loop
+      await tx.driverLocation.create({ data: { driver_id: created.id, ...d.at, accuracy_m: 15 } });
     }
 
     let receiptSeq = 1;
     for (const o of ORDERS) {
       const driverId = o.driverIdx ? driverIds[o.driverIdx - 1] : null;
+      // Price the new-style jobs exactly as checkout would.
+      let priced = {};
+      if (o.kind === 'RIDE') {
+        const meters = estimateRoadMeters(o.pickup, o);
+        const fare = fromCents(rideFareCents(meters, o.vehicle));
+        o.amount = fare;
+        priced = {
+          kind: 'RIDE', vehicle: o.vehicle, distance_m: meters, subtotal: '0.00', fee: fare,
+          pickup_lat: o.pickup.lat, pickup_lng: o.pickup.lng, pickup_text: o.pickup.text,
+        };
+      } else if (o === ORDERS[0]) {
+        const { items, subtotalCents } = priceCart(SEED_CART, catalog);
+        const meters = estimateRoadMeters(bakaara, o);
+        const fee = deliveryFeeCents(meters);
+        o.items = items;
+        o.amount = fromCents(subtotalCents + fee);
+        priced = {
+          subtotal: fromCents(subtotalCents), fee: fromCents(fee), distance_m: meters,
+          pickup_lat: bakaara.lat, pickup_lng: bakaara.lng, pickup_text: bakaara.name_en,
+        };
+      }
       // eslint-disable-next-line no-await-in-loop
       const order = await tx.order.create({
         data: {
@@ -138,6 +189,7 @@ async function seed() {
           lng: o.lng,
           landmark_text: o.landmark,
           driver_id: driverId,
+          ...priced,
         },
         select: { id: true },
       });
@@ -157,7 +209,10 @@ async function seed() {
       }
 
       // A couple of chat messages so the thread isn't empty.
-      const messages = [{ order_id: orderId, sender: 'user', body: o.items[0].text }];
+      const messages = [{
+        order_id: orderId, sender: 'user',
+        body: o.kind === 'RIDE' ? 'I am waiting outside.' : o.items.map((i) => i.text).join(', '),
+      }];
       if (o.status !== 'PENDING_PAYMENT') {
         messages.push({
           order_id: orderId,
@@ -209,7 +264,7 @@ async function seed() {
           verified_at: o.status === 'DELIVERED' ? new Date() : null,
         },
       });
-      const pastPickup = ['IN_TRANSIT', 'DELIVERED'].includes(o.status);
+      const pastPickup = o.kind !== 'RIDE' && ['IN_TRANSIT', 'DELIVERED'].includes(o.status);
       const near = { lat: o.lat + 0.0004, lng: o.lng + 0.0003, accuracy: 18 };
       if (pastPickup) {
         photoJobs.push({ orderId, kind: 'pickup_proof', label: '🛍️ Items', bg: '#e6c65c' });
@@ -232,7 +287,7 @@ async function seed() {
     // The pending order's customer has said "I've paid", so the operator's screen shows a
     // payment waiting to be checked against the merchant phone.
     await tx.order.updateMany({
-      where: { status: 'PENDING_PAYMENT' },
+      where: { status: 'PENDING_PAYMENT', kind: 'DELIVERY' },
       data: { payment_claimed_at: new Date(), payment_claim_ref: 'SEED-EVC-0001' },
     });
   }, { timeout: 30000 });

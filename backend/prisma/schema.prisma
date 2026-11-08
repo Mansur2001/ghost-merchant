@@ -61,7 +61,12 @@ model Driver {
   email      String?
   /// When dispatch last gave this driver an order — the fair-rotation tiebreak.
   last_assigned_at DateTime? @db.Timestamptz(6)
+  /// 'bajaj' | 'car' | 'moto'. Rides go to a matching vehicle; deliveries to any.
+  vehicle    String   @default("bajaj")
+  /// The driver's "I want work" switch. Dispatch only picks drivers who are online.
+  online     Boolean  @default(false)
   orders     Order[]
+  location   DriverLocation?
 
   @@map("drivers")
 }
@@ -108,6 +113,20 @@ model Order {
   /// Which wallet the customer says they used (domain/wallets.js id), so the operator
   /// checks the right merchant phone.
   payment_claim_wallet String?
+  /// DELIVERY or RIDE. Same state machine; proof and dispatch rules differ by kind.
+  kind          order_kind   @default(DELIVERY)
+  /// Where the job starts (rider's pickup, or the market). lat/lng/landmark_text = where it ends.
+  pickup_lat    Float?
+  pickup_lng    Float?
+  pickup_text   String?
+  /// Rides only: 'bajaj' | 'car'.
+  vehicle       String?
+  distance_m    Int?
+  /// total_amount = subtotal + fee, computed by the server (domain/pricing.js). Null on legacy orders.
+  subtotal      Decimal?     @db.Decimal(12, 2)
+  fee           Decimal?     @db.Decimal(12, 2)
+  /// Drivers who released this job before pickup; dispatch skips them for it.
+  released_by   BigInt[]     @default([])
 
   driver       Driver?       @relation(fields: [driver_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   user         User          @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -118,8 +137,10 @@ model Order {
   refunds      Refund[]
   handoff      DeliveryHandoff?
   proofs       OrderProof[]
+  payment_attempts PaymentAttempt[]
 
   @@index([driver_id], map: "idx_orders_driver")
+  @@index([kind, status], map: "idx_orders_kind_status")
   @@index([status], map: "idx_orders_status")
   @@index([user_id], map: "idx_orders_user")
   @@map("orders")
@@ -392,4 +413,92 @@ model AuditLog {
 
   @@index([at(sort: Desc)], map: "idx_audit_log_at")
   @@map("audit_log")
+}
+
+enum order_kind {
+  DELIVERY
+  RIDE
+}
+
+/// Latest fix per driver, overwritten — not a movement history (see the migration).
+model DriverLocation {
+  driver_id  BigInt   @id
+  lat        Float
+  lng        Float
+  accuracy_m Int?
+  heading    Int?
+  speed_kmh  Int?
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  driver Driver @relation(fields: [driver_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("driver_locations")
+}
+
+/// Fixed places people name as addresses: markets, landmarks, districts.
+model Place {
+  id         Int      @id @default(autoincrement())
+  kind       String
+  name_en    String
+  name_so    String
+  city       String
+  lat        Float
+  lng        Float
+  active     Boolean  @default(true)
+  sort       Int      @default(0)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("places")
+}
+
+model CatalogCategory {
+  id      Int           @id @default(autoincrement())
+  name_en String
+  name_so String
+  icon    String        @default("")
+  active  Boolean       @default(true)
+  sort    Int           @default(0)
+  items   CatalogItem[]
+
+  @@map("catalog_categories")
+}
+
+/// A generic good or meal with a fixed price. The server prices every cart from these.
+model CatalogItem {
+  id          Int      @id @default(autoincrement())
+  category_id Int
+  name_en     String
+  name_so     String
+  unit_en     String   @default("")
+  unit_so     String   @default("")
+  price       Decimal  @db.Decimal(12, 2)
+  active      Boolean  @default(true)
+  sort        Int      @default(0)
+  updated_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  category CatalogCategory @relation(fields: [category_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([category_id, sort], map: "idx_catalog_items_category")
+  @@map("catalog_items")
+}
+
+/// A request to a payment provider to take an order's payment from the customer's wallet.
+/// One pending per order (partial UNIQUE in the migration). Approved -> confirmPayment.
+model PaymentAttempt {
+  id         String   @id @db.Uuid
+  order_id   String   @db.Uuid
+  provider   String
+  wallet     String
+  payer      String
+  amount     Decimal  @db.Decimal(12, 2)
+  status     String   @default("pending")
+  reference  String?
+  detail     String?
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  order Order @relation(fields: [order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([order_id, created_at], map: "idx_payment_attempts_order")
+  @@map("payment_attempts")
 }

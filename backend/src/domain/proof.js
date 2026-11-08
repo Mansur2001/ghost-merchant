@@ -1,7 +1,7 @@
 // The proof-of-delivery standard. Pure rules — no DB, no Express — so they can be tested
 // exhaustively and the driver app, the operator review queue and the commands all agree.
 //
-//   pickup   (DISPATCHED -> IN_TRANSIT)  a photo of the goods. Always.
+//   pickup   (DISPATCHED -> IN_TRANSIT)  a photo of the goods. Always. (A ride: the rider's code.)
 //   delivery (IN_TRANSIT -> DELIVERED)   the customer's 4-digit handoff code, OR — when the
 //                                        customer can't give it — a door photo plus a reason,
 //                                        which is flagged for an operator to check.
@@ -68,17 +68,29 @@ export function cleanReason(raw) {
 }
 
 // What to store for one step: where the driver was, how far from the pin, and why (if at all)
-// an operator should look. `order` needs lat/lng (the customer's pin, possibly null).
+// an operator should look. `order` needs lat/lng (the end pin) and, for rides, pickup_lat/lng.
+//
+// Rides prove different things (CLAUDE.md, Proof of delivery):
+//   pickup   the rider's 4-digit code — the right person got in. Without it, a reason, flagged.
+//   delivery a drop-off fix, compared with the destination. No code: the rider is in the car.
 export function buildProof({ step, method, fix, order, note = null }) {
-  const pin = order && order.lat != null && order.lng != null ? { lat: order.lat, lng: order.lng } : null;
+  const isRide = order?.kind === 'RIDE';
+  const pinOf = (lat, lng) => (lat != null && lng != null ? { lat, lng } : null);
+  const pin = isRide && step === 'pickup'
+    ? pinOf(order.pickup_lat, order.pickup_lng)
+    : pinOf(order?.lat, order?.lng);
   const distance = fix && pin ? distanceMeters(fix, pin) : null;
 
   const flags = [];
-  if (step === 'delivery') {
-    if (method === 'photo_no_code') flags.push('no_code');
+  const checked = step === 'delivery' || (isRide && step === 'pickup');
+  if (checked) {
+    if (method === 'photo_no_code' || method === 'no_code') flags.push('no_code');
     if (!fix) flags.push('no_gps');
     else if (distance != null && distance > PROOF_RADIUS_M) flags.push('far_from_pin');
   }
+  // A rider dropped off early (they asked to stop) is normal; a pickup code that matched
+  // proves the pickup. Neither needs a person to look, unless the code was skipped.
+  if (isRide && step === 'pickup' && method === 'code') flags.length = 0;
 
   return {
     step,

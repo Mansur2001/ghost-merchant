@@ -16,7 +16,9 @@ export const STATUS = {
 const TRANSITIONS = {
   PENDING_PAYMENT: ['PAID_UNASSIGNED', 'FAILED_REFUND'],
   PAID_UNASSIGNED: ['DISPATCHED', 'FAILED_REFUND'],
-  DISPATCHED: ['IN_TRANSIT', 'FAILED_REFUND'],
+  // Back to PAID_UNASSIGNED: the driver released the job before pickup (too far, breakdown).
+  // It is re-dispatched to someone else; nothing has been bought or carried yet.
+  DISPATCHED: ['IN_TRANSIT', 'PAID_UNASSIGNED', 'FAILED_REFUND'],
   IN_TRANSIT: ['DELIVERED', 'FAILED_REFUND'],
   DELIVERED: [], // terminal
   FAILED_REFUND: [], // terminal
@@ -33,7 +35,7 @@ export function assertTransition(from, to) {
   }
 }
 
-// Which auto-response (if any) fires on entering a state. Consumed by the auto-responder.
+// Which auto-response (if any) fires on entering a state. Consumed by transitionOrder.
 export const AUTO_RESPONSES = {
   PAID_UNASSIGNED: 'Payment confirmed. We are finding a driver for you now.',
   DISPATCHED: 'A driver has accepted your order and is heading to the market.',
@@ -41,3 +43,18 @@ export const AUTO_RESPONSES = {
   DELIVERED: 'Your order has been delivered. Thank you!',
   FAILED_REFUND: 'There was a problem with your order. An operator will contact you shortly.',
 };
+
+const RIDE_RESPONSES = {
+  PAID_UNASSIGNED: 'Payment confirmed. We are finding a driver near you.',
+  DISPATCHED: 'A driver is on the way to pick you up.',
+  IN_TRANSIT: 'Your ride has started.',
+  DELIVERED: 'You have arrived. Thank you for riding with GuriKaabe!',
+  FAILED_REFUND: 'There was a problem with your ride. An operator will contact you shortly.',
+};
+
+export function autoResponse(from, to, kind = 'DELIVERY') {
+  if (from === 'DISPATCHED' && to === 'PAID_UNASSIGNED') {
+    return 'Your driver could not make it. We are finding you another one.';
+  }
+  return (kind === 'RIDE' ? RIDE_RESPONSES : AUTO_RESPONSES)[to] || null;
+}

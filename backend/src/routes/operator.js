@@ -23,7 +23,9 @@ import {
   getRecentDeliveries,
 } from '../queries/orders.js';
 import { markProofReviewed, ProofError } from '../commands/proofs.js';
-import { getDriversWithStats, getDriverById } from '../queries/drivers.js';
+import { getDriversWithStats, getDriverById, getDriverPositions } from '../queries/drivers.js';
+import { getCatalog, getPlaces } from '../queries/catalog.js';
+import { createEntry, updateEntry, CatalogError } from '../commands/catalog.js';
 import { STATUS } from '../domain/stateMachine.js';
 import { wakeOutbox, outboxHealth } from '../events/outbox.js';
 import {
@@ -500,6 +502,73 @@ operatorRouter.post('/operator/drivers/:id/active', adminOnly, async (req, res, 
     next(err);
   }
 });
+
+// POST /api/operator/drivers/:id/vehicle { vehicle } — what they drive decides which rides they
+// get (a car rider never gets a bajaj). Admins only, like the rest of the roster.
+operatorRouter.post('/operator/drivers/:id/vehicle', adminOnly, async (req, res, next) => {
+  try {
+    const vehicle = req.body?.vehicle;
+    if (!['bajaj', 'car', 'moto'].includes(vehicle)) return res.status(400).json({ error: 'vehicle is bajaj, car or moto' });
+    const driver = await prisma.driver.update({
+      where: { id: BigInt(req.params.id) },
+      data: { vehicle },
+      select: { id: true, name: true, vehicle: true },
+    });
+    auditAfter({ actor: actorLabel(req.auth), action: 'staff.vehicle', subject: `driver:${req.params.id}`, detail: { vehicle } });
+    dispatchWaitingSoon();
+    res.json({ driver });
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'driver not found' });
+    next(err);
+  }
+});
+
+// GET /api/operator/map — drivers' latest positions and what they carry. Live updates come
+// over the socket (driver_location).
+operatorRouter.get('/operator/map', operatorOnly, async (req, res, next) => {
+  try {
+    res.json({ drivers: await getDriverPositions() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Catalog and places (admins). Nothing is deleted; `active: false` hides. ──
+function catalogError(err, res, next) {
+  if (err instanceof CatalogError) return res.status(err.status).json({ error: err.message });
+  next(err);
+}
+
+operatorRouter.get('/operator/catalog', operatorOnly, async (req, res, next) => {
+  try {
+    res.json({ categories: await getCatalog({ includeInactive: true }), places: await getPlaces({ includeInactive: true }) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Written out route by route (not a loop) so every path is greppable and the API-doc test
+// can see it.
+const createRoute = (kind) => async (req, res, next) => {
+  try {
+    res.status(201).json({ [kind]: await createEntry(kind, req.body, actorLabel(req.auth)) });
+  } catch (err) {
+    catalogError(err, res, next);
+  }
+};
+const updateRoute = (kind) => async (req, res, next) => {
+  try {
+    res.json({ [kind]: await updateEntry(kind, req.params.id, req.body, actorLabel(req.auth)) });
+  } catch (err) {
+    catalogError(err, res, next);
+  }
+};
+operatorRouter.post('/operator/catalog/categories', adminOnly, createRoute('category'));
+operatorRouter.patch('/operator/catalog/categories/:id', adminOnly, updateRoute('category'));
+operatorRouter.post('/operator/catalog/items', adminOnly, createRoute('item'));
+operatorRouter.patch('/operator/catalog/items/:id', adminOnly, updateRoute('item'));
+operatorRouter.post('/operator/places', adminOnly, createRoute('place'));
+operatorRouter.patch('/operator/places/:id', adminOnly, updateRoute('place'));
 
 // GET /api/operator/audit — the append-only decision log, newest first. Admins only: it names
 // staff and customers' orders, and it is the record a dispute is settled with.

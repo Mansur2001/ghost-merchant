@@ -13,6 +13,9 @@ import { signupRouter } from './routes/signup.js';
 import { staffSetupRouter } from './routes/staffSetup.js';
 import { sweepExpiredSetupCodes } from './commands/staffAccounts.js';
 import { dispatchWaitingSoon } from './commands/dispatch.js';
+import { sweepStaleAttempts } from './commands/providerPayments.js';
+import { ensureStarterCatalog } from './db/starterCatalog.js';
+import { WAAFIPAY_PRODUCTION_URL } from './domain/waafipay.js';
 import { attachSocketServer } from './realtime/socketServer.js';
 import { ensureBucket } from './storage/objectStore.js';
 import { sweepExpiredOtps } from './commands/auth.js';
@@ -96,6 +99,12 @@ housekeeping.unref();
 const dispatchTimer = setInterval(dispatchWaitingSoon, 30 * 1000);
 dispatchTimer.unref();
 
+// Wallet prompts left 'pending' by a restart mid-call become 'unknown' (commands/providerPayments.js).
+const attemptTimer = setInterval(() => {
+  sweepStaleAttempts().catch((err) => console.error('payment attempt sweep failed:', err.message));
+}, 60 * 1000);
+attemptTimer.unref();
+
 async function boot() {
   // The `log` transport prints login codes to the server log, so anyone with log access could
   // sign in as any customer. Fine in dev, fatal in production.
@@ -142,6 +151,27 @@ async function boot() {
     ? '[payments] confirmed ONLY by the signed mobile-money callback; operators cannot mark orders paid'
     : '[payments] confirmed by an operator with the transaction number (switch to api when the provider is live)');
 
+  // WaafiPay: half-set credentials, or a sandbox gateway in production (which would mark
+  // orders paid with no money behind them), refuse to boot.
+  const waafi = config.waafipay;
+  if (waafi.errors.length) {
+    waafi.errors.forEach((e) => console.error(`FATAL: WaafiPay ${e}`));
+    process.exit(1);
+  }
+  if (waafi.enabled && config.env === 'production' && waafi.url !== WAAFIPAY_PRODUCTION_URL) {
+    console.error(`FATAL: WAAFIPAY_URL in production must be ${WAAFIPAY_PRODUCTION_URL} — anything else confirms payments nobody made.`);
+    process.exit(1);
+  }
+  console.log(waafi.enabled
+    ? `[payments] in-app wallet prompts on (${waafi.wallets.join(', ')}) via ${new URL(waafi.url).host}`
+    : '[payments] in-app wallet prompts off (no WaafiPay credentials) — USSD links and "I\'ve paid" only');
+
+  if (config.pricing.errors.length) {
+    config.pricing.errors.forEach((e) => console.error(`FATAL: tariff ${e}`));
+    process.exit(1);
+  }
+  console.log(config.routingUrl ? `[routing] OSRM at ${config.routingUrl}` : '[routing] straight-line estimate (no ROUTING_URL)');
+
   // A half-set review login is silently disabled by reviewCodeFor(), which would surface as a
   // Play rejection days later. Say so now, while someone is watching the deploy.
   const review = config.otp.review;
@@ -185,6 +215,13 @@ async function boot() {
       );
       process.exit(1);
     }
+  }
+
+  // A fresh install gets a starter catalog and places list; an edited one is never touched.
+  try {
+    if (await ensureStarterCatalog(prisma)) console.log('[catalog] starter catalog/places added — check prices and pins');
+  } catch (err) {
+    console.error('starter catalog failed (continuing):', err.message);
   }
 
   try {

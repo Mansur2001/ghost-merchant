@@ -20,7 +20,19 @@ function forCustomer(wallets, operator) {
 // instead, and route the order through the operator's manual confirm path. The same applies
 // when no wallet is configured yet. The client renders whatever this returns; it must never
 // assume a pay link exists.
-export function buildPaymentInstruction(order, wallets = config.payment.wallets) {
+const WALLET_NAMES = { evc: 'EVC Plus', zaad: 'Zaad', sahal: 'Sahal' };
+
+// Wallets the app can charge directly (WaafiPay: a prompt on the customer's phone, approved
+// with their PIN). Offered beside the USSD links, not instead of them.
+export function appPayWallets(waafi = config.waafipay) {
+  return waafi.enabled ? waafi.wallets.map((id) => ({ id, name: WALLET_NAMES[id] || id })) : [];
+}
+
+export function buildPaymentInstruction(order, wallets = config.payment.wallets, waafi = config.waafipay) {
+  return { ...ussdInstruction(order, wallets), appPay: appPayWallets(waafi) };
+}
+
+function ussdInstruction(order, wallets) {
   const parsed = parsePhone(order?.user_phone);
 
   if (!(parsed.valid && parsed.canUssd)) {

@@ -12,7 +12,7 @@
 //   * conditional `ON CONFLICT ... DO NOTHING` against a PARTIAL unique index — Prisma's
 //     upsert can't target one, and that index is what makes offline replay idempotent.
 import { prisma, withCriticalTransaction, inTransaction } from '../db/prisma.js';
-import { assertTransition, AUTO_RESPONSES } from '../domain/stateMachine.js';
+import { assertTransition, autoResponse } from '../domain/stateMachine.js';
 import { normalizeMsisdnOrThrow } from '../domain/phone.js';
 import { EVENTS } from '../events/bus.js';
 import { isUuid, newOrderId } from '../domain/ids.js';
@@ -29,7 +29,14 @@ import { newHandoffCode } from '../domain/proof.js';
 //
 // The client chooses the id, never the owner: the account comes from the verified session.
 // `contactPhone` is whatever number the customer wants the driver to call.
-export async function createOrder({ id, userId, contactPhone, items, totalAmount, lat, lng, landmark }) {
+//
+// The newer fields (kind, pickup, vehicle, distanceM, subtotal, fee) come from checkout.js,
+// which prices the job on the server. Without them this is the legacy shape older app builds
+// still send: a typed request and a typed total.
+export async function createOrder({
+  id, userId, contactPhone, items, totalAmount, lat, lng, landmark,
+  kind = 'DELIVERY', pickup = null, vehicle = null, distanceM = null, subtotal = null, fee = null,
+}) {
   if (!Number.isInteger(userId)) throw new Error('userId required');
   if (!contactPhone) throw new Error('phone required');
   if (!landmark || !landmark.trim()) throw new Error('landmark is mandatory');
@@ -58,6 +65,14 @@ export async function createOrder({ id, userId, contactPhone, items, totalAmount
         lat: lat ?? null,
         lng: lng ?? null,
         landmark_text: landmark,
+        kind,
+        pickup_lat: pickup?.lat ?? null,
+        pickup_lng: pickup?.lng ?? null,
+        pickup_text: pickup?.text ?? null,
+        vehicle,
+        distance_m: distanceM,
+        subtotal,
+        fee,
       },
     });
 
@@ -67,7 +82,7 @@ export async function createOrder({ id, userId, contactPhone, items, totalAmount
         from_status: null,
         to_status: 'PENDING_PAYMENT',
         actor: 'system',
-        note: 'order created',
+        note: kind === 'RIDE' ? 'ride booked' : 'order created',
       },
     });
     // The code the customer gives the driver at the door (domain/proof.js). Same commit as
@@ -88,7 +103,9 @@ export async function createOrder({ id, userId, contactPhone, items, totalAmount
 //
 // Pass `client` to enlist in an existing transaction — payment matching does this so the
 // receipt, the transition and both events commit as one unit.
-export async function transitionOrder(orderId, toStatus, actor = 'system', note = null, { client } = {}) {
+// `message` replaces the state's automatic chat line (a customer's own cancel is not "there
+// was a problem with your order").
+export async function transitionOrder(orderId, toStatus, actor = 'system', note = null, { client, message } = {}) {
   // CP path: order state is the single source of truth, so a transition is acknowledged only
   // once it is durable. When nested in a caller's transaction, that caller chose the level.
   const run = client ? (fn) => fn(client) : withCriticalTransaction;
@@ -98,7 +115,7 @@ export async function transitionOrder(orderId, toStatus, actor = 'system', note 
     // concurrent transitions both read the old status, both pass assertTransition, and the
     // second silently overwrites the first — an order could go DELIVERED then IN_TRANSIT.
     const locked = await tx.$queryRaw`
-      SELECT id, status FROM orders WHERE id = ${orderId}::uuid FOR UPDATE
+      SELECT id, status, kind FROM orders WHERE id = ${orderId}::uuid FOR UPDATE
     `;
     const order = locked[0];
     if (!order) throw new Error(`order ${orderId} not found`);
@@ -121,7 +138,7 @@ export async function transitionOrder(orderId, toStatus, actor = 'system', note 
 
     // The state-driven auto-response belongs to the same commit: a customer must never see
     // the status move without the message explaining it, or vice versa.
-    const auto = AUTO_RESPONSES[toStatus];
+    const auto = message ?? autoResponse(order.status, toStatus, order.kind);
     if (auto) await postMessage({ orderId, sender: 'system', body: auto }, { client: tx });
 
     // Failing an order that was already paid means we owe the customer money. Open the debt
@@ -185,4 +202,31 @@ export async function postMessage({ orderId, sender, body, clientId }, { client 
 
   if (!client && result.created) wakeOutbox();
   return result.message;
+}
+
+// The customer calls it off before a driver has it. Unpaid: it just closes. Paid and still
+// waiting for a driver: it fails into the refund ledger (transitionOrder opens what is owed).
+// Once a driver is on the way it is the driver's or the operator's call, not a button.
+export async function cancelOrder({ orderId }) {
+  const order = await withCriticalTransaction(async (tx) => {
+    const rows = await tx.$queryRaw`SELECT status, kind FROM orders WHERE id = ${orderId}::uuid FOR UPDATE`;
+    const row = rows[0];
+    if (!row) return { error: 'not found', status: 404 };
+    if (!['PENDING_PAYMENT', 'PAID_UNASSIGNED'].includes(row.status)) {
+      return { error: 'a driver is already on the way — call or message them', status: 409 };
+    }
+    // A wallet prompt in flight may still take the money: let it finish first.
+    const pending = await tx.paymentAttempt.findFirst({ where: { order_id: orderId, status: 'pending' } });
+    if (pending) return { error: 'finish or refuse the payment prompt on your phone first', status: 409 };
+    const paid = row.status === 'PAID_UNASSIGNED';
+    const what = row.kind === 'RIDE' ? 'ride' : 'order';
+    return transitionOrder(orderId, 'FAILED_REFUND', 'customer', 'cancelled by customer', {
+      client: tx,
+      message: paid
+        ? `You cancelled this ${what}. We owe you a refund and will send it back to your wallet.`
+        : `You cancelled this ${what}.`,
+    });
+  });
+  if (!order.error) wakeOutbox();
+  return order;
 }

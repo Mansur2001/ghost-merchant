@@ -40,6 +40,13 @@ export function describeFailure(err) {
   return null;
 }
 
+// For routes that answer their own validation errors with 400: an infrastructure failure must
+// still reach errorHandler, so the customer sees "database unavailable [503 · DB-P1001 · ref]"
+// rather than a raw message (CLAUDE.md, Known gaps).
+export function isInfraError(err) {
+  return describeFailure(err) !== null;
+}
+
 // 404 for unmatched /api routes. Without this an unknown API path falls through to Express's
 // HTML 404, so a client parsing JSON sees a confusing parse error instead of a clean 404.
 export function apiNotFound(req, res) {

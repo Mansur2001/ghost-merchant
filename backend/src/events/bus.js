@@ -26,6 +26,15 @@ export const EVENTS = {
   MESSAGE_POSTED: 'message.posted',
   // The customer said "I've paid" — tells operators which order to check. Not a payment.
   PAYMENT_CLAIMED: 'payment.claimed',
+  // A wallet prompt (WaafiPay) changed state: pending, approved, declined, unknown.
+  PAYMENT_ATTEMPT: 'payment.attempt',
+};
+
+// Not domain events: high-rate, latest-wins telemetry that goes straight to the bus, never
+// through the outbox. A lost driver position is replaced by the next one seconds later, and
+// writing every ping into the outbox would make the relay mostly about GPS.
+export const TELEMETRY = {
+  DRIVER_LOCATION: 'telemetry.driver_location',
 };
 
 // Redis pub/sub channel. Every instance must agree on this name, so changing it during a

@@ -6,7 +6,7 @@ import { pickDriver, MAX_ACTIVE_PER_DRIVER } from '../src/domain/dispatch.js';
 import { signPayload, verifyWebhook, MAX_SKEW_SECONDS } from '../src/domain/paymentWebhook.js';
 
 const d = (id, active_orders, last, extra = {}) =>
-  ({ id: BigInt(id), active: true, ready: true, active_orders, last_assigned_at: last, ...extra });
+  ({ id: BigInt(id), active: true, ready: true, online: true, active_orders, last_assigned_at: last, ...extra });
 
 describe('pickDriver — fair, automatic dispatch', () => {
   test('the driver with the fewest active jobs gets it', () => {
@@ -41,6 +41,14 @@ describe('pickDriver — fair, automatic dispatch', () => {
       d(2, 0, null, { ready: false }),
       d(3, MAX_ACTIVE_PER_DRIVER, null),
     ])).toBeNull();
+  });
+
+  test('offline drivers, and drivers carrying a rider, get no deliveries', () => {
+    expect(pickDriver([
+      d(1, 0, null, { online: false }),
+      d(2, 0, null, { active_rides: 1 }),
+    ])).toBeNull();
+    expect(pickDriver([d(1, 0, null, { online: false }), d(2, 1, null)]).id).toBe(2n);
   });
 });
 

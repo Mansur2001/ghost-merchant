@@ -29,10 +29,12 @@ info:
     - **Money:** GuriKaabe is merchant of record. One payment per order, no balances, and no
       endpoint anywhere sends money. An order becomes paid only through
       `POST /api/operator/orders/{id}/mark-paid` (operator mode) or the signed
-      `POST /api/payments/webhook` (api mode) — never both.
+      `POST /api/payments/webhook` (api mode) — never both — or when the WaafiPay gateway approves an
+      in-app payment (`POST /api/orders/{id}/pay`, either mode).
     - **Dispatch is automatic.** There is no endpoint to choose a driver.
     - **Order states:** `PENDING_PAYMENT → PAID_UNASSIGNED → DISPATCHED → IN_TRANSIT → DELIVERED`;
-      any live state may go to `FAILED_REFUND`. Illegal moves answer `409`.
+      any live state may go to `FAILED_REFUND`; a driver may release `DISPATCHED → PAID_UNASSIGNED`
+      before pickup. Rides (`kind: RIDE`) use the same states. Illegal moves answer `409`.
 
     ## Live updates (WebSocket — not expressible in OpenAPI)
     Connect to `wss://app.gurikaabe.com/ws`. Send the token in the **first frame** (never in the URL):
@@ -46,11 +48,14 @@ info:
     | `{"type":"subscribe","orderId":"<uuid>"}` | anyone allowed to see that order | `subscribed`, then that order's events |
     | `{"type":"subscribe_driver"}` | driver | events for every order assigned to you |
     | `{"type":"subscribe_operator"}` | operator | every event |
+    | `{"type":"location","lat":2.04,"lng":45.31,"accuracy":12,"heading":90,"speed":20}` | driver | nothing (stored, at most every 4 s) |
     | `{"type":"ping"}` | anyone | `{"type":"pong"}` |
 
     Events: `order_state` `{orderId, from, to, actor}`, `payment_confirmed` `{orderId, amount, receiptId}`,
     `payment_claimed` `{orderId, reference, wallet, walletName}`, `message` `{orderId, message}`,
-    `order_created` `{orderId, order}` (operators only). Delivery is at-least-once and every event
+    `order_created` `{orderId, order}` (operators only), `payment_attempt` `{orderId, attemptId, status, wallet}`,
+    `driver_location` `{driverId, lat, lng, accuracy, heading, at, orderId?}` (the customer of that driver's
+    active job, and operators; telemetry, not stored as history). Delivery is at-least-once and every event
     is a snapshot, so a duplicate is harmless. Room members are re-authorized on every event.
   contact:
     name: GuriKaabe
@@ -74,6 +79,8 @@ tags:
   - name: Operator
   - name: Admin
     description: Operators with admin rights (today, the owner only).
+  - name: Operator — catalog
+    description: The generic catalog and fixed places. Reads for every operator; changes by admins, audited.
   - name: Staff onboarding
   - name: Mobile-money API
     description: Prepared for a Sahal / EVC Plus / gateway integration. Off unless PAYMENT_CONFIRMATION=api. See docs/PAYMENT_API.md.
@@ -520,22 +527,28 @@ paths:
       description: |
         The owner is taken from the token, never the body. Send your own `id` (UUID) to make retries
         safe: a retry returns the original order with 200 instead of creating a second one. A 4-digit
-        delivery code is created with the order (readable only by this customer).
+        delivery code is created with the order (readable only by this customer); a ride's rider gives it at pickup.
+        With `kind`, the server prices the job (commands/checkout.js) and refuses with 409 + a fresh `quote`
+        if `expectedTotal` no longer matches.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [phone, items, totalAmount, landmark]
-              properties:
-                id: { type: string, format: uuid }
-                phone: { type: string, description: The number the driver calls (not proof of identity) }
-                items: { type: array, items: { $ref: "#/components/schemas/Item" } }
-                totalAmount: { type: number, minimum: 0, example: 7.5 }
-                lat: { type: [number, "null"] }
-                lng: { type: [number, "null"] }
-                landmark: { type: string, minLength: 1 }
+              oneOf:
+                - $ref: "#/components/schemas/JobRequest"
+                - type: object
+                  title: Legacy (app builds before 0.3)
+                  description: A typed request and a typed total. Kept so old installs keep working.
+                  required: [phone, items, totalAmount, landmark]
+                  properties:
+                    id: { type: string, format: uuid }
+                    phone: { type: string, description: The number the driver calls (not proof of identity) }
+                    items: { type: array, items: { $ref: "#/components/schemas/Item" } }
+                    totalAmount: { type: number, minimum: 0, example: 7.5 }
+                    lat: { type: [number, "null"] }
+                    lng: { type: [number, "null"] }
+                    landmark: { type: string, minLength: 1 }
       responses:
         "201":
           description: Created
@@ -544,6 +557,126 @@ paths:
           description: A retry of an order already created (same id)
           content: { application/json: { schema: { $ref: "#/components/schemas/OrderWithPayment" } } }
         "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/quote:
+    post:
+      tags: [Customer — orders]
+      summary: Price a ride or a delivery, exactly as POST /orders will
+      description: |
+        Writes nothing. A ride quote lists every vehicle with its fare and how many free drivers are near
+        the pickup (a count, never positions), so nobody pays for a ride with no driver. 60 a minute.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/JobRequest" } } }
+      responses:
+        "200": { description: Quote, content: { application/json: { schema: { type: object, properties: { quote: { $ref: "#/components/schemas/Quote" } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { description: An item in the cart is no longer available, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/catalog:
+    get:
+      tags: [Public]
+      summary: The generic catalog (active categories and items with prices)
+      description: Public and cacheable (5 minutes). The server prices carts from these rows, never from the client.
+      security: []
+      responses:
+        "200":
+          description: Categories with their items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  categories: { type: array, items: { $ref: "#/components/schemas/CatalogCategory" } }
+
+  /api/places:
+    get:
+      tags: [Public]
+      summary: Fixed places (markets, landmarks, districts) for search and pickup
+      security: []
+      responses:
+        "200":
+          description: Active places
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  places: { type: array, items: { $ref: "#/components/schemas/Place" } }
+
+  /api/orders/{id}/cancel:
+    post:
+      tags: [Customer — orders]
+      summary: Cancel before a driver has it
+      description: |
+        PENDING_PAYMENT or PAID_UNASSIGNED only. A paid one fails into the refund ledger (a refund is
+        opened in the same transaction). Refused while a wallet prompt is still pending.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200": { description: Cancelled, content: { application/json: { schema: { type: object, properties: { order: { $ref: "#/components/schemas/Order" } } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: A driver is already on the way, or a payment prompt is pending, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/orders/{id}/pay:
+    post:
+      tags: [Customer — orders]
+      summary: Pay in the app — a WaafiPay prompt on the customer's phone (EVC Plus, Zaad, Sahal)
+      description: |
+        Only when WaafiPay is configured (`appPay` in the payment instruction is non-empty). Answers 202
+        at once; the customer approves with their PIN and the result arrives over the socket
+        (`payment_attempt`, then `payment_confirmed`). One pending prompt per order: a second tap returns
+        the first. After an unreadable answer, no new prompt for 10 minutes. 10 per 15 minutes.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [wallet, phone]
+              properties:
+                wallet: { type: string, enum: [evc, zaad, sahal] }
+                phone: { type: string, description: The Somali wallet number that pays }
+      responses:
+        "202": { description: Prompt sent, content: { application/json: { schema: { type: object, properties: { attempt: { $ref: "#/components/schemas/PaymentAttempt" } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { description: No such order, or in-app payment not available, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: Already paid, or the last answer was unclear, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/orders/{id}/payment:
+    get:
+      tags: [Customer — orders]
+      summary: The latest in-app payment attempt (for the pay screen after a reload)
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200": { description: Attempt or null, content: { application/json: { schema: { type: object, properties: { attempt: { oneOf: [{ $ref: "#/components/schemas/PaymentAttempt" }, { type: "null" }] } } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/orders/{id}/driver-location:
+    get:
+      tags: [Customer — orders]
+      summary: Where my driver is (first paint of the map)
+      description: Only while DISPATCHED or IN_TRANSIT. Live updates come over the socket as `driver_location`.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200":
+          description: Position or null
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  location:
+                    type: [object, "null"]
+                    properties:
+                      lat: { type: number }
+                      lng: { type: number }
+                      accuracy: { type: [integer, "null"] }
+                      heading: { type: [integer, "null"] }
+                      at: { type: string, format: date-time }
+                      name: { type: string }
+                      vehicle: { type: string, enum: [bajaj, car, moto] }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/orders/{id}/paid:
     post:
@@ -765,15 +898,93 @@ paths:
     post:
       tags: [Driver]
       summary: Confirm pickup (DISPATCHED → IN_TRANSIT)
-      description: Requires the pickup photo. Records a proof row with the GPS fix in the same transaction as the transition.
+      description: |
+        A delivery requires the pickup photo. A ride requires the rider's 4-digit `code` (5 tries), or a
+        `noCodeReason` (flagged for review). Records a proof row with the GPS fix in the same transaction.
       parameters: [{ $ref: "#/components/parameters/OrderId" }]
       requestBody:
-        content: { application/json: { schema: { type: object, properties: { fix: { $ref: "#/components/schemas/Fix" } } } } }
+        content: { application/json: { schema: { type: object, properties: { fix: { $ref: "#/components/schemas/Fix" }, code: { type: string, pattern: "^[0-9]{4}$" }, noCodeReason: { type: string } } } } }
       responses:
         "200": { description: Picked up, content: { application/json: { schema: { type: object, properties: { order: { $ref: "#/components/schemas/Order" } } } } } }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { description: Not waiting for pickup, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
         "422": { description: '"take a photo of the items first"', content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/driver/orders/{id}/dropoff:
+    post:
+      tags: [Driver]
+      summary: Finish a ride (IN_TRANSIT → DELIVERED)
+      description: The drop-off fix is the evidence. Far from the destination, or no fix, is flagged for review — never refused.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { fix: { $ref: "#/components/schemas/Fix" }, note: { type: string, maxLength: 200 } } } } }
+      responses:
+        "200": { description: Ride finished, content: { application/json: { schema: { type: object, properties: { order: { $ref: "#/components/schemas/Order" } } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Not a ride, or not started, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/driver/orders/{id}/release:
+    post:
+      tags: [Driver]
+      summary: Give a job back before pickup (DISPATCHED → PAID_UNASSIGNED)
+      description: Re-dispatched to the next free driver, never back to this one. Audited.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, minLength: 3 } } } } }
+      responses:
+        "200": { description: Released, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean }, redispatched: { type: boolean } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Already picked up, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/driver/me:
+    get:
+      tags: [Driver]
+      summary: My vehicle and online switch
+      responses:
+        "200":
+          description: Driver
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  driver: { type: object, properties: { id: { type: string }, name: { type: string }, vehicle: { type: string, enum: [bajaj, car, moto] }, online: { type: boolean } } }
+
+  /api/driver/online:
+    post:
+      tags: [Driver]
+      summary: Go online (get jobs) or offline (keep the jobs you have, get no new ones)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [online], properties: { online: { type: boolean } } } } }
+      responses:
+        "200": { description: Switched, content: { application/json: { schema: { type: object, properties: { driver: { type: object } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/driver/location:
+    post:
+      tags: [Driver]
+      summary: My position (HTTP fallback; the socket `location` frame is the usual path)
+      description: |
+        Only the latest position is kept (no trail). At most one write per 4 s; outside Somalia is refused.
+        Sent to the customers of this driver's active jobs and to operators. 30 a minute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Fix"
+                - type: object
+                  properties:
+                    heading: { type: number, minimum: 0, maximum: 359 }
+                    speed: { type: number, description: km/h }
+      responses:
+        "200": { description: Recorded (or throttled), content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { description: Too many updates, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   /api/driver/orders/{id}/delivery-proof:
     post:
@@ -1227,6 +1438,128 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/AdminsOnly" }
 
+  /api/operator/drivers/{driverId}/vehicle:
+    post:
+      tags: [Admin]
+      summary: Set what a driver drives (decides which rides they get)
+      parameters:
+        - { name: driverId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [vehicle], properties: { vehicle: { type: string, enum: [bajaj, car, moto] } } } } }
+      responses:
+        "200": { description: Updated, content: { application/json: { schema: { type: object, properties: { driver: { type: object } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { description: Admins only, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/operator/map:
+    get:
+      tags: [Operator]
+      summary: Drivers' latest positions and their active jobs (live updates over the socket)
+      responses:
+        "200":
+          description: Positions from the last 24 hours
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  drivers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        driver_id: { type: string }
+                        name: { type: string }
+                        vehicle: { type: string }
+                        online: { type: boolean }
+                        lat: { type: number }
+                        lng: { type: number }
+                        updated_at: { type: string, format: date-time }
+                        jobs: { type: array, items: { type: object } }
+
+  /api/operator/catalog:
+    get:
+      tags: [Operator — catalog]
+      summary: The whole catalog and places list, hidden rows included
+      responses:
+        "200":
+          description: Catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  categories: { type: array, items: { $ref: "#/components/schemas/CatalogCategory" } }
+                  places: { type: array, items: { $ref: "#/components/schemas/Place" } }
+
+  /api/operator/catalog/categories:
+    post:
+      tags: [Operator — catalog]
+      summary: Add a category (admin; audited)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CatalogCategoryInput" } } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { description: Admins only, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/operator/catalog/categories/{id}:
+    patch:
+      tags: [Operator — catalog]
+      summary: Change or hide a category (admin; audited). Nothing is deleted.
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CatalogCategoryInput" } } } }
+      responses:
+        "200": { description: Updated, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { description: Admins only, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/operator/catalog/items:
+    post:
+      tags: [Operator — catalog]
+      summary: Add an item with its price (admin; audited)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CatalogItemInput" } } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { description: Admins only, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/operator/catalog/items/{id}:
+    patch:
+      tags: [Operator — catalog]
+      summary: Change an item's price or name, or hide it (admin; audited with before/after)
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CatalogItemInput" } } } }
+      responses:
+        "200": { description: Updated, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { description: Admins only, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/operator/places:
+    post:
+      tags: [Operator — catalog]
+      summary: Add a place (admin; audited). Must be inside Somalia.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PlaceInput" } } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { description: Admins only, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/operator/places/{id}:
+    patch:
+      tags: [Operator — catalog]
+      summary: Move, rename or hide a place (admin; audited)
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PlaceInput" } } } }
+      responses:
+        "200": { description: Updated, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { description: Admins only, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/operator/drivers/{driverId}/active:
     post:
       tags: [Admin]
@@ -1418,6 +1751,83 @@ components:
       type: string
       enum: [PENDING_PAYMENT, PAID_UNASSIGNED, DISPATCHED, IN_TRANSIT, DELIVERED, FAILED_REFUND]
 
+    JobRequest:
+      type: object
+      required: [kind, phone]
+      properties:
+        kind: { type: string, enum: [RIDE, DELIVERY] }
+        id: { type: string, format: uuid }
+        phone: { type: string, description: The number the driver calls }
+        vehicle: { type: string, enum: [bajaj, car], description: Rides }
+        pickup: { $ref: "#/components/schemas/PointOrPlace" }
+        pickupNote: { type: string, maxLength: 200 }
+        dropoff: { $ref: "#/components/schemas/PointOrPlace" }
+        pickupPlaceId: { type: integer, description: "Deliveries: the market (default: nearest to the door)" }
+        landmark: { type: string, description: Required for a delivery }
+        expectedTotal: { type: string, description: The total the customer saw; a mismatch is a 409 }
+        cart:
+          type: object
+          properties:
+            lines: { type: array, maxItems: 30, items: { type: object, properties: { itemId: { type: integer }, qty: { type: integer, minimum: 1, maximum: 50 } } } }
+            custom: { type: object, properties: { text: { type: string, maxLength: 300 }, budget: { type: number, minimum: 0.5, maximum: 500 } } }
+
+    PointOrPlace:
+      oneOf:
+        - { type: object, required: [lat, lng], properties: { lat: { type: number }, lng: { type: number } } }
+        - { type: object, required: [placeId], properties: { placeId: { type: integer } } }
+
+    Quote:
+      type: object
+      properties:
+        kind: { type: string, enum: [RIDE, DELIVERY] }
+        distance_m: { type: [integer, "null"] }
+        minutes: { type: [integer, "null"] }
+        route_source: { type: string, enum: [osrm, estimate, none] }
+        pickup: { type: [object, "null"] }
+        dropoff: { type: object }
+        subtotal: { type: string, description: Deliveries }
+        fee: { type: string, description: Deliveries }
+        total: { type: string, description: Deliveries }
+        items: { type: array, items: { $ref: "#/components/schemas/Item" } }
+        options:
+          type: array
+          description: Rides — one per vehicle
+          items: { type: object, properties: { vehicle: { type: string }, fee: { type: string }, total: { type: string }, available: { type: integer } } }
+
+    PaymentAttempt:
+      type: object
+      properties:
+        orderId: { type: string, format: uuid }
+        attemptId: { type: string, format: uuid }
+        status: { type: string, enum: [pending, approved, declined, unknown] }
+        wallet: { type: string, enum: [evc, zaad, sahal] }
+        detail: { type: [string, "null"] }
+
+    CatalogCategory:
+      type: object
+      properties:
+        id: { type: integer }
+        name_en: { type: string }
+        name_so: { type: string }
+        icon: { type: string }
+        items: { type: array, items: { type: object, properties: { id: { type: integer }, name_en: { type: string }, name_so: { type: string }, unit_en: { type: string }, unit_so: { type: string }, price: { type: string } } } }
+
+    CatalogCategoryInput:
+      type: object
+      properties: { name_en: { type: string }, name_so: { type: string }, icon: { type: string }, sort: { type: integer }, active: { type: boolean } }
+
+    CatalogItemInput:
+      type: object
+      properties: { category_id: { type: integer }, name_en: { type: string }, name_so: { type: string }, unit_en: { type: string }, unit_so: { type: string }, price: { type: number }, sort: { type: integer }, active: { type: boolean } }
+
+    Place:
+      type: object
+      properties: { id: { type: integer }, kind: { type: string, enum: [market, landmark, district] }, name_en: { type: string }, name_so: { type: string }, city: { type: string }, lat: { type: number }, lng: { type: number } }
+
+    PlaceInput:
+      type: object
+      properties: { kind: { type: string, enum: [market, landmark, district] }, name_en: { type: string }, name_so: { type: string }, city: { type: string }, lat: { type: number }, lng: { type: number }, sort: { type: integer }, active: { type: boolean } }
+
     Item:
       type: object
       properties:
@@ -1440,6 +1850,14 @@ components:
         payment_claimed_at: { type: [string, "null"], format: date-time }
         payment_claim_ref: { type: [string, "null"] }
         payment_claim_wallet: { type: [string, "null"] }
+        kind: { type: string, enum: [DELIVERY, RIDE] }
+        pickup_lat: { type: [number, "null"] }
+        pickup_lng: { type: [number, "null"] }
+        pickup_text: { type: [string, "null"] }
+        vehicle: { type: [string, "null"], enum: [bajaj, car, null] }
+        distance_m: { type: [integer, "null"] }
+        subtotal: { type: [string, "null"] }
+        fee: { type: [string, "null"] }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
@@ -1457,6 +1875,10 @@ components:
               ussdUri: { type: string, example: "tel:*712*612345678*7.50%23", description: "Use verbatim — the # is pre-encoded as %23" }
         ussdUri: { type: [string, "null"], description: Legacy single-wallet field }
         paymentNote: { type: [string, "null"] }
+        appPay:
+          type: array
+          description: Wallets the app can charge directly (POST /orders/{id}/pay). Empty until WaafiPay is configured.
+          items: { type: object, properties: { id: { type: string, enum: [evc, zaad, sahal] }, name: { type: string } } }
 
     OrderWithPayment:
       allOf:
@@ -1487,7 +1909,7 @@ components:
       type: object
       properties:
         step: { type: string, enum: [pickup, delivery] }
-        method: { type: string, enum: [photo, code, photo_no_code] }
+        method: { type: string, enum: [photo, code, photo_no_code, no_code, dropoff] }
         note: { type: [string, "null"] }
         distance_m: { type: [integer, "null"], description: From the driver's fix to the customer's pin }
         accuracy_m: { type: [integer, "null"] }

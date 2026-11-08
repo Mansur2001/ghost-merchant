@@ -6,7 +6,14 @@
 //   chat, and photos. A new route without it is a data breach, not a missing feature.
 //   The ownership rule itself lives in domain/access.js — don't re-implement it inline.
 import { Router, raw } from 'express';
-import { createOrder, postMessage } from '../commands/orders.js';
+import { createOrder, postMessage, cancelOrder } from '../commands/orders.js';
+import { placeOrder, quote } from '../commands/checkout.js';
+import { startWalletPayment, snapshot } from '../commands/providerPayments.js';
+import { latestAttempt } from '../queries/payments.js';
+import { getCatalog, getPlaces } from '../queries/catalog.js';
+import { getDriverLocationForOrder } from '../queries/drivers.js';
+import { PricingError } from '../domain/pricing.js';
+import { isInfraError } from '../middleware/errorHandler.js';
 import { claimPayment, PaymentError } from '../commands/payments.js';
 import { getOrderTimeline, getMessages, getOrdersByUser, getHandoff, getProofs } from '../queries/orders.js';
 import { savePhoto } from '../commands/photos.js';
@@ -55,29 +62,64 @@ ordersRouter.get('/orders/mine', customerOnly, async (req, res) => {
 // The owning account is taken from the session, NOT the body — otherwise a verified customer
 // could create orders (and chat threads) in someone else's account. `phone` in the body is
 // only the number the driver calls.
-ordersRouter.post('/orders', customerOnly, async (req, res) => {
+ordersRouter.post('/orders', customerOnly, async (req, res, next) => {
   try {
-    const { id, phone, items, totalAmount, lat, lng, landmark } = req.body || {};
+    const body = req.body || {};
+    // `kind` = the priced checkout (commands/checkout.js). Without it: the legacy shape old
+    // app builds send (a typed request and total), kept so they don't break mid-release.
     // `id` is the client's own UUID when it has one. Retrying a create whose response was
     // lost returns the SAME order (201 -> 200) instead of billing the customer twice.
-    const { order, created } = await createOrder({
-      id,
-      userId: req.auth.uid,
-      contactPhone: phone,
-      items,
-      totalAmount,
-      lat,
-      lng,
-      landmark,
-    });
+    const { order, created } = body.kind
+      ? await placeOrder({ userId: req.auth.uid, body })
+      : await createOrder({
+        id: body.id,
+        userId: req.auth.uid,
+        contactPhone: body.phone,
+        items: body.items,
+        totalAmount: body.totalAmount,
+        lat: body.lat,
+        lng: body.lng,
+        landmark: body.landmark,
+      });
     res.status(created ? 201 : 200).json({
       order,
       created,
       ...buildPaymentInstruction(order),
     });
   } catch (err) {
+    if (err instanceof PricingError) {
+      return res.status(err.status).json({ error: err.message, ...(err.quote ? { quote: err.quote } : {}) });
+    }
+    if (isInfraError(err)) return next(err);
     res.status(400).json({ error: err.message });
   }
+});
+
+// POST /api/quote — what a job would cost, priced exactly as POST /orders will price it.
+ordersRouter.post(
+  '/quote',
+  customerOnly,
+  rateLimit({ windowMs: 60 * 1000, max: 60, message: 'too many requests' }),
+  async (req, res, next) => {
+    try {
+      res.json({ quote: await quote(req.body || {}) });
+    } catch (err) {
+      if (err instanceof PricingError) return res.status(err.status).json({ error: err.message });
+      next(err);
+    }
+  }
+);
+
+// The generic catalog and the fixed places. Public: the same for everyone, nothing personal,
+// and the checkout needs it before sign-in is worth asking for.
+ordersRouter.get('/catalog', async (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.json({ categories: await getCatalog() });
+});
+
+ordersRouter.get('/places', async (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.json({ places: await getPlaces() });
 });
 
 ordersRouter.get('/orders/:id', requireAuth, requireOrderAccess, (req, res) => {
@@ -148,6 +190,54 @@ ordersRouter.post(
     }
   }
 );
+
+// POST /api/orders/:id/cancel — before a driver has it. Paid already: a refund is opened.
+ordersRouter.post(
+  '/orders/:id/cancel',
+  customerOnly,
+  requireOrderAccess,
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: 'too many requests' }),
+  async (req, res) => {
+    const result = await cancelOrder({ orderId: req.params.id });
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    res.json({ order: result });
+  }
+);
+
+// POST /api/orders/:id/pay { wallet, phone } — a WaafiPay prompt on the customer's phone.
+// 202: the result comes over the socket (payment_attempt, then payment_confirmed).
+ordersRouter.post(
+  '/orders/:id/pay',
+  customerOnly,
+  requireOrderAccess,
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: 'too many requests' }),
+  async (req, res, next) => {
+    try {
+      const attempt = await startWalletPayment({
+        orderId: req.params.id,
+        wallet: req.body?.wallet,
+        phone: req.body?.phone,
+      });
+      res.status(202).json({ attempt: snapshot(attempt) });
+    } catch (err) {
+      if (err instanceof PaymentError) return res.status(err.status).json({ error: err.message });
+      next(err);
+    }
+  }
+);
+
+ordersRouter.get('/orders/:id/payment', customerOnly, requireOrderAccess, async (req, res) => {
+  res.json({ attempt: await latestAttempt(req.params.id) });
+});
+
+// Where the assigned driver is, for the map's first paint (the socket carries the rest).
+// Only while they are on the way: before assignment there is no driver to show, and after the
+// job the customer has no business knowing where that person went next.
+ordersRouter.get('/orders/:id/driver-location', customerOnly, requireOrderAccess, async (req, res) => {
+  const o = req.order;
+  if (o.driver_id == null || !['DISPATCHED', 'IN_TRANSIT'].includes(o.status)) return res.json({ location: null });
+  res.json({ location: await getDriverLocationForOrder(o.driver_id) });
+});
 
 // ── Photos (MinIO-backed) ──
 // Customer attaches a reference photo to their own order.

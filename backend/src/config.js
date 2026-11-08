@@ -1,5 +1,7 @@
 // Central config. All secrets come from the environment (.env in dev, real env on the VPS).
 import dotenv from 'dotenv';
+import { parseTariff } from './domain/pricing.js';
+import { parseWaafiPay } from './domain/waafipay.js';
 import { parseWallets } from './domain/wallets.js';
 dotenv.config();
 
@@ -79,6 +81,17 @@ export const config = {
   // See docs/PAYMENT_API.md. The secret signs the callbacks; boot refuses 'api' without one.
   paymentConfirmation: process.env.PAYMENT_CONFIRMATION || 'operator',
   paymentWebhookSecret: process.env.PAYMENT_WEBHOOK_SECRET || '',
+
+  // WaafiPay (EVC Plus, Zaad, Sahal): the customer gets a prompt on their phone and approves
+  // with their PIN; the approval confirms the order. Unset = not offered. Half-set refuses to
+  // boot (domain/waafipay.js). Works in either PAYMENT_CONFIRMATION mode.
+  waafipay: parseWaafiPay(process.env),
+
+  // Fares and delivery fees (domain/pricing.js). Defaults in code; each overridable.
+  pricing: parseTariff(process.env),
+
+  // Optional self-hosted OSRM for road distances (routing/route.js). Unset = straight line x 1.3.
+  routingUrl: process.env.ROUTING_URL || '',
 
   // Redis is OPTIONAL. Unset = single-instance mode (in-process bus + rate limiter), which
   // is exactly how this ran before P2. Set it to run more than one backend container.

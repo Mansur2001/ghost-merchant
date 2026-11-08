@@ -17,6 +17,7 @@ export const SEED_OPERATORS = [
 export const SEED_DRIVERS = [
   { name: 'Amina', msisdn: '+252619876543', pin: '1234' },
   { name: 'Bashir', msisdn: '+252651112223', pin: '5678' },
+  { name: 'Cali', msisdn: '+252631234567', pin: '2468' },
 ];
 
 export const SEED_CUSTOMERS = ['+252612345678', '+252651234567', '+252771234567'];

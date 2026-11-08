@@ -18,6 +18,7 @@ const REQUIRED_INDEXES = {
   idx_refunds_one_open: 'one open refund per order',
   idx_refunds_owed: 'the reconciliation queue',
   idx_order_proofs_review: "the operator's queue of deliveries to check",
+  idx_payment_attempts_one_pending: 'one wallet prompt at a time per order (no double charge)',
 };
 
 const REQUIRED_CHECKS = {
@@ -25,7 +26,11 @@ const REQUIRED_CHECKS = {
   order_photos_kind_check: 'photo kind is one of the three known values',
   delivery_handoffs_code_check: 'a delivery code is exactly 4 digits',
   order_proofs_step_check: 'proof step is pickup or delivery',
-  order_proofs_method_check: 'proof method is photo, code or photo_no_code',
+  order_proofs_method_check: 'proof method is one of the known values',
+  orders_ride_shape_check: 'a ride always has a vehicle, a pickup and a destination',
+  orders_amount_parts_check: 'subtotal + fee is the total the customer pays',
+  catalog_items_price_check: 'a catalog price is positive',
+  payment_attempts_status_check: 'payment attempt status is one of the known values',
   refunds_amount_check: 'a refund can never be negative',
   refunds_status_check: 'refund status is one of owed/settled/waived',
   users_has_login: 'every customer account can be signed in to (phone or email)',

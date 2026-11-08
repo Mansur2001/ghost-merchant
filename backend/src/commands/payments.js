@@ -104,7 +104,11 @@ export async function claimPayment({ orderId, reference, wallet: walletId, walle
 // (the API always does), must equal the order total to the cent.
 //
 // A paid order is dispatched in the same transaction — no human chooses the driver.
-export async function confirmPayment({ orderId, reference, amount, actor }) {
+//
+// `provider` names the rail on the payment row ('manual' = an operator; 'waafipay' = the
+// gateway approved it). `withinTx(tx)` lets a caller record its own bookkeeping (the gateway
+// attempt) in the same commit as the payment, so the two can never disagree after a crash.
+export async function confirmPayment({ orderId, reference, amount, actor, provider = 'manual', payer = null, withinTx = null }) {
   const ref = referenceOrThrow(reference);
   if (!ref) throw new PaymentError('enter the transaction number from the payment');
   const receiptId = ref;
@@ -141,10 +145,10 @@ export async function confirmPayment({ orderId, reference, amount, actor }) {
       data: {
         order_id: orderId,
         telecom_receipt_id: receiptId,
-        sender_msisdn: order.user_phone,
+        sender_msisdn: payer || order.user_phone,
         amount: order.total_amount,
         matched: true,
-        provider: 'manual',
+        provider,
         sender_name: actor,
       },
     });
@@ -164,6 +168,7 @@ export async function confirmPayment({ orderId, reference, amount, actor }) {
       actor, action: 'payment.confirmed', subject: `order:${orderId}`,
       detail: { reference: ref, amount: String(order.total_amount) },
     }, { client: tx });
+    if (withinTx) await withinTx(tx);
     // A free driver gets it now; otherwise it waits for the next one to free up.
     const driver = await dispatchOrder(tx, orderId);
     return driver ? { ...updated, status: STATUS.DISPATCHED, driver_id: driver.id } : updated;

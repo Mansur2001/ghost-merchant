@@ -33,7 +33,7 @@ export class ProofError extends Error {
 // checks and write two proofs. The UNIQUE (order_id, step) would catch it; this says why.
 async function lockOrder(tx, orderId) {
   const rows = await tx.$queryRaw`
-    SELECT id, status, lat, lng FROM orders WHERE id = ${orderId}::uuid FOR UPDATE
+    SELECT id, status, kind, lat, lng, pickup_lat, pickup_lng FROM orders WHERE id = ${orderId}::uuid FOR UPDATE
   `;
   if (!rows[0]) throw new ProofError('order not found', 404);
   return rows[0];
@@ -43,23 +43,81 @@ async function hasPhoto(tx, orderId, kind) {
   return Boolean(await tx.orderPhoto.findFirst({ where: { order_id: orderId, kind }, select: { id: true } }));
 }
 
-// Driver has the goods. Needs the pickup photo already uploaded.
-export async function confirmPickup({ orderId, actor, fix: rawFix }) {
+// The handoff code check, shared by a delivery's door step and a ride's pickup. Returns
+// { ok: true } or { fail } — never throws on a wrong code, so the caller can COMMIT the
+// attempt count before raising (see the header).
+async function checkHandoffCode(tx, orderId, code) {
+  const rows = await tx.$queryRaw`
+    SELECT code, attempts FROM delivery_handoffs WHERE order_id = ${orderId}::uuid FOR UPDATE
+  `;
+  const handoff = rows[0];
+  if (!handoff) return { fail: 'no_code' };
+  if (handoff.attempts >= HANDOFF_MAX_ATTEMPTS) return { fail: 'locked' };
+  if (!handoffMatches(handoff.code, String(code))) {
+    await tx.deliveryHandoff.update({
+      where: { order_id: orderId },
+      data: { attempts: { increment: 1 } },
+    });
+    return { fail: 'wrong', left: HANDOFF_MAX_ATTEMPTS - handoff.attempts - 1 };
+  }
+  await tx.deliveryHandoff.update({ where: { order_id: orderId }, data: { verified_at: new Date() } });
+  return { ok: true };
+}
+
+function raiseCodeFailure(outcome, { fallback }) {
+  if (outcome.fail === 'wrong') {
+    // Say how many are left: a driver who knows they have one try left calls the customer
+    // instead of guessing.
+    throw new ProofError(
+      outcome.left > 0 ? `wrong code — ${outcome.left} tries left` : 'wrong code — no tries left',
+      422,
+      { triesLeft: outcome.left }
+    );
+  }
+  if (outcome.fail === 'locked') {
+    throw new ProofError(`too many wrong codes — ${fallback} instead`, 423, { triesLeft: 0 });
+  }
+  if (outcome.fail === 'no_code') {
+    throw new ProofError(`this order has no code — ${fallback} instead`, 409);
+  }
+}
+
+// Driver has the goods (a delivery: the pickup photo must be uploaded) or the rider is in
+// the car (a ride: the rider's `code`, or a `noCodeReason`, flagged).
+export async function confirmPickup({ orderId, actor, fix: rawFix, code, noCodeReason }) {
   const fix = parseFix(rawFix);
-  const order = await withCriticalTransaction(async (tx) => {
+  const outcome = await withCriticalTransaction(async (tx) => {
     const row = await lockOrder(tx, orderId);
     if (row.status !== STATUS.DISPATCHED) {
       throw new ProofError(`this order is not waiting for pickup (${row.status})`);
     }
+    if (row.kind === 'RIDE') return ridePickup(tx, row, { orderId, actor, fix, code, noCodeReason });
     if (!(await hasPhoto(tx, orderId, 'pickup_proof'))) {
       throw new ProofError('take a photo of the items first', 422);
     }
     const proof = buildProof({ step: 'pickup', method: 'photo', fix, order: row });
     await tx.orderProof.create({ data: { order_id: orderId, actor, ...proof } });
-    return transitionOrder(orderId, STATUS.IN_TRANSIT, actor, 'items secured (photo)', { client: tx });
+    return { order: await transitionOrder(orderId, STATUS.IN_TRANSIT, actor, 'items secured (photo)', { client: tx }) };
   });
+  if (outcome.fail) raiseCodeFailure(outcome, { fallback: 'give a reason' });
   wakeOutbox();
-  return order;
+  return outcome.order;
+}
+
+async function ridePickup(tx, row, { orderId, actor, fix, code, noCodeReason }) {
+  const usingCode = code !== undefined && code !== null && code !== '';
+  const reason = usingCode ? null : cleanReason(noCodeReason);
+  if (usingCode && !isHandoffCode(String(code))) throw new ProofError('the code is 4 digits', 400);
+  if (!usingCode && !reason) throw new ProofError('enter the rider\'s code, or say why you can\'t', 400);
+  if (usingCode) {
+    const check = await checkHandoffCode(tx, orderId, code);
+    if (check.fail) return check;
+  }
+  const method = usingCode ? 'code' : 'no_code';
+  const proof = buildProof({ step: 'pickup', method, fix, order: row, note: reason });
+  await tx.orderProof.create({ data: { order_id: orderId, actor, ...proof } });
+  const note = usingCode ? 'rider picked up (rider code)' : `rider picked up without code: ${reason}`;
+  return { order: await transitionOrder(orderId, STATUS.IN_TRANSIT, actor, note, { client: tx }) };
 }
 
 // Driver has handed the goods over. Either `code` (the customer's 4 digits) or `noCodeReason`
@@ -78,23 +136,12 @@ export async function confirmDelivery({ orderId, actor, code, noCodeReason, fix:
     if (row.status !== STATUS.IN_TRANSIT) {
       throw new ProofError(`this order is not out for delivery (${row.status})`);
     }
+    if (row.kind === 'RIDE') throw new ProofError('a ride is finished with "Drop off", not a code', 409);
 
     let method;
     if (usingCode) {
-      const rows = await tx.$queryRaw`
-        SELECT code, attempts FROM delivery_handoffs WHERE order_id = ${orderId}::uuid FOR UPDATE
-      `;
-      const handoff = rows[0];
-      if (!handoff) return { fail: 'no_code' };
-      if (handoff.attempts >= HANDOFF_MAX_ATTEMPTS) return { fail: 'locked' };
-      if (!handoffMatches(handoff.code, String(code))) {
-        await tx.deliveryHandoff.update({
-          where: { order_id: orderId },
-          data: { attempts: { increment: 1 } },
-        });
-        return { fail: 'wrong', left: HANDOFF_MAX_ATTEMPTS - handoff.attempts - 1 };
-      }
-      await tx.deliveryHandoff.update({ where: { order_id: orderId }, data: { verified_at: new Date() } });
+      const check = await checkHandoffCode(tx, orderId, code);
+      if (check.fail) return check;
       method = 'code';
     } else {
       if (!(await hasPhoto(tx, orderId, 'delivery_proof'))) {
@@ -115,23 +162,28 @@ export async function confirmDelivery({ orderId, actor, code, noCodeReason, fix:
     return { order };
   });
 
-  if (outcome.fail === 'wrong') {
-    // Say how many are left: a driver who knows they have one try left calls the customer
-    // instead of guessing.
-    throw new ProofError(
-      outcome.left > 0 ? `wrong code — ${outcome.left} tries left` : 'wrong code — no tries left',
-      422,
-      { triesLeft: outcome.left }
-    );
-  }
-  if (outcome.fail === 'locked') {
-    throw new ProofError('too many wrong codes — deliver with a photo instead', 423, { triesLeft: 0 });
-  }
-  if (outcome.fail === 'no_code') {
-    throw new ProofError('this order has no delivery code — deliver with a photo instead', 409);
-  }
+  if (outcome.fail) raiseCodeFailure(outcome, { fallback: 'deliver with a photo' });
   wakeOutbox();
   return outcome.order;
+}
+
+// A ride is over: the rider got out. The drop-off fix is the evidence; far from the
+// destination or no fix at all is flagged for the Deliveries review, never refused.
+export async function confirmDropoff({ orderId, actor, fix: rawFix, note: rawNote }) {
+  const fix = parseFix(rawFix);
+  const note = cleanReason(rawNote);
+  const order = await withCriticalTransaction(async (tx) => {
+    const row = await lockOrder(tx, orderId);
+    if (row.kind !== 'RIDE') throw new ProofError('a delivery is finished with the customer\'s code', 409);
+    if (row.status !== STATUS.IN_TRANSIT) {
+      throw new ProofError(`this ride has not started (${row.status})`);
+    }
+    const proof = buildProof({ step: 'delivery', method: 'dropoff', fix, order: row, note });
+    await tx.orderProof.create({ data: { order_id: orderId, actor, ...proof } });
+    return transitionOrder(orderId, STATUS.DELIVERED, actor, note ? `ride finished: ${note}` : 'ride finished', { client: tx });
+  });
+  wakeOutbox();
+  return order;
 }
 
 // Operator looked at a flagged proof. Doesn't change the order — it clears the review queue

@@ -6,9 +6,11 @@ import { requireOrderAccess } from '../middleware/authorize.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { transitionOrder, postMessage } from '../commands/orders.js';
 import { savePhoto } from '../commands/photos.js';
-import { confirmPickup, confirmDelivery, ProofError } from '../commands/proofs.js';
+import { confirmPickup, confirmDelivery, confirmDropoff, ProofError } from '../commands/proofs.js';
 import { cleanReason } from '../domain/proof.js';
-import { dispatchWaitingSoon } from '../commands/dispatch.js';
+import { dispatchWaitingSoon, releaseOrder } from '../commands/dispatch.js';
+import { setDriverOnline, recordDriverLocation } from '../commands/locations.js';
+import { getDriverSelf } from '../queries/drivers.js';
 import { getDriverQueue, getShoppingList } from '../queries/orders.js';
 import { STATUS } from '../domain/stateMachine.js';
 import { parsePhone } from '../domain/phone.js';
@@ -76,12 +78,15 @@ function proofError(err, res, next) {
 }
 
 // POST /api/driver/orders/:id/secured  { fix? } — items in hand. Needs the pickup photo.
+// A ride: { code } | { noCodeReason } — the rider's code proves the right person got in.
 driversRouter.post('/driver/orders/:id/secured', ...myOrder, async (req, res, next) => {
   try {
     const order = await confirmPickup({
       orderId: req.params.id,
       actor: `driver:${req.auth.id}`,
       fix: req.body?.fix,
+      code: req.body?.code,
+      noCodeReason: req.body?.noCodeReason,
     });
     res.json({ order });
   } catch (err) {
@@ -107,6 +112,61 @@ driversRouter.post('/driver/orders/:id/delivered', ...myOrder, async (req, res, 
     proofError(err, res, next);
   }
 });
+
+// POST /api/driver/orders/:id/dropoff  { fix?, note? } — a ride is over.
+driversRouter.post('/driver/orders/:id/dropoff', ...myOrder, async (req, res, next) => {
+  try {
+    const order = await confirmDropoff({
+      orderId: req.params.id,
+      actor: `driver:${req.auth.id}`,
+      fix: req.body?.fix,
+      note: req.body?.note,
+    });
+    dispatchWaitingSoon();
+    res.json({ order });
+  } catch (err) {
+    proofError(err, res, next);
+  }
+});
+
+// POST /api/driver/orders/:id/release { reason } — give a job back before pickup. It goes to
+// the next free driver, never back to this one.
+driversRouter.post('/driver/orders/:id/release', ...myOrder, async (req, res) => {
+  const reason = cleanReason(req.body?.reason);
+  if (!reason) return res.status(400).json({ error: 'say why you can\'t take it' });
+  const result = await releaseOrder({ orderId: req.params.id, driverId: req.auth.id, reason });
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json(result);
+});
+
+// GET /api/driver/me — the switch and vehicle the app shows.
+driversRouter.get('/driver/me', driverOnly, async (req, res) => {
+  const me = await getDriverSelf(req.auth.id);
+  if (!me) return res.status(404).json({ error: 'not found' });
+  res.json({ driver: me });
+});
+
+// POST /api/driver/online { online } — "I want work" on or off. Going online can hand the
+// driver a waiting job at once; going offline keeps the jobs they already have.
+driversRouter.post('/driver/online', driverOnly, async (req, res) => {
+  if (typeof req.body?.online !== 'boolean') return res.status(400).json({ error: 'online must be true or false' });
+  const driver = await setDriverOnline({ driverId: req.auth.id, online: req.body.online });
+  if (driver.online) dispatchWaitingSoon();
+  res.json({ driver });
+});
+
+// POST /api/driver/location { lat, lng, accuracy?, heading?, speed? } — the HTTP path for a
+// position, for when the socket is down. The socket `location` frame is the usual one.
+driversRouter.post(
+  '/driver/location',
+  driverOnly,
+  rateLimit({ windowMs: 60 * 1000, max: 30, message: 'too many updates' }),
+  async (req, res) => {
+    const saved = await recordDriverLocation({ driverId: req.auth.id, raw: req.body });
+    if (!saved) return res.status(400).json({ error: 'not a usable position' });
+    res.json({ ok: true });
+  }
+);
 
 // POST /api/driver/orders/:id/failed  { reason } — a reason is required: it is what the
 // operator reads before deciding what is owed.
