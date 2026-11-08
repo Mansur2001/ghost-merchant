@@ -2,6 +2,7 @@
 import dotenv from 'dotenv';
 import { parseTariff } from './domain/pricing.js';
 import { parseWaafiPay } from './domain/waafipay.js';
+import { parseAssistant } from './domain/assistant.js';
 import { parseWallets } from './domain/wallets.js';
 dotenv.config();
 
@@ -89,6 +90,9 @@ export const config = {
 
   // Fares and delivery fees (domain/pricing.js). Defaults in code; each overridable.
   pricing: parseTariff(process.env),
+
+  // Help assistant: a hosted open model (Groq by default). Unset = FAQ answers only.
+  assistant: parseAssistant(process.env, { production: process.env.NODE_ENV === 'production' }),
 
   // Optional self-hosted OSRM for road distances (routing/route.js). Unset = straight line x 1.3.
   routingUrl: process.env.ROUTING_URL || '',

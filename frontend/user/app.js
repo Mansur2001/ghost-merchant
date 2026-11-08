@@ -1522,6 +1522,73 @@ $('pwSetBtn').addEventListener('click', async () => {
   loadPasswordBox();
 });
 
+// ── Help chat ──
+// FAQ first, then the small model on our own server (POST /assistant). It only explains:
+// nothing typed here is stored, and "Talk to a person" opens the order chat with an operator.
+// The conversation lives in memory on this phone, for this visit.
+let helpOrderId = null;
+let helpHistory = [];
+function helpLine(role, text) {
+  const div = document.createElement('div');
+  div.className = `msg ${role === 'user' ? 'user' : 'operator'}`;
+  div.textContent = text;
+  $('helpThread').appendChild(div);
+  $('helpThread').scrollTop = $('helpThread').scrollHeight;
+  return div;
+}
+function openHelp(orderId = null) {
+  if (helpOrderId !== orderId) { helpHistory = []; $('helpThread').replaceChildren(); }
+  helpOrderId = orderId;
+  $('helpAbout').textContent = orderId ? `${t('order.num')}${GMIds.shortId(orderId)}` : '';
+  $('helpChat').classList.toggle('hidden', !token);
+  if (!$('helpThread').children.length) helpLine('assistant', t('help.hello'));
+  showView('faqView');
+}
+async function sendHelp() {
+  const message = $('helpInput').value.trim();
+  if (!message || !token) return;
+  $('helpInput').value = '';
+  helpLine('user', message);
+  const wait = helpLine('assistant', '…');
+  $('helpSend').disabled = true;
+  const res = await api('/assistant', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, history: helpHistory, lang: GMI18n.lang(), ...(helpOrderId ? { orderId: helpOrderId } : {}) }),
+  });
+  $('helpSend').disabled = false;
+  if (res.error) { wait.textContent = GMI18n.err(res.error); return; }
+  wait.textContent = res.reply;
+  helpHistory = [...helpHistory, { role: 'user', content: message }, { role: 'assistant', content: res.reply }].slice(-6);
+  if (res.handoff) $('helpHuman').classList.add('pulse');
+}
+$('helpSend').addEventListener('click', sendHelp);
+$('helpInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendHelp(); });
+$('orderHelp').addEventListener('click', () => openHelp(order?.id || null));
+// A person: on an order, its chat (operators read it live); otherwise the owner's contact.
+$('helpHuman').addEventListener('click', async () => {
+  $('helpHuman').classList.remove('pulse');
+  if (helpOrderId) {
+    await resumeOrder(helpOrderId);
+    $('chatInput').focus();
+    $('chatInput').scrollIntoView({ block: 'center' });
+    return;
+  }
+  const res = await api('/signup/contact');
+  const c = res.contact;
+  if (!c) return;
+  const el = $('helpContact');
+  el.replaceChildren();
+  const mail = document.createElement('a');
+  mail.href = `mailto:${c.email}`;
+  mail.textContent = c.email;
+  const tel = document.createElement('a');
+  tel.href = `tel:${String(c.phone).replace(/[^\d+]/g, '')}`;
+  tel.textContent = c.phone;
+  el.append(t('help.contact'), ' ', mail, ' · ', tel);
+  el.classList.remove('hidden');
+});
+
 // ── Navigation: bottom tabs ──
 // Home = the new-order screen when signed in, the landing page when not. Orders and Account
 // need a session, so they send a signed-out visitor to sign-in first and come back after.
@@ -1542,7 +1609,7 @@ function showView(id, tab) {
   window.scrollTo(0, 0);
 }
 function goTab(tab, { start = false } = {}) {
-  if (tab === 'help') return showView('faqView');
+  if (tab === 'help') return openHelp(null);
   if (!token) {
     if (tab === 'home' && !start) return showView('landingView');
     afterSignIn = tab;

@@ -14,15 +14,16 @@ import { getCatalog, getPlaces } from '../queries/catalog.js';
 import { getDriverLocationForOrder } from '../queries/drivers.js';
 import { PricingError } from '../domain/pricing.js';
 import { isInfraError } from '../middleware/errorHandler.js';
+import { answer } from '../commands/assistant.js';
 import { claimPayment, PaymentError } from '../commands/payments.js';
-import { getOrderTimeline, getMessages, getOrdersByUser, getHandoff, getProofs } from '../queries/orders.js';
+import { getOrder, getOrderTimeline, getMessages, getOrdersByUser, getHandoff, getProofs } from '../queries/orders.js';
 import { savePhoto } from '../commands/photos.js';
 import { disputeDelivery, ProofError } from '../commands/proofs.js';
 import { listPhotos, getPhoto } from '../queries/photos.js';
 import { getObject } from '../storage/objectStore.js';
 import { buildPaymentInstruction } from '../domain/ussd.js';
 import { parsePhone } from '../domain/phone.js';
-import { senderForRole } from '../domain/access.js';
+import { senderForRole, canAccessOrder } from '../domain/access.js';
 import { isUuid } from '../domain/ids.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { requireOrderAccess } from '../middleware/authorize.js';
@@ -238,6 +239,30 @@ ordersRouter.get('/orders/:id/driver-location', customerOnly, requireOrderAccess
   if (o.driver_id == null || !['DISPATCHED', 'IN_TRANSIT'].includes(o.status)) return res.json({ location: null });
   res.json({ location: await getDriverLocationForOrder(o.driver_id) });
 });
+
+// POST /api/assistant { message, history?, lang?, orderId? } — the help chat. Answers only:
+// it can't change anything (domain/assistant.js). With an orderId it knows that order's
+// status — and only if it is the caller's own (same rule as every order route, deny = 404).
+ordersRouter.post(
+  '/assistant',
+  customerOnly,
+  // Per IP generously (many phones share one carrier IP), per account tightly: a CPU model is slow.
+  rateLimit({ windowMs: 10 * 60 * 1000, max: 120, message: 'too many questions — try again in a few minutes' }),
+  rateLimit({ windowMs: 10 * 60 * 1000, max: 30, key: (req) => `uid:${req.auth?.uid}`, message: 'too many questions — try again in a few minutes' }),
+  async (req, res, next) => {
+    try {
+      const { message, history, lang, orderId } = req.body || {};
+      let order = null;
+      if (orderId != null) {
+        order = isUuid(orderId) ? await getOrder(orderId) : null;
+        if (!order || !canAccessOrder(req.auth, order)) return res.status(404).json({ error: 'not found' });
+      }
+      res.json(await answer({ message, history, lang, order }));
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 // ── Photos (MinIO-backed) ──
 // Customer attaches a reference photo to their own order.

@@ -510,6 +510,14 @@
       'drv.ride.tile': 'Pick up: {p}',
       'drv.distance': '{d} from you',
       'drv.newJob': 'New job!',
+      // Help chat.
+      'help.title': 'Ask us',
+      'help.ph': 'Ask a question…',
+      'help.note': 'Automatic answers. They can\'t change your order or money.',
+      'help.human': 'Talk to a person',
+      'help.need': 'Need help?',
+      'help.hello': 'Hi! Ask me about paying, rides, deliveries or your order.',
+      'help.contact': 'Contact us:',
     },
 
     so: {
@@ -1005,6 +1013,14 @@
       'drv.ride.tile': 'Ka qaad: {p}',
       'drv.distance': '{d} ayay kaa jirtaa',
       'drv.newJob': 'Shaqo cusub!',
+      // Help chat.
+      'help.title': 'Na weydii',
+      'help.ph': 'Su’aal qor…',
+      'help.note': 'Jawaabo toos ah. Dalabkaaga iyo lacagta ma beddeli karaan.',
+      'help.human': 'La hadal qof',
+      'help.need': 'Caawimaad ma u baahan tahay?',
+      'help.hello': 'Soo dhawoow! I weydii lacag bixinta, safarka, keenista ama dalabkaaga.',
+      'help.contact': 'Nala soo xiriir:',
     },
   };
 
@@ -1059,6 +1075,7 @@
     [/^you can only give a job back before pickup/, 'err.releaseLate'],
     [/^say why you can.t take it/, 'err.needReason'],
     [/^not a usable position/, 'err.noFix'],
+    [/^too many questions/, 'err.tooMany'],
     [/^No connection/, 'net.offline'],
     [/^server unavailable/, 'err.server'],
     [/^database (unavailable|busy)/, 'err.db'],

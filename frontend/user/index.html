@@ -404,6 +404,7 @@
             <dt id="orderLandmarkLabel" data-i18n="order.landmark">Landmark</dt><dd id="orderLandmark"></dd>
           </dl>
           <button class="danger-ghost hidden" id="cancelBtn" type="button" data-i18n="order.cancel">Cancel</button>
+          <button class="ghost" id="orderHelp" type="button" data-i18n="help.need">Need help?</button>
           <div class="photos" id="photos" style="margin-top:12px;"></div>
         </div>
 
@@ -482,6 +483,24 @@
       <!-- Help -->
       <section id="faqView" class="hidden">
         <div class="screen-head"><h2 data-i18n="faq.title">FAQ</h2></div>
+        <!-- Help chat: FAQ answers first, then a small model on our own server. It only explains;
+             "Talk to a person" goes to the order chat with an operator. -->
+        <div class="card" id="helpChat">
+          <div class="between">
+            <div class="section-title" style="margin:0;" data-i18n="help.title">Ask us</div>
+            <span class="muted" id="helpAbout" style="font-size:12px;"></span>
+          </div>
+          <div class="thread" id="helpThread"></div>
+          <div class="composer">
+            <input id="helpInput" type="text" maxlength="500" data-i18n-ph="help.ph" placeholder="Ask a question…" />
+            <button id="helpSend" type="button" aria-label="Send">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </button>
+          </div>
+          <p class="muted" style="font-size:12px;margin:8px 0 0;" data-i18n="help.note">Automatic answers. They can't change your order or money.</p>
+          <button class="secondary" id="helpHuman" type="button" data-i18n="help.human">Talk to a person</button>
+          <div class="muted hidden" id="helpContact" style="margin-top:8px;"></div>
+        </div>
         <details open><summary data-i18n="faq.what.q"></summary>
           <p class="muted" data-i18n-html="faq.what.a"></p></details>
         <details><summary data-i18n="faq.pay.q"></summary>

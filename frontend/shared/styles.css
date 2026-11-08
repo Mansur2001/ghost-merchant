@@ -614,3 +614,7 @@ body.op { height: 100vh; height: 100dvh; overflow: hidden; }
   #mapWs { grid-template-rows: minmax(0, 40%) minmax(0, 1fr); }
   #mapWs > .list { display: flex; }
 }
+
+/* ── Help chat ── */
+#helpThread { max-height: 320px; min-height: 80px; }
+#helpHuman.pulse { border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-soft); }

@@ -573,6 +573,45 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "409": { description: An item in the cart is no longer available, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
+  /api/assistant:
+    post:
+      tags: [Customer — orders]
+      summary: Help chat — FAQ answers, then a hosted open model; never takes an action
+      description: |
+        Answers only: it cannot cancel, refund, pay or change anything. Strong FAQ matches are answered
+        directly (English or plain Somali); other questions go to a hosted open model (Groq by default)
+        when ASSISTANT_URL is set; it receives the question and an order STATE, never personal data. With `orderId` (the caller's own order, else 404) it knows that order's
+        state — never phone numbers, places or codes. Nothing typed here is stored. `handoff: true`
+        means: offer "Talk to a person". 30 per 10 minutes per account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message: { type: string, maxLength: 500 }
+                lang: { type: string, enum: [en, so] }
+                orderId: { type: string, format: uuid }
+                history:
+                  type: array
+                  maxItems: 6
+                  items: { type: object, properties: { role: { type: string, enum: [user, assistant] }, content: { type: string } } }
+      responses:
+        "200":
+          description: Reply
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reply: { type: string }
+                  source: { type: string, enum: [faq, ai, fallback] }
+                  handoff: { type: boolean }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { description: Too many questions, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
   /api/catalog:
     get:
       tags: [Public]

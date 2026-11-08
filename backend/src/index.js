@@ -170,6 +170,13 @@ async function boot() {
     config.pricing.errors.forEach((e) => console.error(`FATAL: tariff ${e}`));
     process.exit(1);
   }
+  if (config.assistant.errors.length) {
+    config.assistant.errors.forEach((e) => console.error(`FATAL: assistant ${e}`));
+    process.exit(1);
+  }
+  console.log(config.assistant.enabled
+    ? `[assistant] FAQ + ${config.assistant.model} at ${new URL(config.assistant.url).host}`
+    : '[assistant] FAQ answers only (no ASSISTANT_URL)');
   console.log(config.routingUrl ? `[routing] OSRM at ${config.routingUrl}` : '[routing] straight-line estimate (no ROUTING_URL)');
 
   // A half-set review login is silently disabled by reviewCodeFor(), which would surface as a
