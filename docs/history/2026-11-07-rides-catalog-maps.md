@@ -25,7 +25,7 @@ Branch `feature/rides-catalog-maps`. Not deployed yet: waiting for the owner's g
   via WaafiPay, pay orders, automatic refund to wallet, admin-paid withdrawals; append-only
   ledger. Holding balances is e-money (licence question) — the owner decides when to switch on.
 - **Help-chat model is hosted, not on the VPS.** Tried qwen2.5:1.5b on CPU in staging: 45–70 s
-  per answer. Owner asked for a cheap hosted option: Groq (Llama 3.3 70B), free tier then
+  per answer. Owner asked for a cheap hosted option: Groq (openai/gpt-oss-120b; Llama 3.3 70B was retired there), free tier then
   per-token; their terms say no training on inputs. Turn on Zero Data Retention in the console.
 - Seed starts delivery drivers OFFLINE so "waiting for a driver" survives the 30 s dispatch timer.
 
