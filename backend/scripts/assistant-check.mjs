@@ -2,6 +2,7 @@
 //   docker compose exec backend node scripts/assistant-check.mjs
 // Prints the settings (never the key itself), then one real question and the raw answer.
 import { config } from '../src/config.js';
+import { requestBody } from '../src/assistant/client.js';
 
 const a = config.assistant;
 const k = a.apiKey;
@@ -15,14 +16,28 @@ try {
   const res = await fetch(`${a.url}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${k}` },
-    body: JSON.stringify({ model: a.model, messages: [{ role: 'user', content: 'Reply with one short sentence: what is a bajaj?' }], max_tokens: 40 }),
+    // The same body the app sends, so a pass here means the chat works.
+    body: JSON.stringify(requestBody(a, [{ role: 'user', content: 'Reply with one short sentence: what is a bajaj?' }])),
     signal: AbortSignal.timeout(20000),
   });
   const text = await res.text();
   console.log(`HTTP ${res.status} in ${Date.now() - t0} ms`);
   console.log(text.slice(0, 400));
   if (res.status === 401) console.log('→ the key is wrong or revoked: make a new one in the Groq console.');
-  if (res.status === 404 || /model/i.test(text) && res.status === 400) console.log('→ the model name is wrong: copy one from Groq console → Models into ASSISTANT_MODEL.');
+  if (res.status === 404 || (/model/i.test(text) && res.status === 400)) {
+    console.log('→ the model name is wrong. Models this key can use:');
+    try {
+      const list = await fetch(`${a.url}/v1/models`, { headers: { Authorization: `Bearer ${k}` } }).then((r) => r.json());
+      for (const m of (list.data || []).map((x) => x.id).sort()) console.log(`   ${m}`);
+      console.log('  Put one in ASSISTANT_MODEL (openai/gpt-oss-120b is a good choice if listed).');
+    } catch { console.log('  (could not list them — see Groq console → Models)'); }
+  }
+  if (res.ok) {
+    try {
+      const answer = JSON.parse(text)?.choices?.[0]?.message?.content;
+      console.log(answer && answer.trim() ? `✓ the chat will work. Answer: ${answer.trim().slice(0, 160)}` : '✗ the model answered with no text — try another ASSISTANT_MODEL');
+    } catch { /* printed above */ }
+  }
   if (res.status === 403) console.log('→ Groq refused this server (region or account): check the Groq console.');
   if (res.status === 429) console.log('→ free-tier limit reached: wait, or add billing in the Groq console.');
 } catch (err) {

@@ -97,9 +97,17 @@ describe('answer()', () => {
   test('settings: off without a URL, bad URL refused', () => {
     expect(off.enabled).toBe(false);
     expect(parseAssistant({ ASSISTANT_URL: 'ftp://x', ASSISTANT_API_KEY: 'k' }).errors).toHaveLength(1);
-    expect(on.model).toBe('llama-3.3-70b-versatile');
+    expect(on.model).toBe('openai/gpt-oss-120b');
     expect(parseAssistant({ ASSISTANT_URL: 'https://x' }).errors[0]).toMatch(/API_KEY/);
     expect(parseAssistant({ ASSISTANT_URL: 'http://x', ASSISTANT_API_KEY: 'k' }, { production: true }).errors[0]).toMatch(/https/);
+  });
+
+  test('reasoning models get low effort and room to answer; others do not', async () => {
+    const { requestBody } = await import('../src/assistant/client.js');
+    expect(requestBody(on, [])).toMatchObject({ reasoning_effort: 'low', max_tokens: 800 });
+    const plain = requestBody({ ...on, model: 'llama-3.1-8b-instant' }, []);
+    expect(plain.reasoning_effort).toBeUndefined();
+    expect(plain.max_tokens).toBe(220);
   });
 
   test('client: Groq URL composition, key sent, any failure is null', async () => {

@@ -169,12 +169,13 @@ export function cleanReply(text, lang = 'en') {
 }
 
 // Settings: any OpenAI-compatible chat endpoint. The client appends /v1/chat/completions.
-//   Groq        ASSISTANT_URL=https://api.groq.com/openai   ASSISTANT_MODEL=llama-3.3-70b-versatile
+//   Groq        ASSISTANT_URL=https://api.groq.com/openai   ASSISTANT_MODEL=openai/gpt-oss-120b
+//               (llama-3.3-70b-versatile was retired for free/developer accounts, Aug 2026)
 //   OpenRouter  ASSISTANT_URL=https://openrouter.ai/api     ASSISTANT_MODEL=<model id>
 export const GROQ_URL = 'https://api.groq.com/openai';
 export function parseAssistant(env, { production = false } = {}) {
   const url = (env.ASSISTANT_URL || '').trim().replace(/\/$/, '');
-  const model = (env.ASSISTANT_MODEL || 'llama-3.3-70b-versatile').trim();
+  const model = (env.ASSISTANT_MODEL || 'openai/gpt-oss-120b').trim();
   const apiKey = (env.ASSISTANT_API_KEY || '').trim();
   const errors = [];
   if (url && !/^https?:\/\//.test(url)) errors.push('ASSISTANT_URL must be an http(s) URL');
