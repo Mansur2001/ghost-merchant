@@ -387,6 +387,8 @@ own PIN/password with it.** Nobody ever types or knows another person's secret.
   null = waiting for setup). Setup codes: 8 digits, scrypt-hashed, 24h, 5 attempts, deleted on
   use, **one live code per account** (re-send replaces it). `POST /api/staff/setup` is public,
   rate-limited, and answers one generic error for every failure.
+- **Locked-out admin**: `scripts/reset-staff-access.mjs` on the server issues the same setup
+  code (audited; `--print` shows it to whoever has root, who could read the DB anyway).
 - **Re-send doubles as reset**: the old PIN/password keeps working until the new one is set, so
   a reset can't lock anyone out.
 - **Never upsert a driver by phone.** "Add driver" with an existing number is a 409 — the old

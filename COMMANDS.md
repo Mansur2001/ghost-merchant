@@ -84,6 +84,12 @@ docker compose logs backend | grep 1a2b3c4d          # a user reported "ref 1a2b
 node scripts/sms-preflight.mjs --send +1XXXXXXXXXX --email you@example.com   # test Twilio
 ```
 
+**Locked out of a staff account (even the only admin):** issue a setup code on the server,
+then use *Set up account* on the sign-in screen (phone on file + code + new password):
+```bash
+docker compose exec backend node scripts/reset-staff-access.mjs --username abdideq --print
+```
+
 **Rollback:** `git checkout <old commit>`, then run the deploy line again. Restore the database only if a migration broke data:
 ```bash
 gunzip -c /root/backups/<file>.sql.gz | docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" "$POSTGRES_DB"'
