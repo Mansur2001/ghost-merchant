@@ -1194,7 +1194,7 @@ paths:
       tags: [Driver]
       summary: My position (HTTP fallback; the socket `location` frame is the usual path)
       description: |
-        Only the latest position is kept (no trail). At most one write per 4 s; outside Somalia is refused.
+        Only the latest position is kept (no trail). At most one write per 4 s (sooner is dropped, not an error). Anywhere is kept — tracking is tested from abroad; only (0, 0) and malformed fixes are 400.
         Sent to the customers of this driver's active jobs and to operators. 30 a minute.
       requestBody:
         required: true

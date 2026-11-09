@@ -75,3 +75,15 @@ transaction age) — run suites under `caffeinate -i`.
   (kind, min_zoom, name — no `name:so`, so POIs show their OSM name); OSRM answers.
 - Caddy access log in production (`/data/access.log`, 14 days, filtered). Needed a Caddy
   recreate, not a reload (COMMANDS.md).
+
+## 2026-11-09 (later): POIs visible, tracking from abroad
+
+- The owner saw no businesses: most POIs are tagged min_zoom 16, our maps open at 13–15, and a
+  z14 tile carries only what is tagged ≤15. Icons now 2 zooms early, names 1 early; kinds the
+  file really holds were counted from production (560 POIs around KM4) and added.
+- Tracking from anywhere: the server keeps a driver position outside Somalia (was refused),
+  the driver app shares it with an "outside Somalia, no rides here" note, the map isn't
+  bounded to Somalia, the "my location" dot shows anywhere. Booking points stay Somalia-only.
+  A throttled `POST /driver/location` was answered 400; now 200.
+- Decided with the owner: no "book anywhere" switch and no outside tile server; ride dispatch
+  from abroad not needed now.

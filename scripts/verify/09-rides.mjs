@@ -103,8 +103,12 @@ if (waitingDelivery) await call(`/operator/orders/${waitingDelivery}/refund`, { 
 await call('/driver/online', { method: 'POST', token: bashir, body: { online: true } });
 const loc = await call('/driver/location', { method: 'POST', token: bashir, body: { lat: 2.0470, lng: 45.3300, accuracy: 12 } });
 chk('driver position accepted', loc.status === 200, JSON.stringify(loc.body));
-const far = await call('/driver/location', { method: 'POST', token: cali, body: { lat: 47.6, lng: -122.3, accuracy: 5 } });
-chk('a position outside Somalia is refused', far.status === 400);
+const broken = await call('/driver/location', { method: 'POST', token: cali, body: { lat: 0, lng: 0, accuracy: 5 } });
+chk('a (0, 0) "no fix yet" position is refused', broken.status === 400);
+// Tracking works from abroad (the team tests from Seattle). Amina is offline with no job, so
+// her dot moving doesn't change any dispatch below.
+const abroad = await call('/driver/location', { method: 'POST', token: amina, body: { lat: 47.6, lng: -122.3, accuracy: 5 } });
+chk('a position outside Somalia is kept for tracking', abroad.status === 200, JSON.stringify(abroad.body));
 const q = await call('/quote', { method: 'POST', token: alice, body: { kind: 'RIDE', pickup, dropoff } });
 const carOpt = q.body.quote?.options?.find((o) => o.vehicle === 'car');
 const bajOpt = q.body.quote?.options?.find((o) => o.vehicle === 'bajaj');

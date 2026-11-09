@@ -163,7 +163,8 @@ driversRouter.post(
   rateLimit({ windowMs: 60 * 1000, max: 30, message: 'too many updates' }),
   async (req, res) => {
     const saved = await recordDriverLocation({ driverId: req.auth.id, raw: req.body });
-    if (!saved) return res.status(400).json({ error: 'not a usable position' });
+    // null = too soon after the last one: dropped, not wrong (the next one will land).
+    if (saved === false) return res.status(400).json({ error: 'not a usable position' });
     res.json({ ok: true });
   }
 );

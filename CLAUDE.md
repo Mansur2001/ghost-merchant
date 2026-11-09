@@ -193,18 +193,23 @@ customer wallet exists but is OFF by default (invariant 6).
 - **Ride proof**: pickup = the rider's 4-digit code (same `delivery_handoffs`, 5 tries) or a
   reason (flagged); drop-off = the GPS fix vs the destination (flagged if far, never refused).
 - **Locations** (`commands/locations.js`): one row per driver (`driver_locations`), no trail;
-  one write per 4 s; outside Somalia refused. Sent to the customer of that driver's ACTIVE
+  one write per 4 s; **kept from anywhere** (only (0, 0) and malformed are refused) so tracking
+  can be tested from abroad — dispatch stays local by itself (rides: within 8 km of a pickup
+  checkout holds to Somalia). Sent to the customer of that driver's ACTIVE
   job (re-authorized per order) and to operators. Customers see a driver only while
   DISPATCHED/IN_TRANSIT. The quote shows a COUNT of drivers nearby, never positions.
 - **Maps**: Leaflet + protomaps-leaflet (vendored in `frontend/shared/vendor/`), street data
   from ONE self-hosted file `tiles/somalia.pmtiles` (`scripts/fetch-map-tiles.sh`), served by
   Caddy with range requests. No tile vendor, no key. Without the file: a plain grid with pins.
   Customer location = GPS watched for the best fix, shown with its accuracy, then a draggable
-  pin or a place search. **A fix outside Somalia is never used** (`GMMap.inArea`): the map stays
-  on Mogadishu and asks for the point — testers abroad (Seattle) would otherwise book from there.
+  pin or a place search. **A fix outside Somalia is never used for a booking point**
+  (`GMMap.inArea`): the map stays on Mogadishu and asks for the point — testers abroad (Seattle)
+  would otherwise book from there. Live dots (yours, a driver's) show anywhere; the map isn't
+  bounded, only the street picture ends at the border. A driver abroad gets no road and no ETA.
   **POIs** (shops, clinics, mosques, banks, fuel…) are our own label rules on the tile file's
-  `pois` layer (`map.js` `poiRules` — protomaps-leaflet has none): emoji discs from z14, names
-  from z16, Somali names when the app is in Somali. **The OSM credit is required (ODbL)**: it is
+  `pois` layer (`map.js` `poiRules` — protomaps-leaflet has none). Most places are tagged
+  `min_zoom` 16 and a lower-zoom tile only holds what is tagged for it, so icons show 2 levels
+  early (from z13) and names 1 early (from z15); `name:so` isn't in the file, so names are OSM's. **The OSM credit is required (ODbL)**: it is
   a small ⓘ that opens on tap — never remove it. Maps with `locate: true` get a "my location"
   button: a live blue dot that follows until the map is dragged. A driver's dot glides between
   fixes and fades with "last seen" after 2 min without one.

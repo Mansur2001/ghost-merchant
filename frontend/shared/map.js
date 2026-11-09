@@ -10,7 +10,9 @@
 (function (global) {
   var L = global.L;
   var MOGADISHU = { lat: 2.0469, lng: 45.3182 };
-  // Somalia and Somaliland with a margin (matches backend domain/geo.js SERVICE_AREA).
+  // Somalia and Somaliland with a margin (matches backend domain/geo.js SERVICE_AREA): where a
+  // pickup, drop-off or place may be. The map itself is NOT held to it — a live dot (yours, a
+  // driver's) is shown wherever it is; only the street picture ends at the border.
   var BOUNDS = [[-1.9, 40.8], [12.3, 51.6]];
 
   var tilesState = null; // null = not checked, true/false once known
@@ -75,14 +77,29 @@
     courthouse: ['🏛', PUBLIC], embassy: ['🏛', PUBLIC], post_office: ['📮', PUBLIC], museum: ['🏛', PUBLIC],
     stadium: ['🏟', PUBLIC], sports_centre: ['🏟', PUBLIC], toilets: ['🚻', PUBLIC], drinking_water: ['🚰', PUBLIC],
     park: ['🌳', GREEN], garden: ['🌳', GREEN], beach: ['🏖', GREEN], zoo: ['🦒', GREEN], marina: ['⚓', TRAVEL],
+    // Kinds the Somalia file actually holds (counted around KM4/Bakaara, 2026-11-09).
+    mall: ['🛍', SHOP], shopping_centre: ['🛍', SHOP], department_store: ['🛍', SHOP], retail: ['🛍', SHOP],
+    computer: ['💻', SHOP], cosmetics: ['💄', SHOP], perfumery: ['💄', SHOP], gift: ['🎁', SHOP],
+    beverages: ['🥤', SHOP], photographer: ['📷', SHOP], car_rental: ['🚗', TRAVEL],
+    community_centre: ['🏛', PUBLIC], monument: ['🗿', PUBLIC], memorial: ['🗿', PUBLIC],
+    attraction: ['⭐', PUBLIC], viewpoint: ['⭐', GREEN], cinema: ['🎬', PUBLIC], theatre: ['🎭', PUBLIC],
+    fitness_centre: ['🏋', PUBLIC], playground: ['🛝', GREEN], pitch: ['⚽', GREEN],
   };
   // Health and money first: when two would overlap, the one a person is likelier to need stays.
   var POI_RANK = [HEALTH, MONEY, TRAVEL, SHOP, FOOD, STAY, PUBLIC, GREEN];
   var POI_FONT = '500 11px sans-serif';
-  var POI_MIN_ZOOM = 14; // street level; below it the dots would be noise
-  var POI_TEXT_ZOOM = 16; // names only once there is room for them
+  // The file tags most places to appear only from z16, closer than our maps open (13–15), so
+  // nothing showed. Icons come 2 levels sooner, names 1 sooner; the labeler drops overlaps.
+  var POI_MIN_ZOOM = 13;
+  var POI_TEXT_ZOOM = 15;
+  var POI_EARLY = 2;
 
   function poiKind(props) { return props.kind || props['pmap:kind'] || ''; }
+  // From which zoom the file says a place matters (16 if it doesn't say); every place by 17.
+  function poiZoom(props) {
+    var min = Number(props.min_zoom);
+    return Math.min(isFinite(min) && min > 0 ? min : 16, 17);
+  }
 
   function poiSymbolizer(lng, dark) {
     var textFill = dark ? '#ececec' : '#2b2b2b';
@@ -93,7 +110,7 @@
         if (!kind) return undefined;
         var a = geom[0][0];
         var r = 9;
-        var name = layout.zoom >= POI_TEXT_ZOOM
+        var name = layout.zoom >= Math.max(POI_TEXT_ZOOM, poiZoom(feature.props) - 1)
           ? String(feature.props['name:' + lng] || feature.props.name || '').slice(0, 28) : '';
         var w = 0;
         if (name) { layout.scratch.font = POI_FONT; w = layout.scratch.measureText(name).width; }
@@ -137,9 +154,7 @@
         filter: function (zoom, f) {
           var k = POI[poiKind(f.props)];
           if (!k || k[1] !== colour) return false;
-          // The tiles say from which zoom a place matters; the small ones still show by 17.
-          var min = Number(f.props.min_zoom);
-          return zoom >= Math.min(isFinite(min) && min > 0 ? min : POI_TEXT_ZOOM, 17);
+          return zoom >= poiZoom(f.props) - POI_EARLY;
         },
       };
     });
@@ -179,7 +194,8 @@
   }
 
   // "Where am I": a button that turns on a live dot (with its accuracy ring) and keeps it in
-  // view until the map is dragged; a second tap re-centres. A fix outside Somalia is never drawn.
+  // view until the map is dragged; a second tap re-centres. Drawn anywhere — it is only a dot;
+  // what a booking may use is decided by the screen (inArea), not here.
   function locateControl(onState) {
     var c = L.control({ position: 'bottomright' });
     c.onAdd = function () {
@@ -224,9 +240,7 @@
     var map = L.map(el, {
       zoomControl: true,
       attributionControl: false,
-      maxBounds: BOUNDS,
-      maxBoundsViscosity: 0.8,
-      minZoom: 5,
+      minZoom: 3,
       maxZoom: 19,
       tap: true,
     }).setView([center.lat, center.lng], opts.zoom || 14);
@@ -332,7 +346,6 @@
       api.remove('_meAcc');
     }
     function showMe(fix, btn) {
-      if (!inArea(fix)) { btn.classList.add('gm-locate-off'); return; }
       btn.classList.remove('gm-locate-off');
       var first = !api.has('_me');
       api.pin('_me', fix, { kind: 'me', glide: true });

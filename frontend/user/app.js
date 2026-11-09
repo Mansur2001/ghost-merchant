@@ -1133,6 +1133,17 @@ function showDriver(loc) {
   // Where the driver is headed next: the rider's pickup, else the door.
   const target = isRide(order) && order.status === 'DISPATCHED'
     ? { lat: order.pickup_lat, lng: order.pickup_lng } : { lat: order.lat, lng: order.lng };
+  // A driver abroad (testing from Seattle) has no road to the pickup and no honest ETA:
+  // the dot moves live, the strip shows who it is and nothing invented.
+  if (!GMMap.inArea(driverAt)) {
+    $('driverIc').textContent = VEHICLE_ICON[driverAt.vehicle] || '🛵';
+    $('driverName').textContent = driverAt.name || '';
+    $('driverEta').textContent = '';
+    showSeen();
+    $('driverStrip').classList.remove('hidden');
+    if (first && !orderMap.dragged) orderMap.fit([driverAt]);
+    return;
+  }
   const d = GMMap.distance(driverAt, target);
   let minutes = Math.max(1, Math.ceil(((d * 1.3) / 1000 / 18) * 60));
   // Along the road when we have the route; a new one when the driver leaves it or the leg

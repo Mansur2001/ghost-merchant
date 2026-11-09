@@ -206,13 +206,13 @@ $('onlineBtn').addEventListener('click', async () => {
   if (me.online) startSharing(); else stopSharing();
 });
 function sendFix(fix) {
-  // Outside Somalia the server refuses the position anyway; say so instead of "sharing".
-  if (!GMMap.inArea(fix)) { lastFix = null; $('locLine').textContent = t('drv.loc.outside'); return; }
+  // Shared from anywhere (tracking is tested from abroad); outside Somalia the driver is told
+  // no ride will be matched to them from there — dispatch only looks near the pickup.
   lastFix = fix;
   const frame = { lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy, heading: fix.heading, speed: fix.speed };
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'location', ...frame }));
   else if (navigator.onLine) api('/driver/location', { method: 'POST', body: JSON.stringify(frame) });
-  $('locLine').textContent = t('drv.loc.on', { m: fix.accuracy });
+  $('locLine').textContent = GMMap.inArea(fix) ? t('drv.loc.on', { m: fix.accuracy }) : t('drv.loc.outside');
   if (jobMap && current) showSelfOnMap();
 }
 function startSharing() {
@@ -588,7 +588,7 @@ async function routeFrom(fix) {
   onNavFix(fix);
 }
 function onNavFix(fix) {
-  if (!navState.on || !GMMap.inArea(fix)) return;
+  if (!navState.on) return;
   navState.fix = fix;
   navState.map.pin('me', fix, { kind: 'driver' });
   navState.map.follow(fix, 17);
@@ -658,8 +658,10 @@ async function startNav() {
   try { navState.wake = await navigator.wakeLock?.request('screen'); } catch { navState.wake = null; }
   let first = true;
   navState.stop = GMLocation.watch((fix) => {
-    if (!GMMap.inArea(fix)) { $('navNote').hidden = false; $('navNote').textContent = t('drv.loc.outside'); return; }
+    // Abroad there is no road to follow (routes are Somalia's): the dot still moves, on a
+    // straight line to the target, with the note saying why.
     if (first) { first = false; routeFrom(fix); } else onNavFix(fix);
+    if (!GMMap.inArea(fix)) { $('navNote').hidden = false; $('navNote').textContent = t('drv.loc.outside'); }
   }, () => { $('navNote').hidden = false; $('navNote').textContent = t('drv.loc.off'); }, { minIntervalMs: 2000 });
 }
 function stopNav() {

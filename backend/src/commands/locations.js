@@ -8,7 +8,6 @@
 import { prisma } from '../db/prisma.js';
 import { publish, TELEMETRY } from '../events/bus.js';
 import { parseFix } from '../domain/proof.js';
-import { inServiceArea } from '../domain/geo.js';
 import { audit } from './audit.js';
 import { dispatchWaitingSoon } from './dispatch.js';
 import { notifyAfter } from './push.js';
@@ -30,10 +29,16 @@ const clampInt = (v, lo, hi) => {
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : null;
 };
 
-// Returns true if stored, false if refused (bad fix, outside the area), null if throttled.
+// A phone with no fix yet reports (0, 0) — open sea off Africa, never a driver.
+const brokenFix = (f) => Math.abs(f.lat) < 0.001 && Math.abs(f.lng) < 0.001;
+
+// Returns true if stored, false if refused (malformed or (0, 0)), null if throttled.
+// Anywhere on Earth is kept: tracking is only a dot on the customer's map, and the team tests
+// it from abroad. Dispatch is what must stay local, and it does on its own — a ride goes to the
+// nearest driver within 8 km of a pickup that checkout already holds to Somalia.
 export async function recordDriverLocation({ driverId, raw, now = Date.now() }) {
   const fix = parseFix(raw);
-  if (!fix || !inServiceArea(fix)) return false;
+  if (!fix || brokenFix(fix)) return false;
   const key = String(driverId);
   if (now - (lastWrite.get(key) || 0) < MIN_INTERVAL_MS) return null;
   lastWrite.set(key, now);
