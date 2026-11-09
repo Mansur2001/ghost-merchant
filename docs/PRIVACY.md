@@ -59,6 +59,11 @@ if you chose it, by email through Twilio SendGrid. It receives your phone number
 the text of the message (which contains the code) only to deliver it, and nothing else about
 you or your orders.
 
+**Maps.** Map data © OpenStreetMap contributors, available under the Open Database License
+(openstreetmap.org/copyright). The street map is drawn with Protomaps from a copy kept on our
+own servers. When you search for a place, the words you typed are sent through our server to
+OpenStreetMap's search service (Nominatim) — nothing about who searched.
+
 Apart from that, we share data with **no one else**. We do not sell or rent personal
 information, and we do not use it for advertising or profiling. We may disclose information if legally compelled, or
 where necessary to prevent fraud or harm.

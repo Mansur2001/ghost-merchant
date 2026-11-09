@@ -516,16 +516,6 @@ body.op { height: 100vh; height: 100dvh; overflow: hidden; }
   background-size: 32px 32px;
 }
 .gm-map-note { background: var(--panel); color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; font-size: 12px; max-width: 220px; }
-/* The data credit the licence requires, folded into a small ⓘ (open on tap). */
-.gm-credit { display: flex; align-items: center; gap: 4px; flex-direction: row-reverse; }
-.gm-credit-btn, .gm-locate { min-height: 0; margin-top: 0; padding: 0; flex: none; }
-.gm-credit-btn {
-  width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line);
-  background: var(--panel); color: var(--muted); font: italic 700 11px/1 Georgia, serif; opacity: .75; cursor: pointer;
-}
-.gm-credit-text { display: none; background: var(--panel); color: var(--muted); font-size: 10px; padding: 1px 6px; border-radius: 6px; }
-.gm-credit-text a { color: var(--muted); }
-.gm-credit.open .gm-credit-text { display: inline; }
 /* "My location": a crosshair button; blue while it follows the phone, faded when GPS is off. */
 .gm-locate {
   width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel);

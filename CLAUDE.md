@@ -209,8 +209,9 @@ customer wallet exists but is OFF by default (invariant 6).
   **POIs** (shops, clinics, mosques, banks, fuel…) are our own label rules on the tile file's
   `pois` layer (`map.js` `poiRules` — protomaps-leaflet has none). Most places are tagged
   `min_zoom` 16 and a lower-zoom tile only holds what is tagged for it, so icons show 2 levels
-  early (from z13) and names 1 early (from z15); `name:so` isn't in the file, so names are OSM's. **The OSM credit is required (ODbL)**: it is
-  a small ⓘ that opens on tap — never remove it. Maps with `locate: true` get a "my location"
+  early (from z13) and names 1 early (from z15); `name:so` isn't in the file, so names are OSM's. No credit on the map itself (owner's call,
+  2026-11-09): OpenStreetMap and Protomaps are credited in `docs/PRIVACY.md` → *Maps*; keep
+  that line. Maps with `locate: true` get a "my location"
   button: a live blue dot that follows until the map is dragged. A driver's dot glides between
   fixes and fades with "last seen" after 2 min without one.
   `shared/location.js` `watch()` throttles TRAILING, never lossy: a still phone may send no more

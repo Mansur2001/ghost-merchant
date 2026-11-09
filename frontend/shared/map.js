@@ -174,25 +174,6 @@
     return layer;
   }
 
-  // The data's licence (ODbL) requires the credit, so it stays — as a small ⓘ that opens it on
-  // a tap rather than a line across every map.
-  function creditControl() {
-    var c = L.control({ position: 'bottomright' });
-    c.onAdd = function () {
-      var d = L.DomUtil.create('div', 'gm-credit');
-      var b = L.DomUtil.create('button', 'gm-credit-btn', d);
-      b.type = 'button';
-      b.textContent = 'i';
-      b.setAttribute('aria-label', 'Map data');
-      var t = L.DomUtil.create('span', 'gm-credit-text', d);
-      t.innerHTML = '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
-      L.DomEvent.disableClickPropagation(d);
-      L.DomEvent.on(b, 'click', function () { d.classList.toggle('open'); });
-      return d;
-    };
-    return c;
-  }
-
   // "Where am I": a button that turns on a live dot (with its accuracy ring) and keeps it in
   // view until the map is dragged; a second tap re-centres. Drawn anywhere — it is only a dot;
   // what a booking may use is decided by the screen (inArea), not here.
@@ -251,8 +232,8 @@
     checkTiles().then(function (ok) {
       if (ok) {
         base = streetLayer();
+        // No credit on the map: OpenStreetMap and Protomaps are credited in the privacy policy.
         base.addTo(map);
-        creditControl().addTo(map);
       } else {
         el.classList.add('gm-map-plain');
         note = L.control({ position: 'bottomleft' });
