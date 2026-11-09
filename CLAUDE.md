@@ -175,7 +175,8 @@ The desk coordinates; it does not decide who gets paid, who gets work, or who ge
 
 GuriKaabe is **rides first, delivery second** (the Yassir model), on one order table
 (`orders.kind` RIDE | DELIVERY) and one state machine. Same merchant-of-record rule: every job
-is prepaid to the business wallet; no cash, no wallet balance.
+is prepaid to the business wallet; no cash on delivery (drivers never hold customer money). A
+customer wallet exists but is OFF by default (invariant 6).
 
 - **The server prices everything** (`domain/pricing.js`, `commands/checkout.js`). Ride fare =
   base + per km by vehicle (bajaj, car), fixed at booking. Delivery = catalog items + a custom
@@ -199,13 +200,36 @@ is prepaid to the business wallet; no cash, no wallet balance.
   from ONE self-hosted file `tiles/somalia.pmtiles` (`scripts/fetch-map-tiles.sh`), served by
   Caddy with range requests. No tile vendor, no key. Without the file: a plain grid with pins.
   Customer location = GPS watched for the best fix, shown with its accuracy, then a draggable
-  pin or a place search. Road distance: optional OSRM (`ROUTING_URL`), else straight × 1.3.
+  pin or a place search. **A fix outside Somalia is never used** (`GMMap.inArea`): the map stays
+  on Mogadishu and asks for the point — testers abroad (Seattle) would otherwise book from there.
+  `shared/location.js` `watch()` throttles TRAILING, never lossy: a still phone may send no more
+  readings, and its last one (at the door) is the one that matters.
+- **Routing and turn-by-turn** (`routing/route.js`, `GET /api/route`, `shared/nav.js`): our own
+  OSRM (`ghcr.io/project-osrm/osrm-backend:v5.27.1`, compose profile `routing`, ~400 MB RAM)
+  with the Somalia road network from Geofabrik, built by `scripts/fetch-routing-data.sh` (also
+  sets `ROUTING_URL`; rerun monthly for new roads). Fares use road distance; ETAs never beat
+  18 km/h. Driver: full-screen navigation (next turn, "then", ETA, follows the phone, re-routes
+  after 2 off-route readings, Wake Lock, optional voice where the phone has the language).
+  Arrival counts the PIN too, not only the road's end (pins sit in courtyards). Customer: the
+  driver's road route + live ETA; the trip's road while booking. No engine → `route: null`, a
+  straight line, and "Maps app" (`geo:`). Never invent a route.
+- **Place search** (`geocode/nominatim.js`, `GET /api/geocode`): OpenStreetMap's public
+  Nominatim through our backend, kept to its policy — ONE request a second for the whole
+  backend (a queue), a day's cache, identifying User-Agent, Somalia only, on SUBMIT (it forbids
+  search-as-you-type; our own `places` still filter as you type). Show "© OpenStreetMap
+  contributors". Heavy use → our own Nominatim via `NOMINATIM_URL`. Only the query leaves.
 - **Help chat** (`domain/assistant.js`): FAQ first (EN + plain Somali), then a hosted open
-  model (Groq by default, any OpenAI-compatible URL) only when `ASSISTANT_URL`+`_API_KEY` are
-  set. It has NO tools and can't act; it sees an order STATE, never phone/place/code; nothing
+  model (Groq `openai/gpt-oss-120b` by default — `llama-3.3-70b-versatile` was retired there in
+  Aug 2026; reasoning models get `reasoning_effort: low` and room to answer, `assistant/client.js`
+  `requestBody`), any OpenAI-compatible URL, only when `ASSISTANT_URL`+`_API_KEY` are set.
+  Failures are logged with their reason; `scripts/assistant-check.mjs` on the server shows the
+  live answer and, on a bad model name, the models the key can use. UI: the standard support
+  widget — a corner launcher, a collapsible panel (bottom sheet on a phone), hidden on screens
+  with their own bottom button (ride booking, cart, checkout). It has NO tools and can't act; it sees an order STATE, never phone/place/code; nothing
   typed is stored; "Talk to a person" = the order chat. Self-hosting on the VPS CPU was tried
-  (45–70 s per answer) and dropped. This is the second bounded vendor exception after Twilio:
-  it carries questions, never money or identities.
+  (45–70 s per answer) and dropped — the owner chose a hosted model, not the VPS. This is the
+  second bounded vendor exception after Twilio: it carries questions, never money or
+  identities. (OSM data via Geofabrik/Protomaps/Nominatim is open data, not a vendor account.)
 
 ## Push notifications
 
@@ -545,15 +569,22 @@ Worker that cache-first serves its shell.
   (filled with the last one used, `gm_contact`). Session token in `localStorage`
   (`gm_token`/`gm_phone`, which holds the phone or email signed in with) — not `sessionStorage`, because re-verifying costs a real SMS and the
   customer is on one personal handset. Any 401 clears the session. Resume via
-  `GET /api/orders/mine` (token-scoped). Opens on a home/landing role picker; header has Home,
-  FAQ and the theme toggle. Checkout takes an optional reference photo.
+  `GET /api/orders/mine` (token-scoped). Signed in, Home offers **Ride** (map booking) and
+  **Food & shopping** (catalog → cart `gm_cart` → checkout priced by the server); tracking has a
+  live map; Account has notifications and (when on) the wallet. Deep links `/?order=<id>` and
+  `/?wallet=1` come from tapped notifications. Order lists cut long text with "…" inside the
+  card (`.tile-sub` must be `display: block` for the ellipsis to apply).
 - **Driver**: PIN login → token in `sessionStorage` (`driverToken`); the socket authenticates
   then joins `subscribe_driver` (its own feed, not the operator firehose). Queue shows **only
-  orders the operator assigned to this driver** — there is no shared self-serve pool. Order
-  detail can capture a delivery-proof photo.
+  orders the operator assigned to this driver** — there is no shared self-serve pool. An
+  **online switch** (dispatch only picks online drivers; online = sharing position), a job map,
+  "Start navigation", ride steps (rider code / End trip), "give job back" before pickup, a
+  new-job buzz, `/driver/?job=<id>` deep link. Order detail can capture a delivery-proof photo.
 - **Operator**: password → token in `sessionStorage` (`opToken`). Confirms payments (while in
   operator mode), watches dispatch happen, checks flagged deliveries, chats. No driver picker.
-  A Drivers panel lists the roster with live workload stats.
+  A Drivers panel lists the roster with live workload stats, online state and vehicle (admins
+  set it); **Live map**; **Catalog & places** (admins edit, audited); wallet withdrawals sit in
+  Refunds (admins). English only.
 - **Layout**: standard delivery-app shell. Customer: app bar + bottom tabs (Home / Orders /
   Help / Account), sectioned checkout with a sticky action bar, tracking screen (status hero,
   delivery code, proof, timeline from `/orders/:id/timeline`, chat). Driver: job list, then
@@ -580,10 +611,16 @@ Worker that cache-first serves its shell.
 - **Icons** come from `GuriKaabe-brandsheet.png`: `scripts/brandsheet-icons.py` (needs Pillow)
   writes the masters, `mobile/make-icons.sh` resizes them into Android densities.
 
+- **Maps in the page**: Leaflet's panes use z-index 400–1000, so every map container gets its
+  own stacking context (`.map { isolation: isolate }`) or it paints over the sticky app bar.
+- **Vendored scripts** (`frontend/shared/vendor/`, licences in `LICENSES.txt`): Leaflet 1.9.4,
+  protomaps-leaflet 5.1.0 — local files because the CSP is `script-src 'self'`.
+
 ### ⚠️ When you change any frontend shell file (index.html / app.js / styles.css / phone.js)
 
 **Bump the `CACHE` constant** in that PWA's `sw.js` (e.g. `gurikaabe-user-vN`), or reloads keep
-serving the cached old version. This is the #1 "my change isn't showing" gotcha here.
+serving the cached old version. A change in `frontend/shared/` means all three. Service workers
+never cache `/api`, `/ws` or `/tiles` (range requests on a 500 MB file). This is the #1 "my change isn't showing" gotcha here.
 
 ---
 
@@ -612,7 +649,7 @@ Guards (`db/seedSafety.js`), because the seed truncates everything and its passw
 ## Testing
 
 ```bash
-cd backend && npm install && npm test   # 512 Jest unit tests, ESM via --experimental-vm-modules
+cd backend && npm install && npm test   # 527 Jest unit tests, ESM via --experimental-vm-modules
 ./scripts/verify/run-all.sh             # live suites over real HTTP + WebSocket
 ```
 
@@ -620,8 +657,18 @@ Pure-domain suites need no DB; `payments` and `outbox` mock the pg transaction a
 (`jest.unstable_mockModule`). `tests/setup/env.js` seeds the env vars `config.js` requires at
 import. Jest is a devDependency — the Docker image (`npm install --omit=dev`) doesn't ship it.
 
-**Rides suite** `scripts/verify/09-rides.mjs` (63 checks over HTTP + WebSocket, against
-staging: it needs the WaafiPay simulator). Run from `backend/` like 05.
+**Rides suite** `scripts/verify/09-rides.mjs` (82 checks over HTTP + WebSocket, against
+staging — rides, carts, WaafiPay, wallet ledger, permissions: it needs the WaafiPay simulator).
+Run from `backend/` like 05.
+
+Staging extras: the **WaafiPay simulator** (`scripts/waafipay-mock.mjs`; payer ending 0000 =
+declined, 9999 = unreadable), `WALLET_ENABLED=true`, throwaway VAPID keys, and **OSRM** when
+`routing/` is built (`staging.sh up` starts it). Playwright: 26 workflows incl. rides,
+navigation, OSM search, help chat, wallet. Pushes can't reach a headless browser — the bridge
+is proven by registering a device at an address that can't exist and checking the attempts.
+**A Mac that sleeps mid-run** freezes Docker: tests "take 45 minutes", OTPs expire (401) and
+Prisma reports transactions "2,700,000 ms" old. That is the laptop, not a lock — run the
+suites under `caffeinate -i`.
 
 **Staging + Playwright** (`./scripts/staging.sh`, `e2e/`): a second Compose project
 (`gurikaabe-staging`, `docker-compose.staging.yml`, `.env.staging`) on 127.0.0.1:8444 with its
@@ -683,7 +730,15 @@ refunds as a ledger, staff onboarding by invite (admin-only), the offline write 
 multi-instance operation behind Redis, login codes delivered to a real US handset (then over ClickSend, now Twilio),
 sign-in or sign-up by email alone (Phone | Email switch), reportable error messages (reason + `ref`), and the
 EN/SO interface, proof of delivery, automatic dispatch, the audit log, and the operator console.
-The Android app builds and installs (`0.2.0`, signed; upload key `~/gurikaabe-release.jks`).
+Since 2026-11-08 in production: rides (bajaj/car, prepaid fixed fares, nearest-driver dispatch,
+rider code), the generic catalog + cart, live maps with the self-hosted Somalia street map,
+turn-by-turn navigation on our own OSRM, OpenStreetMap place search, the help-chat widget on
+Groq, web push notifications, and in-app recovery of a locked-out admin
+(`scripts/reset-staff-access.mjs`). Built and OFF: WaafiPay (no merchant keys yet), the
+customer wallet (`WALLET_ENABLED`, licence question), Android push (needs Firebase).
+The Android app builds and installs (`0.3.0`, versionCode 7, signed; upload key
+`~/gurikaabe-release.jks`); build 7 predates the chat widget, push and navigation — the next
+upload is build 8.
 **Production: https://app.gurikaabe.com on 136.244.93.174** (Vultr, Ubuntu 24.04), email-only
 (no Twilio), `PAYMENT_CONFIRMATION=operator`, nightly `pg_dump`. `COMMANDS.md` has deploy,
 backup and rollback; `./scripts/staging.sh simulate` is the end-to-end check before any release.
@@ -699,7 +754,11 @@ real text. Production deploy: `docker-compose.prod.yml` (+ `Caddyfile.prod`). Se
 cause (the `ref` still comes through). Real wallet merchant numbers and USSD codes aren't
 configured yet: no wallet is offered until they are (`domain/wallets.js`).
 
-Push notifications: Web Push live once VAPID keys are set; the Android app needs Firebase.
+**Still to do before real customers:** check every starter place pin and price on the ground
+(placeholders, some likely below cost — Operator → Catalog); add help-chat and push to
+`docs/PRIVACY.md`; Play Data safety must declare precise location; Firebase project +
+`google-services.json` for push in the Android app; WaafiPay keys (one $0.10 test per wallet);
+a native-speaker review of the new Somali.
 
 **Android release:** `cd mobile && GM_API_BASE=https://app.gurikaabe.com npm run build` (now ends
 with `cap copy android` — before 2026-11-06 it didn't, and every bundle silently carried the
