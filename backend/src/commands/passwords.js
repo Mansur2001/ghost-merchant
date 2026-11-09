@@ -8,10 +8,13 @@
 //                        nor its timing says which emails have accounts.
 //   setPassword        — signed in: change it (needs the current one) or, within 15 minutes of
 //                        a code sign-in, set a new one without it (the "forgot password" path).
+//                        Either way the account's email is told afterwards.
 import { prisma } from '../db/prisma.js';
 import { hashSecret, verifySecret } from '../middleware/auth.js';
 import { normalizeEmail } from '../domain/email.js';
 import { passwordProblem } from '../domain/customerPassword.js';
+import { maskEmail } from '../domain/email.js';
+import { sendPasswordChangedNotice } from '../notify/emailSender.js';
 
 export class PasswordError extends Error {
   constructor(message, status = 400) {
@@ -63,11 +66,16 @@ export async function setPassword({ userId, currentPassword, newPassword }) {
   }
   const problem = passwordProblem(newPassword, { email: user.email });
   if (problem) throw new PasswordError(problem);
+  const first = !user.password_hash; // read before the write: "set" vs "changed" in the notice
   await prisma.user.update({
     where: { id: userId },
     // The reset window is single-use: once a password is set, the next change needs it.
     data: { password_hash: hashSecret(newPassword), password_reset_until: null },
   });
+  // Tell the owner, after the change is saved. Best effort, like a push: a slow or failed email
+  // must not fail (or slow) a change that already happened — it is logged and dropped.
+  sendPasswordChangedNotice(user.email, { first })
+    .catch((err) => console.warn(`[password] changed-notice to ${maskEmail(user.email)} not sent: ${err.message}`));
 }
 
 // For "Account": does this account have a password, and may it set one without the old one now?

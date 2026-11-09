@@ -1,5 +1,6 @@
 // Outbound email: login codes for customers who linked an email, the code that confirms a new
-// email, and staff setup codes an admin chose to send by email.
+// email, staff setup codes an admin chose to send by email, and the "your password was
+// changed" notice (no code, no secret — it tells the owner, so a hijack doesn't go unseen).
 //
 // Twilio SendGrid, under the same OTP_TRANSPORT as SMS (notify/smsSender.js) and the same
 // rules: real mail in production, never a code in the log there, and in dev only to addresses
@@ -64,6 +65,30 @@ async function sendViaSendGrid(to, subject, text) {
 
 function devAllowlisted(email) {
   return config.otp.devEmailAllowlist.includes(String(email).toLowerCase());
+}
+
+// The notice after a password is set or changed (OWASP: tell the owner on the channel they
+// own). It carries nothing secret, so in dev the log line names no address and no content.
+export async function sendPasswordChangedNotice(email, { first = false } = {}) {
+  const transport = resolveTransport({
+    configured: emailConfigured(),
+    allowlisted: devAllowlisted(email),
+    target: email,
+    allowlistName: 'DEV_EMAIL_ALLOWLIST',
+  });
+  if (transport === 'log') {
+    console.warn('[EMAIL][dev-transport] password-changed notice (not sent)');
+    return { transport: 'log' };
+  }
+  const what = first ? 'set' : 'changed';
+  await sendViaSendGrid(email, `Your GuriKaabe password was ${what}`,
+    `Your GuriKaabe password was just ${what}. If this was you, there is nothing to do.\n` +
+    `If it wasn't you: open GuriKaabe, tap "Forgot your password? Sign in with an emailed ` +
+    `code", sign in with the code we send to this email, and set a new password.\n\n` +
+    `Furaha sirta GuriKaabe waa la ${first ? 'sameeyay' : 'beddelay'}. Haddii adiga ay ahayd, waxba ha samayn.\n` +
+    `Haddii aadan adiga ahayn: fur GuriKaabe, riix "Furaha sirta ma ilowday?", ku gal koodhka aan ` +
+    `emailkan u dirno, kadibna samee furaha sirta cusub.`);
+  return { transport };
 }
 
 async function deliver(email, code, subject, text) {

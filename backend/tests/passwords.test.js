@@ -1,7 +1,8 @@
 // Customer passwords: sign-in that doesn't need an email to arrive, without weakening it.
 //   * weak passwords are refused in plain words;
 //   * a failed sign-in says nothing about whether the email has an account;
-//   * changing a password needs the current one — except in the reset window after a code.
+//   * changing a password needs the current one — except in the reset window after a code;
+//   * the account's email is told after every change, and that email can never undo one.
 import { jest, describe, test, expect, beforeEach } from '@jest/globals';
 
 let users = [];
@@ -19,12 +20,14 @@ const prisma = {
   },
 };
 jest.unstable_mockModule('../src/db/prisma.js', () => ({ prisma }));
+const sendPasswordChangedNotice = jest.fn(async () => ({ transport: 'twilio' }));
+jest.unstable_mockModule('../src/notify/emailSender.js', () => ({ sendPasswordChangedNotice }));
 
 const { hashSecret } = await import('../src/middleware/auth.js');
 const { signUpWithPassword, signInWithPassword, setPassword, PasswordError } = await import('../src/commands/passwords.js');
 const { passwordProblem } = await import('../src/domain/customerPassword.js');
 
-beforeEach(() => { users = []; });
+beforeEach(() => { users = []; sendPasswordChangedNotice.mockClear(); });
 
 describe('passwordProblem', () => {
   test('length, not composition rules', () => {
@@ -96,6 +99,32 @@ describe('setPassword', () => {
     users.push(base({ password_hash: null }));
     await setPassword({ userId: 1, newPassword: 'first ever phrase' });
     expect(users[0].password_hash).toBeTruthy();
+  });
+
+  test('the owner is emailed after a change ("changed") and after a first password ("set")', async () => {
+    users.push(base({ password_hash: hashSecret('old pass phrase') }));
+    await setPassword({ userId: 1, currentPassword: 'old pass phrase', newPassword: 'new pass phrase' });
+    expect(sendPasswordChangedNotice).toHaveBeenCalledWith('a@example.com', { first: false });
+    users = [base({ password_hash: null })];
+    await setPassword({ userId: 1, newPassword: 'first ever phrase' });
+    expect(sendPasswordChangedNotice).toHaveBeenLastCalledWith('a@example.com', { first: true });
+  });
+
+  test('a refused change sends no notice', async () => {
+    users.push(base({ password_hash: hashSecret('old pass phrase') }));
+    await expect(setPassword({ userId: 1, currentPassword: 'nope nope', newPassword: 'new pass phrase' })).rejects.toThrow();
+    expect(sendPasswordChangedNotice).not.toHaveBeenCalled();
+  });
+
+  test('a failed notice email never fails (or undoes) the change', async () => {
+    users.push(base({ password_hash: hashSecret('old pass phrase') }));
+    sendPasswordChangedNotice.mockRejectedValueOnce(new Error('sendgrid down'));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(setPassword({ userId: 1, currentPassword: 'old pass phrase', newPassword: 'new pass phrase' })).resolves.toBeUndefined();
+    await new Promise((r) => setImmediate(r));
+    expect((await signInWithPassword({ email: 'a@example.com', password: 'new pass phrase' })).id).toBe(1);
+    expect(warn.mock.calls.join(' ')).toMatch(/a••|not sent/);
+    warn.mockRestore();
   });
 
   test('a phone-only account has no email to sign in with', async () => {

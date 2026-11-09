@@ -370,6 +370,11 @@ reset a forgotten password.
 - Rules: 8–128 characters, not a common password, not containing the email's name part. No
   composition rules — they push people back to codes.
 - Phone-only accounts have no password (passwords are email accounts).
+- **Changing it** is the industry standard (OWASP/NIST, owner's choice 2026-11-09): current +
+  new + repeat — no email code (that is the forgot path; it would make a change wait on
+  SendGrid again). After every set/change/reset the account's email gets a "your password was
+  changed — if this wasn't you…" notice (`sendPasswordChangedNotice`), best effort: a failed
+  email is logged and never fails the change.
 
 ## Email codes: a sign-in of their own
 
