@@ -423,8 +423,8 @@ function searchPlaces(q) {
   if (f.length < 2) return [];
   return (placesCache || []).filter((p) => fold(p.name_en).includes(f) || fold(p.name_so).includes(f)).slice(0, 8);
 }
-// Results as buttons; `onPick(place)` sets the point. OpenStreetMap results carry an "OSM" tag
-// and the attribution line the data's licence asks for.
+// Results as buttons; `onPick(place)` sets the point. OpenStreetMap results show how far they
+// are, and the list ends with the one attribution line the data's licence asks for.
 function renderPlaceResults(box, list, onPick, { osm = false } = {}) {
   const rows = list.map((p) => {
     const b = document.createElement('button');
@@ -436,11 +436,11 @@ function renderPlaceResults(box, list, onPick, { osm = false } = {}) {
     sub.className = 'muted';
     sub.textContent = p.osm ? p.detail : p.city;
     b.append(name, sub);
-    if (p.osm) {
-      const tag = document.createElement('span');
-      tag.className = 'tag';
-      tag.textContent = 'OSM';
-      b.append(tag);
+    if (p.distance_m != null) {
+      const far = document.createElement('span');
+      far.className = 'tag';
+      far.textContent = GMMap.formatDistance(p.distance_m);
+      b.append(far);
     }
     b.addEventListener('click', () => { box.replaceChildren(); onPick(p); });
     return b;
@@ -455,9 +455,10 @@ function renderPlaceResults(box, list, onPick, { osm = false } = {}) {
 }
 
 // Search OpenStreetMap (through our server, which keeps to its rules). On a tap or Enter only:
-// the public service forbids search-as-you-type. Our own places come first.
+// the public service forbids search-as-you-type. Our own places come first; OSM's come from
+// around wherever the map is, each with its distance.
 let osmSeq = 0;
-async function searchOsm(input, box, onPick) {
+async function searchOsm(input, box, onPick, map) {
   // A pending as-you-type filter must not replace these results after they arrive.
   clearTimeout(searchTimer);
   const seq = ++osmSeq;
@@ -466,7 +467,9 @@ async function searchOsm(input, box, onPick) {
   box.replaceChildren(Object.assign(document.createElement('div'), { className: 'muted', textContent: t('search.searching') }));
   await loadPlaces();
   const ours = searchPlaces(q);
-  const res = await api(`/geocode?q=${encodeURIComponent(q)}&lang=${GMI18n.lang()}`);
+  const c = map && map.center();
+  const near = c ? `&near=${c.lat.toFixed(4)},${c.lng.toFixed(4)}` : '';
+  const res = await api(`/geocode?q=${encodeURIComponent(q)}&lang=${GMI18n.lang()}${near}`);
   if (seq !== osmSeq) return; // a newer search (or typing) took over
   if (res.error && !ours.length) { box.replaceChildren(); return toast(GMI18n.err(res.error)); }
   const osm = (res.results || []).map((r) => ({ ...r, osm: true }));
@@ -562,7 +565,7 @@ async function locateForRide() {
 function openRide() {
   showView('rideView', 'home');
   if (!ride.map) {
-    ride.map = GMMap.create($('rideMap'));
+    ride.map = GMMap.create($('rideMap'), { locate: true });
     ride.map.onTap((p) => { if (GMMap.inArea(p)) setRidePoint(ride.picking, p); });
     loadPlaces();
   }
@@ -591,8 +594,8 @@ function pickRidePlace(p) {
   $('placeSearch').value = '';
   setRidePoint(ride.picking, pickOsmOrPlace(p));
 }
-$('placeOsm').addEventListener('click', () => searchOsm($('placeSearch'), $('placeResults'), pickRidePlace));
-$('placeSearch').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); searchOsm($('placeSearch'), $('placeResults'), pickRidePlace); } });
+$('placeOsm').addEventListener('click', () => searchOsm($('placeSearch'), $('placeResults'), pickRidePlace, ride.map));
+$('placeSearch').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); searchOsm($('placeSearch'), $('placeResults'), pickRidePlace, ride.map); } });
 
 async function quoteRide() {
   ride.quote = null;
@@ -873,7 +876,7 @@ async function openCheckout({ custom = false } = {}) {
   renderCartLines();
   if (custom) { $('customBox').open = true; $('request').focus(); }
   if (!drop.map) {
-    drop.map = GMMap.create($('dropMap'), { zoom: 13 });
+    drop.map = GMMap.create($('dropMap'), { zoom: 13, locate: true });
     drop.map.onTap((p) => { if (GMMap.inArea(p)) setDropPoint(p); });
     loadPlaces();
   }
@@ -946,8 +949,8 @@ function pickDropPlace(p) {
   setDropPoint(pickOsmOrPlace(p));
   drop.map.fit([drop.point]);
 }
-$('dropOsm').addEventListener('click', () => searchOsm($('dropSearch'), $('dropResults'), pickDropPlace));
-$('dropSearch').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); searchOsm($('dropSearch'), $('dropResults'), pickDropPlace); } });
+$('dropOsm').addEventListener('click', () => searchOsm($('dropSearch'), $('dropResults'), pickDropPlace, drop.map));
+$('dropSearch').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); searchOsm($('dropSearch'), $('dropResults'), pickDropPlace, drop.map); } });
 
 $('dropSearch').addEventListener('input', () => {
   osmSeq += 1;
@@ -1070,7 +1073,7 @@ function renderOrderMap() {
   const live = ['DISPATCHED', 'IN_TRANSIT'].includes(order.status);
   if (!start && !end) { card.classList.add('hidden'); return; }
   card.classList.remove('hidden');
-  if (!orderMap) orderMap = GMMap.create($('orderMap'));
+  if (!orderMap) orderMap = GMMap.create($('orderMap'), { locate: true });
   orderMap.refresh();
   orderMap.pin('start', start, { kind: isRide(order) ? 'pickup' : 'market' });
   orderMap.pin('end', end, { kind: 'dropoff' });
@@ -1084,7 +1087,8 @@ function renderOrderMap() {
     trackRoute.tracker = null;
     $('driverStrip').classList.add('hidden');
   }
-  orderMap.fit([start, end, driverAt].filter(Boolean));
+  // Every live event re-renders this; once the customer has moved the map, leave it where they put it.
+  if (!orderMap.dragged) orderMap.fit([start, end, driverAt].filter(Boolean));
   if (live) loadDriverLocation();
 }
 async function loadDriverLocation() {
@@ -1109,11 +1113,23 @@ async function refreshTrackRoute(from, to, key) {
   }
 }
 
+// A driver whose phone stopped reporting (dead zone, app closed) is shown faded with how long
+// ago they were seen, never as if they were still moving.
+const STALE_MS = 2 * 60 * 1000;
+const seenAgo = () => (driverAt && driverAt.at ? Date.now() - new Date(driverAt.at).getTime() : 0);
+function showSeen() {
+  if (!driverAt || !orderMap || !orderMap.has('driver')) return;
+  const stale = seenAgo() > STALE_MS;
+  orderMap.pin('driver', driverAt, { kind: 'driver', stale });
+  $('driverSeen').textContent = stale ? ` · ${t('drv.seen', { n: Math.round(seenAgo() / 60000) })}` : '';
+}
+setInterval(showSeen, 30000);
+
 function showDriver(loc) {
   if (!order || !orderMap || !['DISPATCHED', 'IN_TRANSIT'].includes(order.status)) return;
   const first = !driverAt;
-  driverAt = { lat: loc.lat, lng: loc.lng, name: loc.name || driverAt?.name, vehicle: loc.vehicle || driverAt?.vehicle };
-  orderMap.pin('driver', driverAt, { kind: 'driver' });
+  driverAt = { lat: loc.lat, lng: loc.lng, at: loc.at || Date.now(), name: loc.name || driverAt?.name, vehicle: loc.vehicle || driverAt?.vehicle };
+  orderMap.pin('driver', driverAt, { kind: 'driver', glide: true, stale: seenAgo() > STALE_MS });
   // Where the driver is headed next: the rider's pickup, else the door.
   const target = isRide(order) && order.status === 'DISPATCHED'
     ? { lat: order.pickup_lat, lng: order.pickup_lng } : { lat: order.lat, lng: order.lng };
@@ -1131,8 +1147,9 @@ function showDriver(loc) {
   $('driverIc').textContent = VEHICLE_ICON[driverAt.vehicle] || '🛵';
   $('driverName').textContent = driverAt.name || '';
   if (!(trackRoute.tracker && trackRoute.key === key)) $('driverEta').textContent = ` · ${t('drv.eta', { d: GMMap.formatDistance(d), n: minutes })}`;
+  showSeen();
   $('driverStrip').classList.remove('hidden');
-  if (first) orderMap.fit([driverAt, target]);
+  if (first && !orderMap.dragged) orderMap.fit([driverAt, target]);
 }
 
 // ── Cancel (before a driver has it) ──
@@ -1433,6 +1450,9 @@ function connectSocket() {
     const m = JSON.parse(ev.data);
     if (m.type === 'authenticated') {
       if (order) ws.send(JSON.stringify({ type: 'subscribe', orderId: order.id }));
+      // Whatever happened while the socket was down (a step, the driver's moves) was never
+      // sent to us: read it once now instead of showing a frozen page until a reload.
+      resumeOrderQuietly();
       flushQueue(); // a live socket is the most reliable signal the network is actually back
     } else if (m.type === 'auth_error') {
       clearSession();

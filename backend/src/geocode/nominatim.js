@@ -8,7 +8,7 @@
 // Heavy use needs our own Nominatim — set NOMINATIM_URL to it and nothing else changes.
 // Only the search text leaves the server: never who asked.
 import { config } from '../config.js';
-import { inServiceArea, SERVICE_AREA } from '../domain/geo.js';
+import { inServiceArea, SERVICE_AREA, distanceMeters } from '../domain/geo.js';
 
 const CACHE_MAX = 500;
 const CACHE_MS = 24 * 3600 * 1000;
@@ -30,20 +30,46 @@ function throttled(fn) {
 
 export const foldQuery = (q) => String(q || '').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 120);
 
-export async function geocode(q, { lang = 'en', settings = config.geocoder, fetchImpl = fetch } = {}) {
+// How far around the person's map a search looks first (~28 km: all of Mogadishu).
+const NEAR_DEG = 0.25;
+
+// `near` = the point the person is looking at (the map's centre). Without it, "Bakaara" found a
+// hamlet in Gedo before the market in Mogadishu, and "hospital" found nothing at all (a kind
+// of place is only searchable inside a box). So: that area first, the whole country only if
+// it has nothing, each with how far it is.
+export async function geocode(q, { lang = 'en', near = null, settings = config.geocoder, fetchImpl = fetch } = {}) {
   const query = foldQuery(q);
   if (query.length < 3 || !settings.url) return [];
-  const key = `${lang}|${query}`;
+  // The area to 0.1° (~11 km): close enough to share a cache entry, far enough to be no trail.
+  const around = near && inServiceArea(near)
+    ? { lat: Math.round(near.lat * 10) / 10, lng: Math.round(near.lng * 10) / 10 } : null;
+  const key = `${lang}|${around ? `${around.lat},${around.lng}` : '-'}|${query}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.results;
 
-  const { minLat, maxLat, minLng, maxLng } = SERVICE_AREA;
+  let results = [];
+  if (around) {
+    results = await search(query, lang, {
+      minLat: around.lat - NEAR_DEG, maxLat: around.lat + NEAR_DEG,
+      minLng: around.lng - NEAR_DEG, maxLng: around.lng + NEAR_DEG,
+    }, settings, fetchImpl);
+  }
+  if (!results.length) results = await search(query, lang, SERVICE_AREA, settings, fetchImpl);
+  // Nominatim's order is by how well the name matches; kept (nearest-first put "ex dugsi sare
+  // banadir" above Banadir Hospital). The box already made them local; the distance is shown.
+  if (near) results = results.map((r) => ({ ...r, distance_m: Math.round(distanceMeters(near, r)) }));
+  if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
+  cache.set(key, { at: Date.now(), results });
+  return results;
+}
+
+async function search(query, lang, { minLat, maxLat, minLng, maxLng }, settings, fetchImpl) {
   const params = new URLSearchParams({
     q: query, format: 'jsonv2', countrycodes: 'so', limit: '8', addressdetails: '0',
     'accept-language': lang === 'so' ? 'so,en' : 'en,so',
     viewbox: `${minLng},${maxLat},${maxLng},${minLat}`, bounded: '1',
   });
-  const results = await throttled(async () => {
+  return throttled(async () => {
     const res = await fetchImpl(`${settings.url.replace(/\/$/, '')}/search?${params}`, {
       headers: { 'User-Agent': settings.userAgent, Accept: 'application/json' },
       signal: AbortSignal.timeout(6000),
@@ -60,9 +86,6 @@ export async function geocode(q, { lang = 'en', settings = config.geocoder, fetc
       }))
       .filter((r) => r.name && inServiceArea(r));
   });
-  if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
-  cache.set(key, { at: Date.now(), results });
-  return results;
 }
 
 export function resetGeocoder() {

@@ -30,14 +30,15 @@ mapsRouter.get(
   }
 );
 
-// GET /api/geocode?q=…&lang=en|so — any place in Somalia from OpenStreetMap.
+// GET /api/geocode?q=…&lang=en|so&near=lat,lng — any place in Somalia from OpenStreetMap,
+// around `near` (the map the person is looking at) first.
 mapsRouter.get(
   '/geocode',
   requireAuth,
   rateLimit({ windowMs: 60 * 1000, max: 15, key: who, message: 'too many searches — wait a moment' }),
   async (req, res) => {
     try {
-      const results = await geocode(req.query.q, { lang: req.query.lang === 'so' ? 'so' : 'en' });
+      const results = await geocode(req.query.q, { lang: req.query.lang === 'so' ? 'so' : 'en', near: pointOf(req.query.near) });
       res.json({ results, attribution: '© OpenStreetMap contributors' });
     } catch (err) {
       console.warn(`[geocode] ${err.message}`);

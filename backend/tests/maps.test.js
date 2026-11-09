@@ -70,6 +70,30 @@ describe('geocode (OpenStreetMap Nominatim)', () => {
     expect(times[2] - times[1]).toBeGreaterThanOrEqual(1000);
   }, 10000);
 
+  test('near: that area first, in the geocoder\'s order, with the distance', async () => {
+    const mogadishu = [
+      { name: 'Hodan Hospital', display_name: 'Hodan Hospital, Hodan, Muqdisho', lat: '2.0369624', lon: '45.3108968', type: 'hospital' },
+      { name: 'Keysane Hospital', display_name: 'Keysane Hospital, Muqdisho', lat: '2.0535075', lon: '45.3869634', type: 'hospital' },
+    ];
+    const fetchImpl = jest.fn(async () => ({ ok: true, json: async () => mogadishu }));
+    const r = await geocode('hospital', { settings, fetchImpl, near: { lat: 2.054, lng: 45.386 } });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    // A box around 2.1,45.4 (rounded), not the whole country.
+    expect(decodeURIComponent(fetchImpl.mock.calls[0][0])).toMatch(/viewbox=45\.15,2\.35,45\.65,1\.85/);
+    expect(r.map((x) => x.name)).toEqual(['Hodan Hospital', 'Keysane Hospital']);
+    expect(r[1].distance_m).toBeLessThan(200);
+    expect(r[0].distance_m).toBeGreaterThan(8000);
+  });
+
+  test('near finds nothing -> the whole country, once', async () => {
+    const answers = [[], answer];
+    const fetchImpl = jest.fn(async () => ({ ok: true, json: async () => answers.shift() }));
+    const r = await geocode('Banadir Hospital', { settings, fetchImpl, near: { lat: 9.56, lng: 44.06 } });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(decodeURIComponent(fetchImpl.mock.calls[1][0])).toMatch(/viewbox=40\.8,12\.3,51\.6,-1\.9/);
+    expect(r.map((x) => x.name)).toEqual(['Isbitaalka Banaadir']);
+  }, 10000);
+
   test('too short, or switched off -> nothing asked', async () => {
     const fetchImpl = jest.fn();
     expect(await geocode('ab', { settings, fetchImpl })).toEqual([]);

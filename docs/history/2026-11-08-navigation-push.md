@@ -53,3 +53,20 @@ transaction age) — run suites under `caffeinate -i`.
   Bug reports. Same fields, limits, states and three outcomes; EN + plain SO.
 - Android builds paused at the owner's request (build 8 is ready; upload later).
 - Tests: 533 unit, 28 Playwright, 82 live, 65-step simulation.
+
+## 2026-11-09: map POIs, live location, local search
+
+- **Points of interest** on every map: protomaps-leaflet never drew the tiles' `pois` layer, so
+  businesses and landmarks were invisible. Now emoji discs by kind (health, money, travel,
+  shops, food, stay, public, green), names from z16, Somali names in Somali.
+- **Watermarks**: the layer's own "Protomaps © OpenStreetMap" line (doubled with ours) is gone;
+  the OSM credit the licence requires is a small ⓘ. Search results lost the "OSM" tag (they
+  show their distance instead); one credit line stays under them.
+- **Live location**: "my location" button (live dot + accuracy, follows until dragged) on the
+  ride, delivery, tracking and driver job maps. Driver dot glides; faded + "last seen" when
+  stale. **Bug fixed**: after a socket reconnect the tracking page never re-read the order or
+  the driver's position, so it froze until a reload.
+- **Search**: biased to the map's area (Bakaara → Suuqa Bakaaraha, not a hamlet in Gedo;
+  "hospital" now finds hospitals), country-wide fallback, distance on each result.
+- Verified with a synthetic tile file on staging (no real extract locally). Tests: 535 unit,
+  28 Playwright. Not deployed.

@@ -1,4 +1,4 @@
-const CACHE = 'gurikaabe-driver-v42';
+const CACHE = 'gurikaabe-driver-v43';
 const SHELL = ['/driver/', '/driver/index.html', '/driver/app.js', '/icon-192.png', '/shared/styles.css', '/shared/config.js', '/shared/ids.js', '/shared/syncPolicy.js', '/shared/queue.js', '/shared/phone.js', '/shared/theme.js', '/shared/push.js', '/shared/i18n.js', '/shared/map.js', '/shared/location.js', '/shared/nav.js', '/shared/vendor/leaflet-1.9.4.js', '/shared/vendor/leaflet-1.9.4.css', '/shared/vendor/protomaps-leaflet-5.1.0.js'];
 self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener('activate', (e) => e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())));

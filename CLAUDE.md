@@ -202,6 +202,12 @@ customer wallet exists but is OFF by default (invariant 6).
   Customer location = GPS watched for the best fix, shown with its accuracy, then a draggable
   pin or a place search. **A fix outside Somalia is never used** (`GMMap.inArea`): the map stays
   on Mogadishu and asks for the point — testers abroad (Seattle) would otherwise book from there.
+  **POIs** (shops, clinics, mosques, banks, fuel…) are our own label rules on the tile file's
+  `pois` layer (`map.js` `poiRules` — protomaps-leaflet has none): emoji discs from z14, names
+  from z16, Somali names when the app is in Somali. **The OSM credit is required (ODbL)**: it is
+  a small ⓘ that opens on tap — never remove it. Maps with `locate: true` get a "my location"
+  button: a live blue dot that follows until the map is dragged. A driver's dot glides between
+  fixes and fades with "last seen" after 2 min without one.
   `shared/location.js` `watch()` throttles TRAILING, never lossy: a still phone may send no more
   readings, and its last one (at the door) is the one that matters.
 - **Routing and turn-by-turn** (`routing/route.js`, `GET /api/route`, `shared/nav.js`): our own
@@ -217,7 +223,8 @@ customer wallet exists but is OFF by default (invariant 6).
   Nominatim through our backend, kept to its policy — ONE request a second for the whole
   backend (a queue), a day's cache, identifying User-Agent, Somalia only, on SUBMIT (it forbids
   search-as-you-type; our own `places` still filter as you type). Show "© OpenStreetMap
-  contributors". Heavy use → our own Nominatim via `NOMINATIM_URL`. Only the query leaves.
+  contributors". The apps send `near` (the map's centre): ~28 km around it first, the country
+  only if that is empty, in Nominatim's order (nearest-first ranked junk above the right place). Heavy use → our own Nominatim via `NOMINATIM_URL`. Only the query leaves.
 - **Help chat** (`domain/assistant.js`): FAQ first (EN + plain Somali), then a hosted open
   model (Groq `openai/gpt-oss-120b` by default — `llama-3.3-70b-versatile` was retired there in
   Aug 2026; reasoning models get `reasoning_effort: low` and room to answer, `assistant/client.js`

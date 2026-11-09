@@ -706,10 +706,13 @@ paths:
       description: |
         One request a second to the public server for the whole backend, cached for a day, Somalia
         only. Search on submit — the public server forbids search-as-you-type. Show the attribution.
+        With `near` (the map's centre), the ~28 km around it is searched first and the whole country
+        only when that finds nothing; each result carries `distance_m`.
         15 a minute per caller.
       parameters:
         - { name: q, in: query, required: true, schema: { type: string, minLength: 3 } }
         - { name: lang, in: query, schema: { type: string, enum: [en, so] } }
+        - { name: near, in: query, description: "lat,lng in Somalia (ignored otherwise)", schema: { type: string, example: "2.05,45.32" } }
       responses:
         "200":
           description: Places
@@ -718,7 +721,7 @@ paths:
               schema:
                 type: object
                 properties:
-                  results: { type: array, items: { type: object, properties: { name: { type: string }, detail: { type: string }, lat: { type: number }, lng: { type: number }, kind: { type: [string, "null"] } } } }
+                  results: { type: array, items: { type: object, properties: { name: { type: string }, detail: { type: string }, lat: { type: number }, lng: { type: number }, kind: { type: [string, "null"] }, distance_m: { type: integer, description: "only with near" } } } }
                   attribution: { type: string }
         "401": { description: Not signed in, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
         "429": { description: Too many searches, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }

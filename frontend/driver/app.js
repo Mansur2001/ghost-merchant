@@ -297,7 +297,7 @@ function renderTarget() {
 
 let jobMap = null;
 function renderJobMap() {
-  if (!jobMap) jobMap = GMMap.create($('jobMap'));
+  if (!jobMap) jobMap = GMMap.create($('jobMap'), { locate: true });
   jobMap.refresh();
   const start = current.pickup_lat != null ? { lat: current.pickup_lat, lng: current.pickup_lng } : null;
   const end = current.lat != null ? { lat: current.lat, lng: current.lng } : null;
