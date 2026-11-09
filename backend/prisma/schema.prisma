@@ -575,3 +575,29 @@ model PushSubscription {
   @@index([role, subject_id], map: "idx_push_subscriptions_subject")
   @@map("push_subscriptions")
 }
+
+/// Bug reports from the apps (Help -> Report a problem). Owner from the session; closed ones
+/// are deleted 90 days after closing.
+model BugReport {
+  id             Int       @id @default(autoincrement())
+  title          String
+  description    String
+  repro_steps    String?
+  reporter_email String?
+  user_id        Int?
+  app            String
+  app_version    String?
+  lang           String?
+  page           String?
+  order_id       String?   @db.Uuid
+  user_agent     String?
+  status         String    @default("open")
+  triage_note    String?
+  updated_by     String?
+  created_at     DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime  @default(now()) @db.Timestamptz(6)
+  closed_at      DateTime? @db.Timestamptz(6)
+
+  @@index([status, created_at(sort: Desc)], map: "idx_bug_reports_status")
+  @@map("bug_reports")
+}

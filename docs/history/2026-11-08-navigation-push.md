@@ -44,3 +44,12 @@ transaction age) — run suites under `caffeinate -i`.
 3. Privacy policy: help-chat questions go to an AI provider; push notification tokens.
 4. Starter prices/pins checked on the ground; WaafiPay keys; wallet licence decision.
 5. A Chrome tab on the dev Mac has used a full core for days — close it before long test runs.
+
+## 2026-11-09: bug reports
+
+- The owner's team bug tracker (github.com/UWT-TCSS460-SP26/group-project-bug-tracker-front-end-group-8,
+  Next.js + a class API on Render) rebuilt as Help → Report a problem in the customer app, on our
+  own backend (`bug_reports`, migration `20261109120000_bug_reports`), with desk triage under
+  Bug reports. Same fields, limits, states and three outcomes; EN + plain SO.
+- Android builds paused at the owner's request (build 8 is ready; upload later).
+- Tests: 533 unit, 28 Playwright, 82 live, 65-step simulation.

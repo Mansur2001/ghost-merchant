@@ -28,6 +28,9 @@ import { getCatalog, getPlaces } from '../queries/catalog.js';
 import { createEntry, updateEntry, CatalogError } from '../commands/catalog.js';
 import { markWithdrawalPaid, rejectWithdrawal, WalletError } from '../commands/wallet.js';
 import { listWithdrawals } from '../queries/wallet.js';
+import { triageBug } from '../commands/bugs.js';
+import { listBugs, getBug } from '../queries/bugs.js';
+import { BugError } from '../domain/bugReport.js';
 import { STATUS } from '../domain/stateMachine.js';
 import { wakeOutbox, outboxHealth } from '../events/outbox.js';
 import {
@@ -600,6 +603,32 @@ operatorRouter.post('/operator/withdrawals/:id/reject', adminOnly, async (req, r
   }
 });
 const serializeWithdrawal = (w) => ({ id: String(w.id), status: w.status, reference: w.reference, note: w.note });
+
+// ── Bug reports (Help -> Report a problem). Operators triage; every change is audited. ──
+operatorRouter.get('/operator/bugs', operatorOnly, async (req, res, next) => {
+  try {
+    res.json(await listBugs({ status: req.query.status, order: req.query.order }));
+  } catch (err) {
+    next(err);
+  }
+});
+operatorRouter.get('/operator/bugs/:id', operatorOnly, async (req, res, next) => {
+  try {
+    const bug = await getBug(req.params.id);
+    if (!bug) return res.status(404).json({ error: 'not found' });
+    res.json({ bug });
+  } catch (err) {
+    next(err);
+  }
+});
+operatorRouter.patch('/operator/bugs/:id', operatorOnly, async (req, res, next) => {
+  try {
+    res.json({ bug: await triageBug({ id: req.params.id, body: req.body, actor: actorLabel(req.auth) }) });
+  } catch (err) {
+    if (err instanceof BugError) return res.status(err.status).json({ error: err.message, field: err.field });
+    next(err);
+  }
+});
 
 // GET /api/operator/audit — the append-only decision log, newest first. Admins only: it names
 // staff and customers' orders, and it is the record a dispute is settled with.

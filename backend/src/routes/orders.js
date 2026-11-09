@@ -28,7 +28,9 @@ import { buildPaymentInstruction } from '../domain/ussd.js';
 import { parsePhone } from '../domain/phone.js';
 import { senderForRole, canAccessOrder } from '../domain/access.js';
 import { isUuid } from '../domain/ids.js';
-import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAuth, requireRole, verifyToken } from '../middleware/auth.js';
+import { fileBug } from '../commands/bugs.js';
+import { BugError } from '../domain/bugReport.js';
 import { requireOrderAccess } from '../middleware/authorize.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 
@@ -325,6 +327,28 @@ ordersRouter.post(
       }
       res.json(await answer({ message, history, lang, order }));
     } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /api/bugs — Help -> Report a problem. Public on purpose (the team bug tracker's rule:
+// zero friction, no account needed), so it is rate-limited and has a honeypot field. A
+// signed-in customer's account is attached from the session, never from the body.
+ordersRouter.post(
+  '/bugs',
+  rateLimit({ windowMs: 60 * 60 * 1000, max: 8, message: 'too many reports — try again later' }),
+  async (req, res, next) => {
+    // Bots fill every field; people never see this one.
+    if (req.body?.website) return res.status(201).json({ data: { id: null, status: 'open' } });
+    const bearer = (req.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+    const session = bearer ? verifyToken(bearer) : null;
+    const userId = session?.role === 'customer' && Number.isInteger(session.uid) ? session.uid : null;
+    try {
+      const ack = await fileBug({ body: req.body || {}, userId, userAgent: req.get('User-Agent') });
+      res.status(201).json({ data: ack });
+    } catch (err) {
+      if (err instanceof BugError) return res.status(err.status).json({ error: err.message, field: err.field });
       next(err);
     }
   }

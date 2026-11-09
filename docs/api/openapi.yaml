@@ -765,6 +765,37 @@ paths:
         "200": { description: Removed, content: { application/json: { schema: { type: object, properties: { removed: { type: integer } } } } } }
         "401": { description: Not signed in, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
+  /api/bugs:
+    post:
+      tags: [Public]
+      summary: Report a problem with the app (Help → Report a problem)
+      description: |
+        Adapted from the team bug tracker: same fields and limits. No account needed (rate-limited,
+        8 an hour, with a honeypot); a signed-in customer's account is attached from the token, and
+        `orderId` is kept only if it is the caller's own order. Errors name the `field` they belong to.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, description]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 200 }
+                description: { type: string, minLength: 1, maxLength: 5000 }
+                reproSteps: { type: string, maxLength: 5000 }
+                reporterEmail: { type: string, format: email }
+                app: { type: string, enum: [customer, driver, operator] }
+                appVersion: { type: string }
+                lang: { type: string, enum: [en, so] }
+                page: { type: string }
+                orderId: { type: string, format: uuid }
+      responses:
+        "201": { description: Filed, content: { application/json: { schema: { type: object, properties: { data: { type: object, properties: { id: { type: integer }, status: { type: string }, createdAt: { type: string, format: date-time } } } } } } } }
+        "400": { description: Validation failed (`field` says which), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { description: Too many reports, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
   /api/catalog:
     get:
       tags: [Public]
@@ -1675,6 +1706,36 @@ paths:
         "200": { description: Updated, content: { application/json: { schema: { type: object, properties: { driver: { type: object } } } } } }
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { description: Admins only, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/operator/bugs:
+    get:
+      tags: [Operator]
+      summary: Bug reports, newest first; optional status filter
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [open, in_progress, resolved, closed] } }
+        - { name: order, in: query, schema: { type: string, enum: [asc, desc], default: desc } }
+      responses:
+        "200": { description: List and counts per status, content: { application/json: { schema: { type: object } } } }
+
+  /api/operator/bugs/{id}:
+    get:
+      tags: [Operator]
+      summary: One bug report, with its context
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: Report, content: { application/json: { schema: { type: object } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Operator]
+      summary: Triage — status and/or a note (audited). Closed reports are deleted 90 days after closing.
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: { status: { type: string, enum: [open, in_progress, resolved, closed] }, note: { type: string, maxLength: 1000 } } } } }
+      responses:
+        "200": { description: Updated, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /api/operator/map:

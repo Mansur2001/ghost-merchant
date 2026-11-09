@@ -542,6 +542,46 @@
       <section id="faqView" class="hidden">
         <div class="screen-head"><h2 data-i18n="faq.title">FAQ</h2></div>
         <button class="secondary" id="openChat" type="button" style="margin:0 0 14px;" data-i18n="help.open">Chat with us</button>
+
+        <!-- Report a problem: the team bug tracker, adapted (same fields, limits and the three
+             outcomes: filed with its number / inline field errors / "couldn't reach us, your
+             text is kept"). Reports go to our own database; the desk triages them. -->
+        <details class="card bug-card" id="bugBox">
+          <summary><strong data-i18n="bug.title">Report a problem with the app</strong>
+            <span class="muted" data-i18n="bug.sub">Something broken or confusing? Tell us.</span></summary>
+          <div class="alert-ok hidden" id="bugOk" tabindex="-1" role="status"></div>
+          <div class="callout warn hidden" id="bugErr" role="alert"></div>
+          <form id="bugForm" novalidate>
+            <div class="field" data-field="title">
+              <label for="bugTitle"><span data-i18n="bug.f.title">What went wrong?</span> <span class="req">*</span></label>
+              <input id="bugTitle" maxlength="200" data-i18n-ph="bug.f.title.ph" placeholder="Short summary, e.g. The map stays blank" />
+              <div class="counter muted" data-for="bugTitle"></div>
+              <div class="field-error" id="bugTitleErr"></div>
+            </div>
+            <div class="field" data-field="description">
+              <label for="bugDesc"><span data-i18n="bug.f.desc">What happened?</span> <span class="req">*</span></label>
+              <textarea id="bugDesc" maxlength="5000" rows="4" data-i18n-ph="bug.f.desc.ph" placeholder="What did you see? What did you expect?"></textarea>
+              <div class="counter muted" data-for="bugDesc"></div>
+              <div class="field-error" id="bugDescErr"></div>
+            </div>
+            <div class="field" data-field="reproSteps">
+              <label for="bugSteps"><span data-i18n="bug.f.steps">Steps to make it happen again</span> <span class="muted" data-i18n="bug.optional">(optional)</span></label>
+              <textarea id="bugSteps" maxlength="5000" rows="3" data-i18n-ph="bug.f.steps.ph" placeholder="1. Open Ride  2. Tap Search  3. …"></textarea>
+              <div class="counter muted" data-for="bugSteps"></div>
+              <div class="field-error" id="bugStepsErr"></div>
+            </div>
+            <div class="field" data-field="reporterEmail" id="bugEmailWrap">
+              <label for="bugEmail"><span data-i18n="bug.f.email">Your email</span> <span class="muted" data-i18n="bug.optional">(optional)</span></label>
+              <input id="bugEmail" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" />
+              <div class="muted hint" data-i18n="bug.f.email.hint">Only if you want us to reply.</div>
+              <div class="field-error" id="bugEmailErr"></div>
+            </div>
+            <!-- Not for people: bots fill every field. -->
+            <input class="hp" id="bugWebsite" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" />
+            <p class="muted" id="bugContext" style="font-size:12px;margin:8px 0 0;"></p>
+            <button id="bugSend" type="submit" data-i18n="bug.send">Send report</button>
+          </form>
+        </details>
         <details open><summary data-i18n="faq.what.q"></summary>
           <p class="muted" data-i18n-html="faq.what.a"></p></details>
         <details><summary data-i18n="faq.pay.q"></summary>

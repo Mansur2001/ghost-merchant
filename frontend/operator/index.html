@@ -170,6 +170,27 @@
             </div>
           </div>
 
+          <!-- ── Bug reports from Help -> Report a problem (the team bug tracker, adapted) ── -->
+          <div data-panel="bugs" class="panel hidden">
+            <div class="panel-head">
+              <h2>Bug reports</h2>
+              <div class="chips" id="bugFilter" role="group" aria-label="Status">
+                <button class="chip" type="button" data-bugstatus="" aria-pressed="false">All</button>
+                <button class="chip" type="button" data-bugstatus="open" aria-pressed="true">Open</button>
+                <button class="chip" type="button" data-bugstatus="in_progress" aria-pressed="false">In progress</button>
+                <button class="chip" type="button" data-bugstatus="resolved" aria-pressed="false">Resolved</button>
+                <button class="chip" type="button" data-bugstatus="closed" aria-pressed="false">Closed</button>
+              </div>
+            </div>
+            <div class="workspace" id="bugsWs">
+              <div class="pane list">
+                <div class="pane-head"><strong>Reports</strong><span class="muted" id="bugsCount"></span></div>
+                <div class="pane-body" id="bugList"></div>
+              </div>
+              <div class="pane detail" id="bugDetail"></div>
+            </div>
+          </div>
+
           <!-- ── Catalog: generic items and prices, and the fixed places list ── -->
           <div data-panel="catalog" class="panel hidden">
             <div class="panel-head">

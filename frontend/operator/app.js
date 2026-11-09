@@ -115,10 +115,11 @@ const ICON = {
   account: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/>',
   map: '<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>',
   catalog: '<path d="M4 7h16l-1.5 12a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2z"/><path d="M9 7a3 3 0 0 1 6 0"/>',
+  bugs: '<path d="M9 9V7a3 3 0 0 1 6 0v2"/><rect x="7" y="9" width="10" height="11" rx="5"/><path d="M3 13h4M17 13h4M4 7l3 3M20 7l-3 3M4 20l3-3M20 20l-3-3"/>',
 };
 const SECTIONS = [
   ['orders', 'Orders'], ['map', 'Live map'], ['deliveries', 'Deliveries'], ['refunds', 'Refunds'],
-  ['drivers', 'Drivers'], ['catalog', 'Catalog'], ['team', 'Team', 'admin'], ['audit', 'Audit log', 'admin'], ['account', 'Account'],
+  ['drivers', 'Drivers'], ['catalog', 'Catalog'], ['bugs', 'Bug reports'], ['team', 'Team', 'admin'], ['audit', 'Audit log', 'admin'], ['account', 'Account'],
 ];
 let panel = 'orders';
 const counts = {};
@@ -140,6 +141,7 @@ function setPanel(id) {
   if (id === 'audit') loadAudit();
   if (id === 'map') loadMap();
   if (id === 'catalog') loadCatalogAdmin();
+  if (id === 'bugs') loadBugs();
 }
 function setCount(id, n) {
   if ((counts[id] || 0) === n) return;
@@ -149,7 +151,7 @@ function setCount(id, n) {
 document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => setPanel(b.dataset.goto)));
 
 // List + detail plumbing: which item is open in each section, and the phone-width toggle.
-const selected = { orders: null, deliveries: null, refunds: null, drivers: null, team: null, catalog: null };
+const selected = { orders: null, deliveries: null, refunds: null, drivers: null, team: null, catalog: null, bugs: null };
 function markSelected(listEl, key) {
   listEl.querySelectorAll('[data-open]').forEach((r) => r.setAttribute('aria-selected', String(r.dataset.open === key)));
 }
@@ -228,7 +230,7 @@ async function showDash() {
   await loadMe();
   setPanel('orders');
   setStatus(me ? `Signed in as ${me.display_name} (${me.username}) — monitoring live.` : 'Monitoring live.', 'ok');
-  ['orderDetail', 'deliveryDetail', 'refundDetail', 'driverDetail', 'teamDetail', 'catalogDetail'].forEach((id) =>
+  ['orderDetail', 'deliveryDetail', 'refundDetail', 'driverDetail', 'teamDetail', 'catalogDetail', 'bugDetail'].forEach((id) =>
     emptyDetail($(id), '👈', 'Select an item on the left.'));
   refreshAll();
   connectSocket();
@@ -999,6 +1001,74 @@ $('newItemBtn').addEventListener('click', () => editItem(null));
 $('newCatBtn').addEventListener('click', () => editCategory(null));
 $('newPlaceBtn').addEventListener('click', () => editPlace(null));
 
+// ═══════════════ Bug reports ═══════════════
+// From Help -> Report a problem (the team bug tracker, adapted). Every status change and note is
+// in the audit log. Resolved/closed reports are deleted 90 days after closing.
+const BUG_CHIP = { open: ['Open', 'pending'], in_progress: ['In progress', 'info'], resolved: ['Resolved', 'ok'], closed: ['Closed', ''] };
+let bugStatus = 'open';
+let bugs = [];
+async function loadBugs() {
+  const res = await api(`/operator/bugs${bugStatus ? `?status=${bugStatus}` : ''}`);
+  if (res.error) return toast(res.error);
+  bugs = res.bugs || [];
+  setCount('bugs', res.counts?.open || 0);
+  $('bugsCount').textContent = `${bugs.length}`;
+  $('bugList').innerHTML = bugs.length ? bugs.map((b) => {
+    const [chip, tone] = BUG_CHIP[b.status] || [b.status, ''];
+    return `<button class="lrow" type="button" data-open="${b.id}">
+      <span class="l1"><span class="mono">#${b.id}</span><span class="t">${escapeHtml(b.title)}</span></span>
+      <span class="l2">${escapeHtml(b.app)} · ${b.user_id ? 'signed-in customer' : b.reporter_email ? 'visitor with email' : 'anonymous'} · ${timeAgo(b.created_at)}</span>
+      <span class="side"><span class="badge ${tone}">${chip}</span></span>
+    </button>`;
+  }).join('') : `<div class="pane-empty"><div class="big">🐞</div>No ${bugStatus ? BUG_CHIP[bugStatus][0].toLowerCase() : ''} reports.</div>`;
+  $('bugList').querySelectorAll('[data-open]').forEach((r) => r.addEventListener('click', () => openBug(r.dataset.open)));
+  markSelected($('bugList'), selected.bugs);
+}
+$('bugFilter').querySelectorAll('[data-bugstatus]').forEach((b) => b.addEventListener('click', () => {
+  bugStatus = b.dataset.bugstatus;
+  $('bugFilter').querySelectorAll('[data-bugstatus]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+  loadBugs();
+}));
+async function openBug(id) {
+  selected.bugs = String(id);
+  markSelected($('bugList'), selected.bugs);
+  const res = await api(`/operator/bugs/${id}`);
+  if (res.error) return toast(res.error);
+  const b = res.bug;
+  const el = $('bugDetail');
+  const options = Object.entries(BUG_CHIP).map(([v, [label]]) => `<option value="${v}" ${b.status === v ? 'selected' : ''}>${label}</option>`).join('');
+  el.innerHTML = `
+    <div class="pane-head">${backBtn('bugsWs')}<strong class="mono">#${b.id}</strong><span class="t">${escapeHtml(b.title)}</span></div>
+    <div class="pane-body">
+      <div class="dsec"><h4>What happened</h4><p style="margin:0;white-space:pre-wrap;">${escapeHtml(b.description)}</p></div>
+      ${b.repro_steps ? `<div class="dsec"><h4>Steps to reproduce</h4><p style="margin:0;white-space:pre-wrap;">${escapeHtml(b.repro_steps)}</p></div>` : ''}
+      <div class="dsec"><h4>Context</h4><dl class="kv">
+        <dt>From</dt><dd>${b.user_id ? `signed-in customer (account ${b.user_id})` : 'signed-out visitor'}${b.reporter_email ? ` · <a href="mailto:${escapeHtml(b.reporter_email)}">${escapeHtml(b.reporter_email)}</a>` : ''}</dd>
+        <dt>App</dt><dd>${escapeHtml(b.app)} ${escapeHtml(b.app_version || '')} · ${escapeHtml(b.lang || '?')} · screen ${escapeHtml(b.page || '?')}</dd>
+        ${b.order_id ? `<dt>Order</dt><dd><a href="#" data-goorder="${b.order_id}">#${GMIds.shortId(b.order_id)}</a></dd>` : ''}
+        <dt>Device</dt><dd class="muted" style="font-size:12px;">${escapeHtml(b.user_agent || '—')}</dd>
+        <dt>Filed</dt><dd>${new Date(b.created_at).toLocaleString()}</dd>
+        ${b.updated_by ? `<dt>Last change</dt><dd>${escapeHtml(b.updated_by)} · ${timeAgo(b.updated_at)}</dd>` : ''}
+      </dl></div>
+      <div class="dsec"><h4>Triage</h4>
+        <label for="bugStatusSel">Status</label><select id="bugStatusSel">${options}</select>
+        <label for="bugNote">Note (for the team; not sent to the reporter)</label>
+        <textarea id="bugNote" maxlength="1000">${escapeHtml(b.triage_note || '')}</textarea>
+      </div>
+    </div>
+    <div class="pane-foot"><button id="bugSave" type="button">Save</button></div>`;
+  bindBack(el);
+  showDetail('bugsWs', true);
+  el.querySelector('[data-goorder]')?.addEventListener('click', (e) => { e.preventDefault(); setPanel('orders'); refreshAll().then(() => openOrder(b.order_id)); });
+  $('bugSave').addEventListener('click', async () => {
+    const out = await api(`/operator/bugs/${b.id}`, { method: 'PATCH', body: JSON.stringify({ status: $('bugStatusSel').value, note: $('bugNote').value }) });
+    if (out.error) return toast(out.error);
+    toast('Saved ✓ — recorded in the audit log');
+    await loadBugs();
+    openBug(b.id);
+  });
+}
+
 // ═══════════════ Team (admin): access requests + operators ═══════════════
 // Two separate steps, on purpose: Approve records the decision; "Create account" mints the
 // credential and emails them a setup code. An approved request stays here until it's done.
@@ -1317,6 +1387,8 @@ $('opPushToggle').addEventListener('click', async () => {
 function openFromUrl(href) {
   let u;
   try { u = new URL(href, location.origin); } catch { return; }
+  const bug = u.searchParams.get('bug');
+  if (bug) { setPanel('bugs'); openBug(bug); return; }
   const id = u.searchParams.get('order');
   setPanel('orders');
   if (id) { refreshAll().then(() => openOrder(id)); }
@@ -1327,6 +1399,8 @@ if ('serviceWorker' in navigator) {
 
 if (token) showDash().then(() => {
   if (new URLSearchParams(location.search).has('order')) { openFromUrl(location.href); history.replaceState(null, '', location.pathname); }
+  const bugId = new URLSearchParams(location.search).get('bug');
+  if (bugId) { setPanel('bugs'); openBug(bugId); history.replaceState(null, '', location.pathname); }
 });
 
 // ── Service worker ──

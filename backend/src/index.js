@@ -17,6 +17,7 @@ import { staffSetupRouter } from './routes/staffSetup.js';
 import { sweepExpiredSetupCodes } from './commands/staffAccounts.js';
 import { dispatchWaitingSoon } from './commands/dispatch.js';
 import { sweepStaleAttempts } from './commands/providerPayments.js';
+import { sweepClosedBugs } from './commands/bugs.js';
 import { ensureStarterCatalog } from './db/starterCatalog.js';
 import { WAAFIPAY_PRODUCTION_URL } from './domain/waafipay.js';
 import { attachSocketServer } from './realtime/socketServer.js';
@@ -96,6 +97,7 @@ const housekeeping = setInterval(() => {
   sweepExpiredOtps().catch((err) => console.error('OTP sweep failed:', err.message));
   sweepOutbox().catch((err) => console.error('outbox sweep failed:', err.message));
   sweepExpiredSetupCodes().catch((err) => console.error('setup code sweep failed:', err.message));
+  sweepClosedBugs().catch((err) => console.error('bug report sweep failed:', err.message));
 }, 60 * 60 * 1000);
 housekeeping.unref();
 

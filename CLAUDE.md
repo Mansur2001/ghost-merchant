@@ -231,6 +231,23 @@ customer wallet exists but is OFF by default (invariant 6).
   second bounded vendor exception after Twilio: it carries questions, never money or
   identities. (OSM data via Geofabrik/Protomaps/Nominatim is open data, not a vendor account.)
 
+## Bug reports (Help → Report a problem)
+
+The team bug tracker (TCSS 460 group 8, a Next.js form against a class API) rebuilt inside the
+customer PWA's Help tab and our own backend — not its framework, not its API. Kept: the fields
+and limits (title ≤200, description ≤5000, steps ≤5000, optional email), character counters,
+and its three outcomes — "filed as #N" (focused, announced), an error next to the field it
+belongs to (the server names the `field`), and "couldn't reach us" with everything typed kept.
+
+- `POST /api/bugs` is public (zero friction, the tracker's rule): 8 an hour per IP, a honeypot
+  field. A signed-in customer's account comes from the token, never the body; signed in, no
+  email is asked. Context is recorded (app, version, language, screen, the order — only if it
+  is the reporter's own).
+- Desk: **Bug reports** (all operators) — open / in progress / resolved / closed, a team note,
+  every change audited; operators get a push for each new report.
+- Not an archive: resolved/closed reports are deleted 90 days after closing (people type their
+  own details into these). Screenshots are deliberately not collected.
+
 ## Push notifications
 
 `domain/push.js` decides who is told what; `notify/pushSender.js` delivers; `realtime/pushBridge.js`
@@ -649,7 +666,7 @@ Guards (`db/seedSafety.js`), because the seed truncates everything and its passw
 ## Testing
 
 ```bash
-cd backend && npm install && npm test   # 527 Jest unit tests, ESM via --experimental-vm-modules
+cd backend && npm install && npm test   # 533 Jest unit tests, ESM via --experimental-vm-modules
 ./scripts/verify/run-all.sh             # live suites over real HTTP + WebSocket
 ```
 
@@ -663,8 +680,8 @@ Run from `backend/` like 05.
 
 Staging extras: the **WaafiPay simulator** (`scripts/waafipay-mock.mjs`; payer ending 0000 =
 declined, 9999 = unreadable), `WALLET_ENABLED=true`, throwaway VAPID keys, and **OSRM** when
-`routing/` is built (`staging.sh up` starts it). Playwright: 26 workflows incl. rides,
-navigation, OSM search, help chat, wallet. Pushes can't reach a headless browser — the bridge
+`routing/` is built (`staging.sh up` starts it). Playwright: 28 workflows incl. rides,
+navigation, OSM search, help chat, wallet, bug reports. Pushes can't reach a headless browser — the bridge
 is proven by registering a device at an address that can't exist and checking the attempts.
 **A Mac that sleeps mid-run** freezes Docker: tests "take 45 minutes", OTPs expire (401) and
 Prisma reports transactions "2,700,000 ms" old. That is the laptop, not a lock — run the
@@ -733,7 +750,8 @@ EN/SO interface, proof of delivery, automatic dispatch, the audit log, and the o
 Since 2026-11-08 in production: rides (bajaj/car, prepaid fixed fares, nearest-driver dispatch,
 rider code), the generic catalog + cart, live maps with the self-hosted Somalia street map,
 turn-by-turn navigation on our own OSRM, OpenStreetMap place search, the help-chat widget on
-Groq, web push notifications, and in-app recovery of a locked-out admin
+Groq, web push notifications, Help → Report a problem with desk triage, and recovery of a
+locked-out admin
 (`scripts/reset-staff-access.mjs`). Built and OFF: WaafiPay (no merchant keys yet), the
 customer wallet (`WALLET_ENABLED`, licence question), Android push (needs Firebase).
 The Android app builds and installs (`0.3.0`, versionCode 7, signed; upload key

@@ -1887,6 +1887,84 @@ if ('serviceWorker' in navigator) {
 }
 GMPush.onNativeTap(openFromUrl);
 
+// ── Report a problem (Help) ──
+// Adapted from the team bug tracker (TCSS 460 group 8): the same fields and limits, the
+// character counters, and its three outcomes — filed (with the report number, announced to
+// screen readers), a field error shown next to that field, or "couldn't reach us" with
+// everything typed still there. Reports go to our own server, never a third party.
+const APP_VERSION = '0.4.0';
+const BUG_FIELDS = { title: ['bugTitle', 'bugTitleErr'], description: ['bugDesc', 'bugDescErr'], reproSteps: ['bugSteps', 'bugStepsErr'], reporterEmail: ['bugEmail', 'bugEmailErr'] };
+const BUG_LIMITS = { bugTitle: 200, bugDesc: 5000, bugSteps: 5000 };
+function bugCounters() {
+  document.querySelectorAll('#bugForm .counter').forEach((c) => {
+    const el = $(c.dataset.for);
+    const max = BUG_LIMITS[c.dataset.for];
+    c.textContent = `${el.value.length} / ${max}`;
+    c.classList.toggle('near', el.value.length >= max * 0.9);
+  });
+}
+function bugFieldError(field, msg) {
+  const [input, out] = BUG_FIELDS[field] || [];
+  if (!input) return false;
+  $(out).textContent = msg || '';
+  $(input).setAttribute('aria-invalid', msg ? 'true' : 'false');
+  if (msg) $(input).setAttribute('aria-describedby', out); else $(input).removeAttribute('aria-describedby');
+  $(input).closest('.field').classList.toggle('invalid', Boolean(msg));
+  return true;
+}
+function renderBugBox() {
+  // Signed in: we know who it is. Signed out: an optional email for a reply.
+  $('bugEmailWrap').classList.toggle('hidden', Boolean(token));
+  $('bugContext').textContent = helpOrderId ? t('bug.context.order', { n: GMIds.shortId(helpOrderId) }) : '';
+  bugCounters();
+}
+['bugTitle', 'bugDesc', 'bugSteps', 'bugEmail'].forEach((id) => $(id).addEventListener('input', () => {
+  const field = Object.keys(BUG_FIELDS).find((f) => BUG_FIELDS[f][0] === id);
+  bugFieldError(field, '');
+  bugCounters();
+}));
+$('bugBox').addEventListener('toggle', renderBugBox);
+$('bugForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('bugErr').classList.add('hidden');
+  $('bugOk').classList.add('hidden');
+  const title = $('bugTitle').value.trim();
+  const description = $('bugDesc').value.trim();
+  const email = token ? '' : $('bugEmail').value.trim();
+  Object.keys(BUG_FIELDS).forEach((f) => bugFieldError(f, ''));
+  let bad = false;
+  if (!title) bad = bugFieldError('title', t('bug.e.title')) || true;
+  if (!description) bad = bugFieldError('description', t('bug.e.desc')) || true;
+  if (email && !EMAIL_RE.test(email)) bad = bugFieldError('reporterEmail', t('email.bad')) || true;
+  if (bad) return;
+  $('bugSend').disabled = true;
+  $('bugSend').textContent = t('bug.sending');
+  const res = await api('/bugs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      title, description, reproSteps: $('bugSteps').value.trim(), reporterEmail: email,
+      website: $('bugWebsite').value, app: 'customer', appVersion: APP_VERSION, lang: GMI18n.lang(),
+      page: currentView, ...(helpOrderId ? { orderId: helpOrderId } : {}),
+    }),
+  });
+  $('bugSend').disabled = false;
+  $('bugSend').textContent = t('bug.send');
+  if (res.error) {
+    // A field problem goes next to the field; anything else keeps what was typed.
+    if (res.status === 400 && bugFieldError(res.field, GMI18n.err(res.error))) return;
+    $('bugErr').textContent = res.offline || res.status >= 500 ? t('bug.e.network') : GMI18n.err(res.error);
+    $('bugErr').classList.remove('hidden');
+    return;
+  }
+  $('bugForm').reset();
+  bugCounters();
+  const n = res.data?.id;
+  $('bugOk').textContent = n ? t('bug.ok.n', { n }) : t('bug.ok');
+  $('bugOk').classList.remove('hidden');
+  $('bugOk').focus();
+});
+
 // ── Navigation: bottom tabs ──
 // Home = the new-order screen when signed in, the landing page when not. Orders and Account
 // need a session, so they send a signed-out visitor to sign-in first and come back after.
@@ -1911,7 +1989,7 @@ function showView(id, tab) {
   window.scrollTo(0, 0);
 }
 function goTab(tab, { start = false } = {}) {
-  if (tab === 'help') return showView('faqView');
+  if (tab === 'help') { renderBugBox(); return showView('faqView'); }
   if (!token) {
     if (tab === 'home' && !start) return showView('landingView');
     afterSignIn = tab;

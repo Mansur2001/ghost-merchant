@@ -685,3 +685,18 @@ body.op { height: 100vh; height: 100dvh; overflow: hidden; }
 .search-row { display: flex; gap: 8px; align-items: stretch; }
 .search-row input { flex: 1; min-width: 0; }
 .search-row button { margin: 0; flex: 0 0 auto; }
+
+/* ── Report a problem (Help) ── */
+.bug-card summary { cursor: pointer; display: flex; flex-direction: column; gap: 2px; list-style: none; }
+.bug-card summary::-webkit-details-marker { display: none; }
+.bug-card summary .muted { font-size: 13px; font-weight: 400; }
+.bug-card[open] summary { margin-bottom: 8px; }
+.bug-card .field { position: relative; }
+.bug-card .req { color: var(--danger); }
+.bug-card .counter { font-size: 11px; text-align: right; margin-top: 2px; }
+.bug-card .counter.near { color: var(--warn); }
+.bug-card .field-error { color: var(--danger); font-size: 13px; min-height: 0; }
+.bug-card .field.invalid input, .bug-card .field.invalid textarea { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
+.bug-card .hint { font-size: 12px; }
+.bug-card .hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+.alert-ok { padding: 10px 12px; border-radius: 10px; background: var(--ok-soft); color: var(--text); margin-bottom: 8px; font-weight: 600; }
