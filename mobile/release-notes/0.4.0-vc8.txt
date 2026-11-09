@@ -1,0 +1,14 @@
+<en-US>
+0.4.0 (build 8)
+• Turn-by-turn directions for drivers, on a map of Somalia.
+• Watch your driver come along the road, with a live arrival time.
+• Search any place in Somalia when booking.
+• Help chat: tap the chat button any time.
+</en-US>
+<so>
+0.4.0 (nooca 8)
+• Tilmaan jid-jid ah oo darawallada loogu talagalay, khariidadda Soomaaliya.
+• Daawo darawalkaaga oo jidka kuu soo maraya, iyo waqtiga uu imanayo.
+• Raadi meel kasta oo Soomaaliya ah marka aad dalbanayso.
+• Caawimaad: riix badhanka fariimaha mar kasta.
+</so>
