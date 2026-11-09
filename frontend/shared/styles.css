@@ -516,6 +516,8 @@ body.op { height: 100vh; height: 100dvh; overflow: hidden; }
   background-size: 32px 32px;
 }
 .gm-map-note { background: var(--panel); color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; font-size: 12px; max-width: 220px; }
+/* Undo the app-wide button rule (full width, 50px tall, top margin) for the map button. */
+.gm-locate { min-height: 0; margin-top: 0; padding: 0; flex: none; }
 /* "My location": a crosshair button; blue while it follows the phone, faded when GPS is off. */
 .gm-locate {
   width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel);
@@ -535,6 +537,13 @@ body.op { height: 100vh; height: 100dvh; overflow: hidden; }
   border: 2px solid var(--panel);
 }
 .gm-pin .gm-pin-head > b { transform: rotate(45deg); line-height: 1; }
+/* A picked business: its emoji in the pin head instead of A/B, its name beside it. */
+.gm-pin-glyph .gm-pin-head > b { font-size: 15px; font-weight: 400; }
+.leaflet-tooltip.gm-pin-name {
+  background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+  padding: 2px 8px; font-weight: 600; font-size: 12px; line-height: 1.4; box-shadow: 0 2px 6px rgba(0,0,0,.25);
+}
+.leaflet-tooltip.gm-pin-name::before { display: none; }
 .gm-pin-dropoff .gm-pin-head { background: var(--text); color: var(--bg); }
 .gm-pin-market .gm-pin-head { background: var(--panel); color: var(--text); }
 .gm-pin .gm-dot { display: block; width: 22px; height: 22px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 4px rgba(124, 180, 255, .35), 0 2px 6px rgba(0,0,0,.4); }
@@ -572,6 +581,12 @@ body.op { height: 100vh; height: 100dvh; overflow: hidden; }
   background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 10px; font-weight: 600; text-align: left;
 }
 .place-result .muted { font-weight: 400; font-size: 12px; }
+.place-result .place-name { display: flex; align-items: center; gap: 8px; }
+/* A result's kind, as on the map: a coloured disc with the same emoji. */
+.place-ic {
+  flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
+  border: 1.5px solid #fff; font-size: 12px; line-height: 1;
+}
 .ride-options { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
 .ride-option {
   display: flex; align-items: center; gap: 12px; margin: 0; padding: 12px 14px; min-height: 64px; text-align: left; font-weight: 400;

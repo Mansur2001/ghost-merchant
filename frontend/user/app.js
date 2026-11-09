@@ -431,7 +431,17 @@ function renderPlaceResults(box, list, onPick, { osm = false } = {}) {
     b.type = 'button';
     b.className = 'place-result';
     const name = document.createElement('span');
-    name.textContent = p.osm ? p.name : placeName(p);
+    name.className = 'place-name';
+    // The same icon the map draws for this kind of place (hospital, market, mosque…).
+    const ic = GMMap.placeIcon(p.kind, p.category);
+    if (ic) {
+      const disc = document.createElement('span');
+      disc.className = 'place-ic';
+      disc.style.background = ic.color;
+      disc.textContent = ic.glyph;
+      name.append(disc);
+    }
+    name.append(p.osm ? p.name : placeName(p));
     const sub = document.createElement('span');
     sub.className = 'muted';
     sub.textContent = p.osm ? p.detail : p.city;
@@ -476,8 +486,15 @@ async function searchOsm(input, box, onPick, map) {
   renderPlaceResults(box, [...ours, ...osm], onPick, { osm: true });
 }
 const pickOsmOrPlace = (p) => (p.osm
-  ? { lat: p.lat, lng: p.lng, label: p.name }
-  : { lat: p.lat, lng: p.lng, placeId: p.id, label: placeName(p) });
+  ? { lat: p.lat, lng: p.lng, label: p.name, kind: p.kind, category: p.category }
+  : { lat: p.lat, lng: p.lng, placeId: p.id, label: placeName(p), kind: p.kind });
+
+// A point picked from search keeps its icon and name on the map; a GPS fix or a dragged pin
+// (no kind) is the plain A/B pin again.
+const pointLook = (p) => {
+  const ic = GMMap.placeIcon(p.kind, p.category);
+  return ic ? { glyph: ic.glyph, name: p.label } : { glyph: null, name: null };
+};
 
 // What the server is told about a point: the place id when one was chosen (so the server uses
 // ITS coordinates), otherwise the pin.
@@ -521,6 +538,7 @@ function setRidePoint(which, p) {
   ride[which] = p;
   ride.map.pin(which, p, {
     kind: which,
+    ...pointLook(p),
     draggable: true,
     onMove: (q) => setRidePoint(which, { lat: q.lat, lng: q.lng }),
   });
@@ -860,7 +878,7 @@ function renderCartLines() {
 
 function setDropPoint(p) {
   drop.point = p;
-  drop.map.pin('dropoff', p, { kind: 'dropoff', draggable: true, onMove: (q) => setDropPoint({ lat: q.lat, lng: q.lng }) });
+  drop.map.pin('dropoff', p, { kind: 'dropoff', ...pointLook(p), draggable: true, onMove: (q) => setDropPoint({ lat: q.lat, lng: q.lng }) });
   drop.map.accuracy('acc', p.accuracy ? p : null, p.accuracy);
   $('locStatus').textContent = p.placeId || p.label ? p.label
     : p.gps && p.accuracy > UNSURE_M ? t('ride.unsure', { m: p.accuracy })

@@ -82,7 +82,9 @@ async function search(query, lang, { minLat, maxLat, minLng, maxLng }, settings,
         detail: String(r.display_name || '').split(',').slice(1, 4).join(',').trim().slice(0, 120),
         lat: Math.round(Number(r.lat) * 1e6) / 1e6,
         lng: Math.round(Number(r.lon) * 1e6) / 1e6,
-        kind: r.type || r.category || null,
+        // OSM's own words (amenity/hospital, shop/clothes…): the apps draw the same icon as the map.
+        kind: r.type || null,
+        category: r.category || null,
       }))
       .filter((r) => r.name && inServiceArea(r));
   });

@@ -40,7 +40,7 @@ describe('routeDetail', () => {
 describe('geocode (OpenStreetMap Nominatim)', () => {
   const settings = { url: 'https://nominatim.example', userAgent: 'GuriKaabe/test (x@example.com)' };
   const answer = [
-    { name: 'Isbitaalka Banaadir', display_name: 'Isbitaalka Banaadir, Wadada Afgooye, Wadajir, Muqdisho', lat: '2.034484', lon: '45.29884', type: 'hospital' },
+    { name: 'Isbitaalka Banaadir', display_name: 'Isbitaalka Banaadir, Wadada Afgooye, Wadajir, Muqdisho', lat: '2.034484', lon: '45.29884', category: 'amenity', type: 'hospital' },
     { name: 'Far away', display_name: 'Somewhere', lat: '47.6', lon: '-122.3', type: 'city' },
   ];
   beforeEach(() => resetGeocoder());
@@ -52,7 +52,7 @@ describe('geocode (OpenStreetMap Nominatim)', () => {
     expect(url).toMatch(/countrycodes=so/);
     expect(url).toMatch(/bounded=1/);
     expect(init.headers['User-Agent']).toMatch(/GuriKaabe/);
-    expect(r).toEqual([{ name: 'Isbitaalka Banaadir', detail: 'Wadada Afgooye, Wadajir, Muqdisho', lat: 2.034484, lng: 45.29884, kind: 'hospital' }]);
+    expect(r).toEqual([{ name: 'Isbitaalka Banaadir', detail: 'Wadada Afgooye, Wadajir, Muqdisho', lat: 2.034484, lng: 45.29884, kind: 'hospital', category: 'amenity' }]);
   });
 
   test('the same search is answered from the cache, not asked again', async () => {

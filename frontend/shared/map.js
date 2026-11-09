@@ -41,11 +41,11 @@
 
   var PIN_TEXT = { pickup: 'A', dropoff: 'B', driver: '', me: '', market: '🛒', place: '' };
 
-  function icon(kind, label) {
-    var cls = 'gm-pin gm-pin-' + kind;
+  function icon(kind, label, glyph) {
+    var cls = 'gm-pin gm-pin-' + kind + (glyph ? ' gm-pin-glyph' : '');
     var inner = kind === 'driver' || kind === 'me'
       ? '<span class="gm-dot"></span>'
-      : '<span class="gm-pin-head"><b>' + (label || PIN_TEXT[kind] || '') + '</b></span>';
+      : '<span class="gm-pin-head"><b>' + (glyph || label || PIN_TEXT[kind] || '') + '</b></span>';
     var size = kind === 'driver' || kind === 'me' ? [22, 22] : [30, 38];
     var anchor = kind === 'driver' || kind === 'me' ? [11, 11] : [15, 36];
     return L.divIcon({ className: cls, html: inner, iconSize: size, iconAnchor: anchor });
@@ -103,6 +103,21 @@
   function poiZoom(props) {
     var min = Number(props.min_zoom);
     return Math.min(isFinite(min) && min > 0 ? min : 16, 17);
+  }
+
+  // OSM's broader categories, for a search result whose exact type has no icon of its own.
+  var CATEGORY = {
+    shop: ['🛍', SHOP], craft: ['🔧', SHOP], office: ['🏢', PUBLIC], healthcare: ['🏥', HEALTH],
+    tourism: ['⭐', PUBLIC], historic: ['🗿', PUBLIC], leisure: ['🌳', GREEN], aeroway: ['✈', TRAVEL],
+    railway: ['🚉', TRAVEL], public_transport: ['🚌', TRAVEL],
+  };
+  // Our own places (Operator → Catalog & places).
+  var OWN = { market: ['🛒', SHOP], landmark: ['⭐', PUBLIC] };
+  // The icon for a place found by search, the same one the map draws for it, or null.
+  // `kind` is OSM's type (hospital) or ours (market); `category` OSM's (amenity, shop…).
+  function placeIcon(kind, category) {
+    var k = POI[kind] || OWN[kind] || (category === 'landuse' && (kind === 'retail' || kind === 'commercial') ? POI.marketplace : null) || CATEGORY[category];
+    return k ? { glyph: k[0], color: k[1] } : null;
   }
 
   function poiSymbolizer(lng, dark) {
@@ -214,6 +229,18 @@
     })();
   }
 
+  // The place's name beside its pin (a picked business), or none.
+  function nameTag(marker, name) {
+    if ((marker._gmName || '') === (name || '')) return;
+    marker._gmName = name || '';
+    marker.unbindTooltip();
+    if (!name) return;
+    // As text, never HTML: a tooltip string is inserted as markup, and OSM names are public input.
+    var el = document.createElement('span');
+    el.textContent = String(name).slice(0, 40);
+    marker.bindTooltip(el, { permanent: true, direction: 'right', offset: [12, -22], className: 'gm-pin-name' });
+  }
+
   // A position that stopped updating (a driver in a dead zone) is drawn faded, not hidden.
   function markStale(marker, stale) {
     var e = marker.getElement && marker.getElement();
@@ -264,14 +291,18 @@
         o = o || {};
         if (!p || p.lat == null || p.lng == null) { api.remove(key); return null; }
         var existing = layers[key];
+        var look = (o.kind || 'place') + '|' + (o.label || '') + '|' + (o.glyph || '');
         if (existing && existing.setLatLng) {
           if (o.glide) glide(existing, p); else existing.setLatLng([p.lat, p.lng]);
           if (o.title) existing.options.title = o.title;
+          // A picked business turned back into a plain point (dragged away), or the reverse.
+          if (existing._gmLook !== look) { existing.setIcon(icon(o.kind || 'place', o.label, o.glyph)); existing._gmLook = look; }
+          nameTag(existing, o.name);
           if (o.stale != null) markStale(existing, o.stale);
           return existing;
         }
         var m = L.marker([p.lat, p.lng], {
-          icon: icon(o.kind || 'place', o.label),
+          icon: icon(o.kind || 'place', o.label, o.glyph),
           draggable: Boolean(o.draggable),
           keyboard: false,
           title: o.title || '',
@@ -280,6 +311,8 @@
         if (o.onMove) m.on('dragend', function () { var ll = m.getLatLng(); o.onMove({ lat: ll.lat, lng: ll.lng }); });
         if (o.onTap) m.on('click', function () { o.onTap(); });
         if (o.stale) markStale(m, true);
+        m._gmLook = look;
+        nameTag(m, o.name);
         layers[key] = m;
         return m;
       },
@@ -397,5 +430,6 @@
     navUri: navUri,
     MOGADISHU: MOGADISHU,
     stats: stats,
+    placeIcon: placeIcon,
   };
 })(window);

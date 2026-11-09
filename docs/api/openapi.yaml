@@ -721,7 +721,7 @@ paths:
               schema:
                 type: object
                 properties:
-                  results: { type: array, items: { type: object, properties: { name: { type: string }, detail: { type: string }, lat: { type: number }, lng: { type: number }, kind: { type: [string, "null"] }, distance_m: { type: integer, description: "only with near" } } } }
+                  results: { type: array, items: { type: object, properties: { name: { type: string }, detail: { type: string }, lat: { type: number }, lng: { type: number }, kind: { type: [string, "null"], description: "OSM type, e.g. hospital" }, category: { type: [string, "null"], description: "OSM category, e.g. amenity, shop" }, distance_m: { type: integer, description: "only with near" } } } }
                   attribution: { type: string }
         "401": { description: Not signed in, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
         "429": { description: Too many searches, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
