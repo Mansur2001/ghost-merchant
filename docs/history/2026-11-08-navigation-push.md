@@ -87,3 +87,8 @@ transaction age) — run suites under `caffeinate -i`.
   A throttled `POST /driver/location` was answered 400; now 200.
 - Decided with the owner: no "book anywhere" switch and no outside tile server; ride dispatch
   from abroad not needed now.
+- **Why the owner saw no icons and a credit that was gone:** their browser never re-downloaded
+  `map.js` (the production access log showed app.js, i18n.js… but never map.js). The service
+  worker's `addAll` was answered from the browser's HTTP cache (Caddy sent no Cache-Control),
+  so each new cache was filled with the old file. Fixed: precache with `cache: 'reload'`, and
+  Caddy sends `no-cache` for app files. Maps open at z15; the search credit line is gone.

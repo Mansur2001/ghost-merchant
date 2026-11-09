@@ -31,7 +31,7 @@ test('customer: search OpenStreetMap for a destination; the road route is drawn'
   await rider.press('#placeSearch', 'Enter');
   const osm = rider.locator('#placeResults .place-result', { has: rider.locator('.tag') }).first();
   await expect(osm).toBeVisible({ timeout: 15000 });
-  await expect(rider.locator('#placeResults .osm-attrib')).toContainText('OpenStreetMap');
+  await expect(rider.locator('#placeResults .osm-attrib')).toHaveCount(0); // no credit line under results
   await osm.click();
   await expect(rider.locator('#dropoffText')).toContainText(/Ben?adir|Banaadir/i);
   await expect(rider.locator('#rideMap path.gm-route')).toHaveCount(1, { timeout: 10000 });

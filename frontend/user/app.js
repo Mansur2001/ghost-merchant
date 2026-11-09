@@ -424,7 +424,7 @@ function searchPlaces(q) {
   return (placesCache || []).filter((p) => fold(p.name_en).includes(f) || fold(p.name_so).includes(f)).slice(0, 8);
 }
 // Results as buttons; `onPick(place)` sets the point. OpenStreetMap results show how far they
-// are, and the list ends with the one attribution line the data's licence asks for.
+// are (no credit line: OpenStreetMap is credited in the privacy policy).
 function renderPlaceResults(box, list, onPick, { osm = false } = {}) {
   const rows = list.map((p) => {
     const b = document.createElement('button');
@@ -445,10 +445,10 @@ function renderPlaceResults(box, list, onPick, { osm = false } = {}) {
     b.addEventListener('click', () => { box.replaceChildren(); onPick(p); });
     return b;
   });
-  if (osm) {
+  if (osm && !list.length) {
     const note = document.createElement('div');
     note.className = 'osm-attrib';
-    note.textContent = list.length ? '© OpenStreetMap contributors' : t('search.none');
+    note.textContent = t('search.none');
     rows.push(note);
   }
   box.replaceChildren(...rows);
@@ -876,7 +876,7 @@ async function openCheckout({ custom = false } = {}) {
   renderCartLines();
   if (custom) { $('customBox').open = true; $('request').focus(); }
   if (!drop.map) {
-    drop.map = GMMap.create($('dropMap'), { zoom: 13, locate: true });
+    drop.map = GMMap.create($('dropMap'), { zoom: 15, locate: true });
     drop.map.onTap((p) => { if (GMMap.inArea(p)) setDropPoint(p); });
     loadPlaces();
   }

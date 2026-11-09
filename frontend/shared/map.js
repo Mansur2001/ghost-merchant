@@ -94,6 +94,10 @@
   var POI_TEXT_ZOOM = 15;
   var POI_EARLY = 2;
 
+  // How many business/landmark icons have been drawn: lets a test prove they render (the
+  // map is a canvas, so there is no element to count).
+  var stats = { icons: 0 };
+
   function poiKind(props) { return props.kind || props['pmap:kind'] || ''; }
   // From which zoom the file says a place matters (16 if it doesn't say); every place by 17.
   function poiZoom(props) {
@@ -118,6 +122,7 @@
           anchor: a,
           bboxes: [{ minX: a.x - r, minY: a.y - r, maxX: a.x + r + (w ? 4 + w : 0), maxY: a.y + r }],
           draw: function (ctx) {
+            stats.icons++;
             ctx.globalAlpha = 1;
             ctx.beginPath();
             ctx.arc(0, 0, r, 0, 2 * Math.PI);
@@ -224,7 +229,8 @@
       minZoom: 3,
       maxZoom: 19,
       tap: true,
-    }).setView([center.lat, center.lng], opts.zoom || 14);
+    // Street level, like any maps app: businesses and landmarks are on screen without zooming.
+    }).setView([center.lat, center.lng], opts.zoom || 15);
 
     el.classList.add('gm-map');
     var note = null;
@@ -390,5 +396,6 @@
     formatDistance: formatDistance,
     navUri: navUri,
     MOGADISHU: MOGADISHU,
+    stats: stats,
   };
 })(window);

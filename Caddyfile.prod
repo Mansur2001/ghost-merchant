@@ -47,6 +47,10 @@
 		# Real domain: browsers remember to use HTTPS only, so a network can't downgrade them.
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		-Server
+		# App files are checked with the server on every load (a 304 when unchanged): without
+		# it browsers guess them fresh for hours and an update can reach the cache stale. The
+		# `?` keeps any value already set — /tiles sets its own day-long cache, the API its own.
+		?Cache-Control "no-cache"
 	}
 
 	# API -> backend

@@ -1,6 +1,9 @@
-const CACHE = 'gurikaabe-operator-v49';
+const CACHE = 'gurikaabe-operator-v50';
 const SHELL = ['/operator/', '/operator/index.html', '/operator/app.js', '/icon-192.png', '/shared/styles.css', '/shared/config.js', '/shared/ids.js', '/shared/syncPolicy.js', '/shared/queue.js', '/shared/phone.js', '/shared/theme.js', '/shared/push.js', '/shared/map.js', '/shared/vendor/leaflet-1.9.4.js', '/shared/vendor/leaflet-1.9.4.css', '/shared/vendor/protomaps-leaflet-5.1.0.js'];
-self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())));
+// cache: 'reload' = from the server, never the browser's HTTP cache (see user/sw.js).
+self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE)
+  .then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' }))))
+  .then(() => self.skipWaiting())));
 self.addEventListener('activate', (e) => e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);

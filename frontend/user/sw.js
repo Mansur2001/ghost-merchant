@@ -1,6 +1,6 @@
 // Service Worker: caches the app shell on first load so repeat visits render from local
 // storage with near-zero mobile data (SRS 3.1). Bump CACHE to ship new assets.
-const CACHE = 'gurikaabe-user-v52';
+const CACHE = 'gurikaabe-user-v53';
 const SHELL = [
   '/',
   '/index.html',
@@ -15,7 +15,11 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: 'reload' = from the server. A plain addAll may be answered by the browser's HTTP
+  // cache, filling the NEW cache with the OLD file: map.js stayed stale for days that way.
+  event.waitUntil(caches.open(CACHE)
+    .then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {

@@ -649,7 +649,9 @@ Worker that cache-first serves its shell.
 ### ⚠️ When you change any frontend shell file (index.html / app.js / styles.css / phone.js)
 
 **Bump the `CACHE` constant** in that PWA's `sw.js` (e.g. `gurikaabe-user-vN`), or reloads keep
-serving the cached old version. A change in `frontend/shared/` means all three. Service workers
+serving the cached old version. The install precaches with `cache: 'reload'` and Caddy sends
+`Cache-Control: no-cache` for app files — without both, a bumped cache can be filled from the
+browser's HTTP cache with the OLD file (map.js stayed stale on the owner's phone that way). A change in `frontend/shared/` means all three. Service workers
 never cache `/api`, `/ws` or `/tiles` (range requests on a 500 MB file). This is the #1 "my change isn't showing" gotcha here.
 
 ---

@@ -74,6 +74,10 @@ localhost {
 		# for a year and is a genuine pain to undo.
 		# Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		-Server
+		# App files are checked with the server on every load (a 304 when unchanged): without
+		# it browsers guess them fresh for hours and an update can reach the cache stale. The
+		# `?` keeps any value already set — /tiles sets its own day-long cache, the API its own.
+		?Cache-Control "no-cache"
 	}
 
 	# API -> backend
