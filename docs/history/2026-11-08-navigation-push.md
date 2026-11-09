@@ -69,4 +69,9 @@ transaction age) — run suites under `caffeinate -i`.
 - **Search**: biased to the map's area (Bakaara → Suuqa Bakaaraha, not a hamlet in Gedo;
   "hospital" now finds hospitals), country-wide fallback, distance on each result.
 - Verified with a synthetic tile file on staging (no real extract locally). Tests: 535 unit,
-  28 Playwright. Not deployed.
+  28 Playwright, 65-step simulation. **Deployed** 2026-11-09 19:40 (backup
+  `db-2026-11-09-1937-pre-maps.sql.gz`, rollback image `gurikaabe-backend:pre-maps-715d332`).
+  Checked on the server: the street file (OSM 2026-11-06, schema 4.15.2) has the `pois` layer
+  (kind, min_zoom, name — no `name:so`, so POIs show their OSM name); OSRM answers.
+- Caddy access log in production (`/data/access.log`, 14 days, filtered). Needed a Caddy
+  recreate, not a reload (COMMANDS.md).

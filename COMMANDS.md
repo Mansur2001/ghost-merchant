@@ -65,6 +65,9 @@ mkdir -p /root/backups && docker compose exec -T postgres sh -c 'pg_dump -U "$PO
 
 # 2. Deploy
 git pull && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# Caddyfile.prod changed? Recreate Caddy — `caddy reload` re-reads the OLD file: git pull
+# replaces the file, and a single-file mount stays on the one it started with.
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --force-recreate caddy
 
 # 3. Check it's up (should print {"ok":true})
 curl -s https://app.gurikaabe.com/api/health
