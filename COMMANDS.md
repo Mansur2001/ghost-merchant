@@ -81,6 +81,9 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --force-re
 docker compose logs -f backend               # follow the log
 docker compose logs backend --tail 50 | grep FATAL   # why won't it start?
 docker compose logs backend | grep 1a2b3c4d          # a user reported "ref 1a2b3c4d"
+# Every request for the last 14 days, surviving deploys (Caddy; no query strings, digits masked):
+docker compose exec caddy sh -c 'cat /data/access.log*' | grep '"/api/geocode' | tail
+docker compose exec caddy sh -c 'cat /data/access.log*' | grep -E '"status":5[0-9]{2}' | tail
 node scripts/sms-preflight.mjs --send +1XXXXXXXXXX --email you@example.com   # test Twilio
 ```
 
