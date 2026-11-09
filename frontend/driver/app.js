@@ -247,7 +247,20 @@ async function loadQueue() {
   $('queue').querySelectorAll('[data-id]').forEach((el) =>
     el.addEventListener('click', () => openDetail(el.dataset.id))
   );
+  fitQueue();
 }
+
+// The jobs box takes the screen left below the online card (whose notes vary in height), so the
+// page itself doesn't scroll — only the list. A very tall card still leaves a usable box.
+function fitQueue() {
+  const el = $('queue');
+  if (!el.offsetParent) return; // the view is hidden
+  const top = el.getBoundingClientRect().top + window.scrollY;
+  el.style.maxHeight = `${Math.max(260, window.innerHeight - top - 16)}px`;
+}
+window.addEventListener('resize', fitQueue);
+// The online card grows and shrinks (location, notification notes): refit when it does.
+if (window.ResizeObserver) new ResizeObserver(fitQueue).observe($('queue').parentElement);
 
 async function openDetail(id) {
   const res = await api(`/driver/orders/${id}`);

@@ -621,7 +621,9 @@ Worker that cache-first serves its shell.
   one job with a 2-step stepper and the step's proof panel. Operator: a desk console — the
   page never scrolls; every section (Orders, Deliveries, Refunds, Drivers, Team, Account) is a
   grouped list + a detail panel, each scrolling on its own, actions in the detail panel (one
-  pane at a time on a phone). Lists redraw on live events; the detail only when its item
+  pane at a time on a phone). Customer and driver lists (orders, jobs, catalog, cart, search
+  results, shopping list, wallet) sit in a `.scroll-list` box that scrolls on its own; the
+  driver's jobs box is sized to the space left on screen (`fitQueue`). Lists redraw on live events; the detail only when its item
   changes, so typing is never wiped. Never go back to stacked cards with inline forms. Gold is the accent
   only; surfaces are neutral. Old WebViews (minSdk 24 = Android 7) lack `color-mix`: keep a plain fallback
   line before any use of it.

@@ -576,6 +576,19 @@ body.op { height: 100vh; height: 100dvh; overflow: hidden; }
 .point-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .point-row .iconbtn { margin: 0; }
 .place-results { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+
+/* Every list (orders, jobs, items, cart, search results) scrolls inside its own box, so a long
+   one doesn't fill the page with cards. Empty = no box at all. */
+.scroll-list {
+  max-height: min(56vh, 520px); overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); padding: 8px;
+}
+.scroll-list:empty { display: none; }
+/* A list that is the whole screen (orders, the driver's jobs): most of the viewport. */
+.scroll-list.tall { max-height: calc(100vh - 230px); min-height: 0; }
+/* A list inside a form or a card (search results, cart, shopping list, wallet). */
+.scroll-list.short { max-height: min(40vh, 320px); }
+.scroll-list > .tile:last-child, .scroll-list > :last-child { margin-bottom: 0; }
 .place-result {
   display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 44px; margin: 0; padding: 8px 12px;
   background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 10px; font-weight: 600; text-align: left;

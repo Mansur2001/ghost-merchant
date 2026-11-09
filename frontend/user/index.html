@@ -235,7 +235,7 @@
             <input id="placeSearch" type="search" autocomplete="off" enterkeyhint="search" data-i18n-ph="ride.search.ph" placeholder="Bakaara, KM4, Lido…" />
             <button class="secondary small" id="placeOsm" type="button" data-i18n="search.btn">Search</button>
           </div>
-          <div class="place-results" id="placeResults"></div>
+          <div class="place-results scroll-list short" id="placeResults"></div>
           <label for="pickupNote" data-i18n="ride.note">Where exactly? (optional)</label>
           <input id="pickupNote" type="text" maxlength="200" data-i18n-ph="ride.note.ph" placeholder="Outside the pharmacy, blue gate" />
         </div>
@@ -258,7 +258,7 @@
         <button class="linkbtn" id="shopBack" type="button" style="margin-bottom:12px;" data-i18n="nav.back">← Back</button>
         <div class="screen-head"><h2 data-i18n="shop.title">Food &amp; shopping</h2></div>
         <div class="chips" id="catChips" role="tablist"></div>
-        <div id="catItems" class="catalog"></div>
+        <div id="catItems" class="catalog scroll-list"></div>
         <button class="tile custom-tile" id="shopCustom" type="button">
           <span class="tile-icon">📷</span>
           <span class="tile-body">
@@ -281,7 +281,7 @@
 
         <div class="section-title" data-i18n="cart.title">Your cart</div>
         <div class="card">
-          <div id="cartLines"></div>
+          <div class="scroll-list short" id="cartLines"></div>
           <details id="customBox" class="bare" style="margin-top:8px;">
             <summary data-i18n="shop.custom">Something else?</summary>
             <label for="request" data-i18n="start.request">What do you need?</label>
@@ -310,7 +310,7 @@
             <input id="dropSearch" type="search" autocomplete="off" enterkeyhint="search" data-i18n-ph="ride.search.ph" placeholder="Bakaara, KM4, Lido…" />
             <button class="secondary small" id="dropOsm" type="button" data-i18n="search.btn">Search</button>
           </div>
-          <div class="place-results" id="dropResults"></div>
+          <div class="place-results scroll-list short" id="dropResults"></div>
           <label for="landmark" data-i18n="start.landmark">Nearest landmark (required)</label>
           <input id="landmark" type="text" data-i18n-ph="start.landmark.ph" placeholder="Green house next to the yellow pharmacy" />
           <!-- Not who you are (that's the account): the number the driver calls for this order. -->
@@ -448,7 +448,7 @@
       <!-- My orders -->
       <section id="resumeView" class="hidden">
         <div class="screen-head"><h2 data-i18n="resume.title">Your orders</h2></div>
-        <div id="resumeList"></div>
+        <div class="scroll-list tall" id="resumeList"></div>
       </section>
 
       <!-- Account -->
@@ -511,7 +511,7 @@
             <button class="secondary" id="wdBtn" type="button" data-i18n="wallet.withdraw.btn">Request withdrawal</button>
           </details>
           <div class="section-title" style="margin-top:14px;" data-i18n="wallet.history">History</div>
-          <ul class="wallet-history" id="walletHistory"></ul>
+          <ul class="wallet-history scroll-list short" id="walletHistory"></ul>
         </div>
 
         <div class="card hidden" id="pwSetBox">
