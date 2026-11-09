@@ -13,6 +13,7 @@ import { WebSocketServer } from 'ws';
 import { EVENTS, TELEMETRY, subscribe } from '../events/bus.js';
 import { recordDriverLocation } from '../commands/locations.js';
 import { verifyToken, hasIdentity } from '../middleware/auth.js';
+import { sessionIsCurrent, noteSessionVersion } from '../commands/sessions.js';
 import { canAccessOrder } from '../domain/access.js';
 import { getOrder } from '../queries/orders.js';
 import { consumeAsync } from '../middleware/rateLimit.js';
@@ -26,6 +27,10 @@ const MAX_ROOMS_PER_SOCKET = 50; // one client has no business watching 50 order
 const CLOSE_AUTH_TIMEOUT = 4401;
 const CLOSE_AUTH_FAILED = 4403;
 const CLOSE_TOO_MANY = 4429;
+// Not an auth failure: "reconnect" — the device that changed the password does, with its new
+// token; the others try their old one and get auth_error, which signs them out.
+const CLOSE_SESSION_ENDED = 4409;
+const CLOSE_TRY_AGAIN = 1011;
 
 // order_id -> Set<WebSocket>
 const rooms = new Map();
@@ -192,6 +197,14 @@ export function attachSocketServer(httpServer) {
           send(ws, { type: 'auth_error', error: 'invalid or expired token' });
           return ws.close(CLOSE_AUTH_FAILED, 'authentication failed');
         }
+        // A customer token from before a password change is over, here as on HTTP. A DB that
+        // can't answer is not "signed out": close so the app retries, without auth_error.
+        let live;
+        try { live = await sessionIsCurrent(payload); } catch { return ws.close(CLOSE_TRY_AGAIN, 'try again'); }
+        if (!live) {
+          send(ws, { type: 'auth_error', error: 'invalid or expired token' });
+          return ws.close(CLOSE_AUTH_FAILED, 'authentication failed');
+        }
         ws.auth = payload;
         clearTimeout(authTimer);
         return send(ws, { type: 'authenticated', role: payload.role });
@@ -264,6 +277,16 @@ export function attachSocketServer(httpServer) {
     broadcastToOrder(p.orderId, { type: 'payment_attempt', ...p })
   ));
   subscribe(TELEMETRY.DRIVER_LOCATION, bridge(broadcastLocation));
+  // A password changed: every socket of that account on an older token is closed at once.
+  subscribe(EVENTS.CUSTOMER_SESSIONS_ENDED, (p) => {
+    noteSessionVersion(p.uid, p.sv);
+    for (const ws of wss.clients) {
+      const a = ws.auth;
+      if (a?.role === 'customer' && a.uid === p.uid && (Number.isInteger(a.sv) ? a.sv : 0) < p.sv) {
+        ws.close(CLOSE_SESSION_ENDED, 'session ended');
+      }
+    }
+  });
   // Operators only: it's a prompt to go and check the merchant phone.
   subscribe(EVENTS.PAYMENT_CLAIMED, (p) => sendTo(operators, { type: 'payment_claimed', ...p }));
 

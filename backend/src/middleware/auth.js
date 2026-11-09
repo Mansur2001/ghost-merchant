@@ -2,6 +2,7 @@
 // Operator = single super-user password. Driver = per-driver PIN (scrypt-hashed in DB).
 import crypto from 'node:crypto';
 import { config } from '../config.js';
+import { sessionIsCurrent } from '../commands/sessions.js';
 
 // ── PIN / password hashing (scrypt) ──────────────────────
 export function hashSecret(secret) {
@@ -71,15 +72,21 @@ export function hasIdentity(payload) {
   return payload.role !== 'customer' || Number.isInteger(payload.uid);
 }
 
-// Express guard: require a valid token with one of the allowed roles.
+// Express guard: require a valid token with one of the allowed roles. A customer token must
+// also still be a live session — one issued before a password change is refused, on every
+// device (commands/sessions.js). That check reads the DB; a DB failure is an error (503 with
+// a ref), never a pass.
 export function requireRole(...roles) {
   return (req, res, next) => {
     const payload = verifyToken(tokenFromRequest(req));
     if (!payload || !roles.includes(payload.role) || !hasIdentity(payload)) {
       return res.status(401).json({ error: 'unauthorized' });
     }
-    req.auth = payload;
-    next();
+    sessionIsCurrent(payload).then((live) => {
+      if (!live) return res.status(401).json({ error: 'unauthorized' });
+      req.auth = payload;
+      return next();
+    }, next);
   };
 }
 

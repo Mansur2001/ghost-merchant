@@ -375,6 +375,13 @@ reset a forgotten password.
   SendGrid again). After every set/change/reset the account's email gets a "your password was
   changed — if this wasn't you…" notice (`sendPasswordChangedNotice`), best effort: a failed
   email is logged and never fails the change.
+- **…and signs out every other device** (`commands/sessions.js`). Customer tokens carry `sv`,
+  the account's `users.session_version`; `requireRole` and the socket's `auth` refuse an older
+  one (401 / `auth_error`). A set/change/reset — and a squatter's password removed by the
+  owner's first code sign-in — raises it in the same transaction, with a
+  `customer.sessions_ended` outbox event that closes that account's older sockets (4409).
+  The changing device gets a new `token` in the response. No `sv` = 0, so old tokens survived
+  the deploy. Cached 10 s per instance, corrected at once by the event.
 
 ## Email codes: a sign-in of their own
 

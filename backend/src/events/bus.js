@@ -30,6 +30,8 @@ export const EVENTS = {
   PAYMENT_ATTEMPT: 'payment.attempt',
   // A customer said a delivered order never reached them (operators are told).
   DELIVERY_DISPUTED: 'delivery.disputed',
+  // A customer's sessions were ended (password changed): sockets on older tokens are closed.
+  CUSTOMER_SESSIONS_ENDED: 'customer.sessions_ended',
 };
 
 // Not domain events: high-rate, latest-wins telemetry that goes straight to the bus, never

@@ -18,7 +18,9 @@ const prisma = {
   },
   otpCode: { findUnique: jest.fn(async () => ({ last_sent_at: new Date() })), deleteMany: jest.fn(), update: jest.fn() },
   emailChallenge: { deleteMany: jest.fn(), update: jest.fn(), findUnique: jest.fn() },
+  outbox: { create: jest.fn(async () => ({ id: 1 })) },
 };
+const ended = () => prisma.outbox.create.mock.calls.filter(([q]) => q.data.event_name === 'customer.sessions_ended');
 const sendOtpSms = jest.fn(async () => ({ transport: 'twilio' }));
 const sendOtpEmail = jest.fn(async () => ({ transport: 'twilio' }));
 
@@ -41,7 +43,7 @@ const live = (code) => ({ code_hash: hashCode(code), expires_at: new Date(Date.n
 beforeEach(() => {
   challenge = null; upsertWins = true; owner = null; account = null;
   jest.spyOn(console, 'error').mockImplementation(() => {});
-  [sendOtpSms, sendOtpEmail, prisma.$queryRaw, prisma.otpCode.deleteMany, prisma.user.upsert, prisma.user.update, prisma.user.create]
+  [sendOtpSms, sendOtpEmail, prisma.$queryRaw, prisma.otpCode.deleteMany, prisma.user.upsert, prisma.user.update, prisma.user.create, prisma.outbox.create]
     .forEach((f) => f.mockClear());
 });
 
@@ -94,6 +96,11 @@ describe('verifyOtpByEmail', () => {
       where: { id: 5 },
       data: expect.objectContaining({ email_verified_at: expect.any(Date), password_hash: null, password_reset_until: expect.any(Date) }),
     }));
+    // ...and ends every session that password opened (else the squatter stays in for 30 days).
+    expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 5 }, data: { session_version: { increment: 1 } },
+    }));
+    expect(ended()).toHaveLength(1);
   });
 
   test('an already-verified account keeps its password; the code only opens the reset window', async () => {
@@ -106,6 +113,7 @@ describe('verifyOtpByEmail', () => {
     expect(data.email_verified_at).toBe(verified);
     expect(data.password_reset_until).toBeInstanceOf(Date);
     expect(rawKeys()[0]).toMatch(/^email:[0-9a-f]{64}$/);
+    expect(ended()).toHaveLength(0); // the owner's own sessions are left alone
   });
 
   test('a wrong code is the one generic error, and no account is touched', async () => {

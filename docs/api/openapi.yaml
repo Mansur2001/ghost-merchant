@@ -41,7 +41,9 @@ info:
     ```json
     {"type":"auth","token":"<bearer token>"}
     ```
-    Unauthenticated sockets are closed after 10 s (code 4401). After `{"type":"authenticated","role":"…"}`:
+    Unauthenticated sockets are closed after 10 s (code 4401). A customer token from before a password
+    change gets `auth_error` (4403). When the password changes, that account's open sockets are closed
+    with 4409 "session ended": reconnect — the device that changed it has a new token. After `{"type":"authenticated","role":"…"}`:
 
     | Send | Who | Then you receive |
     |---|---|---|
@@ -251,7 +253,7 @@ paths:
     post:
       tags: [Customer — account]
       summary: Set or change my password
-      description: Needs `currentPassword` if one is set — except within 15 minutes of an email-code sign-in (the "forgot password" path, usable once). The account must have an email.
+      description: Needs `currentPassword` if one is set — except within 15 minutes of an email-code sign-in (the "forgot password" path, usable once). The account must have an email. Signs out every OTHER device (their tokens get 401, their sockets close); the returned `token` replaces this device's. The account's email is told.
       requestBody:
         required: true
         content:
@@ -261,7 +263,7 @@ paths:
               required: [newPassword]
               properties: { newPassword: { type: string, minLength: 8 }, currentPassword: { type: string } }
       responses:
-        "200": { description: Set, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+        "200": { description: Set, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean }, token: { type: string, description: "this device's new session" }, expiresInSeconds: { type: integer } } } } } }
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { description: Current password wrong or missing, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
         "429": { $ref: "#/components/responses/RateLimited" }

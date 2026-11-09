@@ -42,6 +42,8 @@ model User {
   email_verified_at    DateTime? @db.Timestamptz(6)
   /// After a code sign-in: until then a new password may be set without the old one.
   password_reset_until DateTime? @db.Timestamptz(6)
+  /// Customer sign-ins carry this (`sv`); raising it signs out every older one (commands/sessions.js).
+  session_version      Int       @default(0)
   orders       Order[]
   email_challenge EmailChallenge?
   wallet       WalletAccount?

@@ -1687,6 +1687,8 @@ $('pwSetBtn').addEventListener('click', async () => {
   });
   $('pwSetBtn').disabled = false;
   if (res.error) { $('pwSetStatus').textContent = errText(res); return; }
+  // Every other device was just signed out; this one carries on with the new session.
+  if (res.token) setSession(res.token, myPhone);
   $('pwNew').value = ''; $('pwNew2').value = ''; $('pwCurrent').value = '';
   $('pwSetStatus').textContent = '';
   toast(t('acct.pw.saved'));

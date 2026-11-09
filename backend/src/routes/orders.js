@@ -29,6 +29,7 @@ import { parsePhone } from '../domain/phone.js';
 import { senderForRole, canAccessOrder } from '../domain/access.js';
 import { isUuid } from '../domain/ids.js';
 import { requireAuth, requireRole, verifyToken } from '../middleware/auth.js';
+import { sessionIsCurrent } from '../commands/sessions.js';
 import { fileBug } from '../commands/bugs.js';
 import { BugError } from '../domain/bugReport.js';
 import { requireOrderAccess } from '../middleware/authorize.js';
@@ -343,7 +344,9 @@ ordersRouter.post(
     if (req.body?.website) return res.status(201).json({ data: { id: null, status: 'open' } });
     const bearer = (req.get('Authorization') || '').replace(/^Bearer\s+/i, '');
     const session = bearer ? verifyToken(bearer) : null;
-    const userId = session?.role === 'customer' && Number.isInteger(session.uid) ? session.uid : null;
+    // A session ended by a password change doesn't name its account here either.
+    const live = session?.role === 'customer' && Number.isInteger(session.uid) && await sessionIsCurrent(session).catch(() => false);
+    const userId = live ? session.uid : null;
     try {
       const ack = await fileBug({ body: req.body || {}, userId, userAgent: req.get('User-Agent') });
       res.status(201).json({ data: ack });

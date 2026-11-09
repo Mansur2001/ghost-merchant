@@ -21,6 +21,8 @@ import { normalizeEmail, maskEmail } from '../domain/email.js';
 import { sendOtpSms } from '../notify/smsSender.js';
 import { sendOtpEmail, sendEmailLinkCode, emailConfigured } from '../notify/emailSender.js';
 import { config } from '../config.js';
+import { wakeOutbox } from '../events/outbox.js';
+import { endSessions, noteSessionVersion } from './sessions.js';
 
 export class OtpCooldownError extends Error {
   constructor(retryAfterMs) {
@@ -134,7 +136,8 @@ export async function requestOtpByEmail(rawEmail) {
   }
 }
 
-const ACCOUNT = { id: true, phone_number: true, email: true };
+// session_version goes into the token (commands/sessions.js).
+const ACCOUNT = { id: true, phone_number: true, email: true, session_version: true };
 
 // Verify a code sent by SMS. On success the account behind the phone is found or created.
 export async function verifyOtp(rawPhone, submittedCode) {
@@ -154,13 +157,16 @@ export async function verifyOtpByEmail(rawEmail, submittedCode) {
   //     on someone else's email loses it the moment the real owner signs in with a code;
   //   * a short window opens to set a new password without the old one (the reset flow).
   // The challenge row is locked FOR UPDATE above, so two verifies of one email serialize here.
-  return consumeChallenge(emailKey(email), submittedCode, async (tx) => {
+  const user = await consumeChallenge(emailKey(email), submittedCode, async (tx) => {
     const now = new Date();
     const resetUntil = new Date(now.getTime() + PASSWORD_RESET_WINDOW_MS);
     const existing = await tx.user.findUnique({ where: { email }, select: { id: true, email_verified_at: true } });
     if (!existing) {
       return tx.user.create({ data: { email, email_verified_at: now, password_reset_until: resetUntil }, select: ACCOUNT });
     }
+    // The first proof also ends every session the squatter's password opened — removing the
+    // password alone left them signed in for up to 30 days.
+    if (!existing.email_verified_at) await endSessions(tx, existing.id);
     return tx.user.update({
       where: { id: existing.id },
       data: {
@@ -171,6 +177,10 @@ export async function verifyOtpByEmail(rawEmail, submittedCode) {
       select: ACCOUNT,
     });
   });
+  // After COMMIT: this instance knows the new version now; the event tells the others.
+  noteSessionVersion(user.id, user.session_version);
+  wakeOutbox();
+  return user;
 }
 
 // How long after a code sign-in a new password may be set without the old one.

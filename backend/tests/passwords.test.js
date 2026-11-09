@@ -16,10 +16,16 @@ const prisma = {
       users.push(u);
       return { id: u.id, phone_number: null, email: u.email };
     }),
-    update: jest.fn(async ({ where, data }) => Object.assign(find({ where }), data)),
+    update: jest.fn(async ({ where, data }) => {
+      const u = find({ where });
+      const { session_version: sv, ...rest } = data;
+      if (sv?.increment) u.session_version = (u.session_version || 0) + sv.increment;
+      return Object.assign(u, rest);
+    }),
   },
+  outbox: { create: jest.fn(async () => ({ id: 1 })) },
 };
-jest.unstable_mockModule('../src/db/prisma.js', () => ({ prisma }));
+jest.unstable_mockModule('../src/db/prisma.js', () => ({ prisma, withTransaction: async (fn) => fn(prisma) }));
 const sendPasswordChangedNotice = jest.fn(async () => ({ transport: 'twilio' }));
 jest.unstable_mockModule('../src/notify/emailSender.js', () => ({ sendPasswordChangedNotice }));
 
@@ -27,7 +33,7 @@ const { hashSecret } = await import('../src/middleware/auth.js');
 const { signUpWithPassword, signInWithPassword, setPassword, PasswordError } = await import('../src/commands/passwords.js');
 const { passwordProblem } = await import('../src/domain/customerPassword.js');
 
-beforeEach(() => { users = []; sendPasswordChangedNotice.mockClear(); });
+beforeEach(() => { users = []; sendPasswordChangedNotice.mockClear(); prisma.outbox.create.mockClear(); });
 
 describe('passwordProblem', () => {
   test('length, not composition rules', () => {
@@ -110,17 +116,28 @@ describe('setPassword', () => {
     expect(sendPasswordChangedNotice).toHaveBeenLastCalledWith('a@example.com', { first: true });
   });
 
+  test('a change signs out every other device: the version goes up, with its event, and is returned', async () => {
+    users.push(base({ password_hash: hashSecret('old pass phrase'), session_version: 3 }));
+    const { sv } = await setPassword({ userId: 1, currentPassword: 'old pass phrase', newPassword: 'new pass phrase' });
+    expect(sv).toBe(4);
+    expect(users[0].session_version).toBe(4);
+    expect(prisma.outbox.create).toHaveBeenCalledWith({
+      data: { event_name: 'customer.sessions_ended', payload: { uid: 1, sv: 4 } }, select: { id: true },
+    });
+  });
+
   test('a refused change sends no notice', async () => {
     users.push(base({ password_hash: hashSecret('old pass phrase') }));
     await expect(setPassword({ userId: 1, currentPassword: 'nope nope', newPassword: 'new pass phrase' })).rejects.toThrow();
     expect(sendPasswordChangedNotice).not.toHaveBeenCalled();
+    expect(prisma.outbox.create).not.toHaveBeenCalled(); // and nobody is signed out
   });
 
   test('a failed notice email never fails (or undoes) the change', async () => {
     users.push(base({ password_hash: hashSecret('old pass phrase') }));
     sendPasswordChangedNotice.mockRejectedValueOnce(new Error('sendgrid down'));
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    await expect(setPassword({ userId: 1, currentPassword: 'old pass phrase', newPassword: 'new pass phrase' })).resolves.toBeUndefined();
+    await expect(setPassword({ userId: 1, currentPassword: 'old pass phrase', newPassword: 'new pass phrase' })).resolves.toEqual({ sv: 1 });
     await new Promise((r) => setImmediate(r));
     expect((await signInWithPassword({ email: 'a@example.com', password: 'new pass phrase' })).id).toBe(1);
     expect(warn.mock.calls.join(' ')).toMatch(/a••|not sent/);

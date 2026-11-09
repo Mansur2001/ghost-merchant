@@ -33,6 +33,10 @@ const phoneKey = (req) => {
 };
 
 const HOUR = 60 * 60 * 1000;
+// A customer session names its account and the session version it belongs to: a password
+// change raises the version and every older session ends (commands/sessions.js).
+const customerToken = (user) =>
+  signToken({ role: 'customer', uid: user.id, sv: user.session_version ?? 0 }, CUSTOMER_TOKEN_TTL_SECONDS);
 
 const requestLimits = [
   rateLimit({ windowMs: HOUR, max: 20, message: 'too many code requests' }),
@@ -100,7 +104,7 @@ authRouter.post('/auth/otp/verify', ...verifyLimits, async (req, res) => {
     const user = email && !phone
       ? await verifyOtpByEmail(email, code)
       : await verifyOtp(phone, code);
-    const token = signToken({ role: 'customer', uid: user.id }, CUSTOMER_TOKEN_TTL_SECONDS);
+    const token = customerToken(user);
     res.json({ token, phone: user.phone_number, email: user.email, expiresInSeconds: CUSTOMER_TOKEN_TTL_SECONDS });
   } catch (err) {
     if (err instanceof OtpInvalidError) return res.status(401).json({ error: err.message });
@@ -185,7 +189,6 @@ authRouter.delete('/auth/email', requireRole('customer'), async (req, res, next)
 // ── Email + password (customers) ──
 // So signing in doesn't depend on an email arriving. Email codes stay the proof of owning the
 // address and the way to reset a forgotten password (commands/passwords.js).
-const customerToken = (user) => signToken({ role: 'customer', uid: user.id }, CUSTOMER_TOKEN_TTL_SECONDS);
 const signedIn = (user) => ({
   token: customerToken(user), phone: user.phone_number, email: user.email, expiresInSeconds: CUSTOMER_TOKEN_TTL_SECONDS,
 });
@@ -222,16 +225,17 @@ authRouter.post(
   }
 );
 
-// POST /api/auth/password { newPassword, currentPassword? } — set or change it. The current one
-// isn't needed within 15 minutes of an email-code sign-in: that is "forgot password".
+// POST /api/auth/password { newPassword, currentPassword? } -> { ok, token } — set or change
+// it. The current one isn't needed within 15 minutes of an email-code sign-in: that is "forgot
+// password". Every other device is signed out; `token` keeps THIS one signed in.
 authRouter.post(
   '/auth/password',
   requireRole('customer'),
   rateLimit({ windowMs: 15 * 60 * 1000, max: 10, key: (req) => `pwset:${req.auth.uid}`, message: 'too many attempts' }),
   async (req, res, next) => {
     try {
-      await setPassword({ userId: req.auth.uid, currentPassword: req.body?.currentPassword, newPassword: req.body?.newPassword });
-      res.json({ ok: true });
+      const { sv } = await setPassword({ userId: req.auth.uid, currentPassword: req.body?.currentPassword, newPassword: req.body?.newPassword });
+      res.json({ ok: true, token: customerToken({ id: req.auth.uid, session_version: sv }), expiresInSeconds: CUSTOMER_TOKEN_TTL_SECONDS });
     } catch (err) {
       passwordFail(err, res, next);
     }

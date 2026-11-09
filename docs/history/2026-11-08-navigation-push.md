@@ -92,3 +92,8 @@ transaction age) — run suites under `caffeinate -i`.
   worker's `addAll` was answered from the browser's HTTP cache (Caddy sent no Cache-Control),
   so each new cache was filled with the old file. Fixed: precache with `cache: 'reload'`, and
   Caddy sends `no-cache` for app files. Maps open at z15; the search credit line is gone.
+- **Passwords (owner's choice: the industry standard).** Change = current + new + repeat (no
+  email code; it would make a change wait on SendGrid). After every set/change/reset: a "your
+  password was changed" email, and every other device signed out (`session_version`, migration
+  `20261109200000_session_version`). The squatter's sessions now end too when the owner proves
+  the email. Lists in the customer/driver apps scroll inside their own box.
