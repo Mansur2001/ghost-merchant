@@ -581,12 +581,14 @@ paths:
     post:
       tags: [Customer — orders]
       summary: Help chat — FAQ answers, then a hosted open model; never takes an action
+      security: [{}, { bearer: [] }]
       description: |
         Answers only: it cannot cancel, refund, pay or change anything. Strong FAQ matches are answered
         directly (English or plain Somali); other questions go to a hosted open model (Groq by default)
         when ASSISTANT_URL is set; it receives the question and an order STATE, never personal data. With `orderId` (the caller's own order, else 404) it knows that order's
         state — never phone numbers, places or codes. Nothing typed here is stored. `handoff: true`
-        means: offer "Talk to a person". 30 per 10 minutes per account.
+        means: offer "Talk to a person". Public: no session needed (signed out, `orderId` is always 404).
+        30 per 10 minutes per account, or per IP when signed out.
       requestBody:
         required: true
         content:

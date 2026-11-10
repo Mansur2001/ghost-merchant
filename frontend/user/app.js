@@ -33,6 +33,8 @@ function clearSession() {
   localStorage.removeItem(CONTACT_KEY);
   localStorage.removeItem('gm_last');
   localStorage.removeItem('gm_cart');
+  // A conversation about this account's order isn't the next person's.
+  resetHelp();
 }
 
 // Every request carries the bearer token. A 401 means the session died (expired, or the
@@ -1711,14 +1713,14 @@ function helpLine(role, text) {
 }
 // The widget: a launcher in the corner on the screens without their own bottom button, a
 // panel that opens over the page (a bottom sheet on a phone). Esc or the chevron collapses it.
-const NO_LAUNCHER = ['landingView', 'joinView', 'authView', 'rideView', 'shopView', 'startView'];
+// Signed out too: the questions people most need answered come before they have an account.
+const NO_LAUNCHER = ['rideView', 'shopView', 'startView'];
 let currentView = null;
 function updateLauncher() {
   const open = !$('chatPanel').hidden;
-  $('chatLauncher').classList.toggle('hidden', open || !token || NO_LAUNCHER.includes(currentView));
+  $('chatLauncher').classList.toggle('hidden', open || NO_LAUNCHER.includes(currentView));
 }
 function openChat(orderId = null) {
-  if (!token) return;
   if (helpOrderId !== orderId) { helpHistory = []; $('helpThread').replaceChildren(); }
   helpOrderId = orderId;
   $('helpAbout').textContent = orderId ? `${t('order.num')}${GMIds.shortId(orderId)}` : '';
@@ -1727,6 +1729,13 @@ function openChat(orderId = null) {
   $('chatLauncher').setAttribute('aria-expanded', 'true');
   updateLauncher();
   setTimeout(() => $('helpInput').focus(), 0);
+}
+function resetHelp() {
+  closeChat();
+  helpOrderId = null;
+  helpHistory = [];
+  $('helpThread').replaceChildren();
+  $('helpAbout').textContent = '';
 }
 function closeChat() {
   if ($('chatPanel').hidden) return;
@@ -1742,7 +1751,7 @@ $('openChat').addEventListener('click', () => openChat(null));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeChat(); });
 async function sendHelp() {
   const message = $('helpInput').value.trim();
-  if (!message || !token) return;
+  if (!message) return;
   $('helpInput').value = '';
   helpLine('user', message);
   const wait = helpLine('assistant', '…');
@@ -2119,7 +2128,7 @@ async function resumeOrder(id) {
 // Requires a live session — without one there is nothing to resume into.
 // A signed-in customer opens on the new-order screen, like any delivery app; the landing page
 // is for people who haven't started yet.
-if (token) { showSignedIn(); goTab('home'); }
+if (token) { showSignedIn(); goTab('home'); } else showView('landingView');
 
 (async function autoResume() {
   try {

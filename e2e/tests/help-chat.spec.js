@@ -5,6 +5,17 @@ import { openApp, signInCustomer, somaliNumber, CUSTOMER_PHONE, placeDelivery } 
 
 test('help chat answers from the FAQ, in Somali too, and hands an order to a person', async ({ browser }, testInfo) => {
   const page = await openApp(browser, testInfo, CUSTOMER_PHONE);
+  // Signed out: help is there before there is an account (on the landing and sign-in screens).
+  await page.goto('/');
+  await expect(page.locator('#chatLauncher')).toBeVisible();
+  await page.click('#chatLauncher');
+  await page.fill('#helpInput', 'How do I pay with Sahal?');
+  await page.click('#helpSend');
+  await expect(page.locator('#helpThread .msg').last()).toContainText('tap your wallet');
+  await page.click('#chatMin');
+  await page.click('#asCustomer');
+  await expect(page.locator('#chatLauncher')).toBeVisible();
+
   await signInCustomer(page, somaliNumber());
   // The standard widget: a launcher in the corner opens the panel; the chevron collapses it.
   await expect(page.locator('#chatLauncher')).toBeVisible();

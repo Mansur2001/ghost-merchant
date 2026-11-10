@@ -309,15 +309,34 @@ ordersRouter.get('/orders/:id/driver-location', customerOnly, requireOrderAccess
   res.json({ location: await getDriverLocationForOrder(o.driver_id) });
 });
 
+// A live customer session if the request carries one, else nobody — for the public routes that
+// do a little more for a signed-in customer. An expired or ended session is just "signed out"
+// here (a session ended by a password change doesn't name its account either).
+async function optionalCustomer(req) {
+  const bearer = (req.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+  const session = bearer ? verifyToken(bearer) : null;
+  const live = session?.role === 'customer' && Number.isInteger(session.uid) && await sessionIsCurrent(session).catch(() => false);
+  return live ? session : null;
+}
+
 // POST /api/assistant { message, history?, lang?, orderId? } — the help chat. Answers only:
-// it can't change anything (domain/assistant.js). With an orderId it knows that order's
-// status — and only if it is the caller's own (same rule as every order route, deny = 404).
+// it can't change anything (domain/assistant.js). Public: people need help most before they
+// have an account (signing in, paying). With an orderId it knows that order's status — and
+// only if it is the signed-in caller's own (same rule as every order route, deny = 404).
 ordersRouter.post(
   '/assistant',
-  customerOnly,
-  // Per IP generously (many phones share one carrier IP), per account tightly: a CPU model is slow.
+  async (req, res, next) => {
+    try {
+      req.auth = await optionalCustomer(req);
+      next();
+    } catch (err) {
+      next(err);
+    }
+  },
+  // Per IP generously (many phones share one carrier IP), per account tightly: each answer can
+  // cost a model call. Signed out, the IP is the identity.
   rateLimit({ windowMs: 10 * 60 * 1000, max: 120, message: 'too many questions — try again in a few minutes' }),
-  rateLimit({ windowMs: 10 * 60 * 1000, max: 30, key: (req) => `uid:${req.auth?.uid}`, message: 'too many questions — try again in a few minutes' }),
+  rateLimit({ windowMs: 10 * 60 * 1000, max: 30, key: (req) => (req.auth ? `uid:${req.auth.uid}` : `anon:${req.ip}`), message: 'too many questions — try again in a few minutes' }),
   async (req, res, next) => {
     try {
       const { message, history, lang, orderId } = req.body || {};
@@ -342,11 +361,7 @@ ordersRouter.post(
   async (req, res, next) => {
     // Bots fill every field; people never see this one.
     if (req.body?.website) return res.status(201).json({ data: { id: null, status: 'open' } });
-    const bearer = (req.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-    const session = bearer ? verifyToken(bearer) : null;
-    // A session ended by a password change doesn't name its account here either.
-    const live = session?.role === 'customer' && Number.isInteger(session.uid) && await sessionIsCurrent(session).catch(() => false);
-    const userId = live ? session.uid : null;
+    const userId = (await optionalCustomer(req))?.uid ?? null;
     try {
       const ack = await fileBug({ body: req.body || {}, userId, userAgent: req.get('User-Agent') });
       res.status(201).json({ data: ack });
