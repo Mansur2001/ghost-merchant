@@ -865,9 +865,9 @@ locked-out admin
 push (needs Firebase). **Built 2026-11-11, branch `full-app` (the stakeholder mockup):** the
 new customer app, choosing your driver, parcels, Farsamo, ratings, catalog pictures and
 suggestions, free delivery, the inbox, AI drafts, and the wallet switched ON (licence held;
-top-ups over USSD confirmed by the desk until WaafiPay has keys). Production needs migrations
-`20261111090000`/`20261111091000` (run on boot) and, if its `.env` says
-`WALLET_ENABLED=false`, that line removed.
+top-ups over USSD confirmed by the desk until WaafiPay has keys). **Deployed to production
+2026-11-12** (`33e50eb`; rollback: image `gurikaabe-backend:pre-full-app-ffd32ce` +
+`/root/backups/db-2026-11-12-0418-pre-full-app.sql.gz`).
 The Android app builds and installs (`0.3.0`, versionCode 7, signed; upload key
 `~/gurikaabe-release.jks`); build 7 predates the chat widget, push and navigation — the next
 upload is build 8.
