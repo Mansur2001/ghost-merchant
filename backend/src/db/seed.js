@@ -98,8 +98,9 @@ const ORDERS = [
   { kind: 'RIDE', status: 'DELIVERED', phone: '+252771234567', driverIdx: 1, vehicle: 'bajaj', rating: 4,
     pickup: { lat: 2.0150, lng: 45.2950, text: 'Wadajir' },
     landmark: 'KM4 junction', lat: 2.0295, lng: 45.3045, items: [] },
-  // A parcel being collected, and a plumber's visit under way with extra work quoted.
-  { kind: 'PARCEL', status: 'DISPATCHED', phone: '+252612345678', driverIdx: 1,
+  // A parcel already delivered, and a plumber's visit under way with extra work quoted.
+  // Delivered, so Amina keeps a free slot for the order waiting at the start of a shift.
+  { kind: 'PARCEL', status: 'DELIVERED', phone: '+252612345678', driverIdx: 1,
     pickup: { lat: 2.0320, lng: 45.3100, text: 'Hodan — blue gate' },
     details: 'Documents in an envelope', recipient: '+252651234567',
     landmark: 'Hamar Weyne, shop 4', lat: 2.0336, lng: 45.3420, items: [] },

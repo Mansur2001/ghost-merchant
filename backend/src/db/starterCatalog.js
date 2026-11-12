@@ -242,7 +242,7 @@ export async function ensureStarterCatalog(db) {
 
 // One time per version, for an install that was already running: ADD what the starter has and
 // it doesn't. Matched by English name; a category or item the admin renamed is left alone.
-export const STARTER_VERSION = 2;
+export const STARTER_VERSION = 3;
 // The first starter's categories, and which home tile each belongs to.
 const LEGACY_SERVICE = { meals: 'food', groceries: 'grocery', drinks: 'food', household: 'shop' };
 
