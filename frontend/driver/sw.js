@@ -1,10 +1,33 @@
-const CACHE = 'gurikaabe-driver-v55';
+const CACHE = 'gurikaabe-driver-v56';
 const SHELL = ['/driver/', '/driver/index.html', '/driver/app.js', '/icon-192.png', '/shared/styles.css', '/shared/config.js', '/shared/ids.js', '/shared/syncPolicy.js', '/shared/queue.js', '/shared/phone.js', '/shared/theme.js', '/shared/push.js', '/shared/i18n.js', '/shared/map.js', '/shared/location.js', '/shared/nav.js', '/shared/vendor/leaflet-1.9.4.js', '/shared/vendor/leaflet-1.9.4.css', '/shared/vendor/protomaps-leaflet-5.1.0.js'];
 // cache: 'reload' = from the server, never the browser's HTTP cache (see user/sw.js).
 self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE)
   .then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' }))))
   .then(() => self.skipWaiting())));
-self.addEventListener('activate', (e) => e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())));
+self.addEventListener('activate', (event) => {
+  const cleanup = (async () => {
+    // Only this app's caches: all three apps share the origin, so the list holds the others' too.
+    const mine = CACHE.replace(/v\d+$/, '');
+    const old = (await caches.keys()).filter((k) => k !== CACHE && k.startsWith(mine));
+    await Promise.all(old.map((k) => caches.delete(k)));
+    await self.clients.claim();
+    return old.length > 0;
+  })();
+  event.waitUntil(cleanup);
+  // An UPDATE (an older version was cached) reloads the pages still showing it: the app has no
+  // update listener, so the first open after a deploy would show the old version. Never on a
+  // first install (it would reload a page someone is typing into). Started AFTER activation,
+  // not inside waitUntil: the reload's requests wait for this worker to be active — awaiting
+  // them here deadlocks the page.
+  cleanup.then((updated) => {
+    if (!updated) return;
+    setTimeout(() => {
+      self.clients.matchAll({ type: 'window' })
+        .then((wins) => wins.forEach((w) => w.navigate(w.url).catch(() => {})));
+    }, 0);
+  });
+});
+
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.pathname.startsWith('/api') || url.pathname.startsWith('/ws') || url.pathname.startsWith('/tiles') || e.request.method !== 'GET') return;

@@ -1,6 +1,6 @@
 // Service Worker: caches the app shell on first load so repeat visits render from local
 // storage with near-zero mobile data (SRS 3.1). Bump CACHE to ship new assets.
-const CACHE = 'gurikaabe-user-v66';
+const CACHE = 'gurikaabe-user-v67';
 const SHELL = [
   '/',
   '/index.html',
@@ -23,11 +23,27 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
-    ).then(() => self.clients.claim())
-  );
+  const cleanup = (async () => {
+    // Only this app's caches: all three apps share the origin, so the list holds the others' too.
+    const mine = CACHE.replace(/v\d+$/, '');
+    const old = (await caches.keys()).filter((k) => k !== CACHE && k.startsWith(mine));
+    await Promise.all(old.map((k) => caches.delete(k)));
+    await self.clients.claim();
+    return old.length > 0;
+  })();
+  event.waitUntil(cleanup);
+  // An UPDATE (an older version was cached) reloads the pages still showing it: the app has no
+  // update listener, so the first open after a deploy would show the old version. Never on a
+  // first install (it would reload a page someone is typing into). Started AFTER activation,
+  // not inside waitUntil: the reload's requests wait for this worker to be active — awaiting
+  // them here deadlocks the page.
+  cleanup.then((updated) => {
+    if (!updated) return;
+    setTimeout(() => {
+      self.clients.matchAll({ type: 'window' })
+        .then((wins) => wins.forEach((w) => w.navigate(w.url).catch(() => {})));
+    }, 0);
+  });
 });
 
 self.addEventListener('fetch', (event) => {
