@@ -2018,7 +2018,7 @@ paths:
     get:
       tags: [Customer — orders]
       summary: The driver (or technician) on this order, or the one it was offered to
-      description: First name, vehicle, plate, whether a photo exists, average rating. No phone, no position. `offer` is true while the chosen driver has not accepted yet.
+      description: First name, vehicle, plate, whether a photo exists, average rating. No position. `phone` (to call them) only while the job is DISPATCHED or IN_TRANSIT, null otherwise. `offer` is true while the chosen driver has not accepted yet.
       parameters: [{ $ref: "#/components/parameters/OrderId" }]
       responses:
         "200": { description: Driver card or null, content: { application/json: { schema: { type: object } } } }

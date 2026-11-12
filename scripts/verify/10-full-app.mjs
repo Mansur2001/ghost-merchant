@@ -130,13 +130,15 @@ chk('another driver can\'t accept it', (await call(`/driver/offers/${ride1}/acce
 chk('the offered driver still can\'t open the job (not theirs yet)', (await call(`/driver/orders/${ride1}`, { token: bashir })).status === 404);
 const card = (await call(`/orders/${ride1}/driver`, { token: alice })).body.driver;
 chk('the rider sees "waiting for Amina" with a deadline', card?.offer === true && card.name === 'Bashir' && Boolean(card.offer_expires_at));
+chk('an offer carries no phone (not taken yet)', card?.phone === null && !JSON.stringify(card).includes('+252'));
 chk('nobody else sees that card', (await call(`/orders/${ride1}/driver`, { token: bob })).status === 404);
 const acc = await call(`/driver/offers/${ride1}/accept`, { method: 'POST', token: bashir, body: {} });
 const r1 = await order(ride1);
 chk('accepted: dispatched to her', acc.status === 200 && r1.status === 'DISPATCHED' && String(r1.driver_id) === aminaCard.id && r1.offer_driver_id === null);
 chk('accepting twice is a 404 (the offer is gone)', (await call(`/driver/offers/${ride1}/accept`, { method: 'POST', token: bashir, body: {} })).status === 404);
 const card2 = (await call(`/orders/${ride1}/driver`, { token: alice })).body.driver;
-chk('now the card is the driver: plate, no phone', card2?.offer === false && card2.plate === 'MOG 4521' && !JSON.stringify(card2).includes('+252'));
+const bashirPhone = sql("SELECT msisdn FROM drivers WHERE name = 'Bashir'");
+chk('now the card is the driver: plate, and the phone to call while the job is live', card2?.offer === false && card2.plate === 'MOG 4521' && card2.phone === bashirPhone);
 
 console.log('\n── decline, then expiry: the nearest takes it ──');
 // Cali finishes her seeded ride first (the rider's code is in the seed), then she is free.
@@ -175,6 +177,7 @@ const code1 = (await call(`/orders/${ride1}/handoff`, { token: alice })).body.co
 await call(`/driver/orders/${ride1}/secured`, { method: 'POST', token: bashir, body: { code: code1 } });
 const drop = await call(`/driver/orders/${ride1}/dropoff`, { method: 'POST', token: bashir, body: { fix: { ...AIRPORT, accuracy: 10 } } });
 chk('the ride is finished', drop.status === 200 && (await order(ride1)).status === 'DELIVERED');
+chk('finished: the card keeps no phone', (await call(`/orders/${ride1}/driver`, { token: alice })).body.driver?.phone === null);
 chk('someone else can\'t rate it', (await call(`/orders/${ride1}/rating`, { method: 'POST', token: bob, body: { stars: 1 } })).status === 404);
 chk('0 stars is refused', (await call(`/orders/${ride1}/rating`, { method: 'POST', token: alice, body: { stars: 0 } })).status === 400);
 chk('rated 5 stars', (await call(`/orders/${ride1}/rating`, { method: 'POST', token: alice, body: { stars: 5, comment: 'Fast' } })).status === 201);

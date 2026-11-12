@@ -124,18 +124,22 @@ appRouter.post('/inbox/seen', customerOnly, async (req, res) => {
 });
 
 // The driver on this order, as the customer sees them: first name, vehicle, plate, photo,
-// rating. Only while it is theirs (dispatched, on the way, or just finished).
+// rating. Only while it is theirs (dispatched, on the way, or just finished). The phone (the
+// call button, owner's call 2026-11-12) only while the job is LIVE — not during the offer,
+// not after it is done, and never in the list of drivers to choose from.
 appRouter.get('/orders/:id/driver', customerOnly, requireOrderAccess, async (req, res) => {
   const o = req.order;
   const shown = ['DISPATCHED', 'IN_TRANSIT', 'DELIVERED'].includes(o.status);
   const id = shown ? o.driver_id : o.offer_driver_id;
   if (id == null) return res.json({ driver: null });
-  const d = await prisma.driver.findUnique({ where: { id }, select: { id: true, name: true, vehicle: true, plate: true, photo_key: true, role: true } });
+  const d = await prisma.driver.findUnique({ where: { id }, select: { id: true, name: true, vehicle: true, plate: true, photo_key: true, role: true, msisdn: true } });
   if (!d) return res.json({ driver: null });
+  const live = ['DISPATCHED', 'IN_TRANSIT'].includes(o.status);
   const r = (await driverRatings([d.id])).get(String(d.id));
   res.json({
     driver: {
       id: String(d.id), name: d.name.trim().split(/\s+/)[0], vehicle: d.vehicle, plate: d.plate, role: d.role,
+      phone: live ? d.msisdn : null,
       photo: Boolean(d.photo_key), rating: r?.avg ?? null, ratings: r?.count ?? 0,
       offer: !shown, offer_expires_at: !shown ? o.offer_expires_at : null,
     },

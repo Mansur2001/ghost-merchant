@@ -395,6 +395,9 @@ function renderDriverCard(d) {
   $('dcVehicle').textContent = who;
   $('dcPlate').textContent = d.plate || '';
   $('dcPlate').classList.toggle('hidden', !d.plate);
+  // The server sends the phone only while the job is live (dispatched / on the way).
+  $('dcCall').classList.toggle('hidden', !d.phone);
+  $('dcCall').href = d.phone ? `tel:${d.phone}` : '#';
 }
 $('dcChat').addEventListener('click', () => { $('chatInput').focus(); $('chatInput').scrollIntoView({ block: 'center', behavior: 'smooth' }); });
 

@@ -69,7 +69,9 @@ you or your orders.
 
 **Riders and drivers.** When you book a ride you see a few nearby drivers' first names,
 photos, plates, ratings and how many minutes away they are — never where they are, and never
-their phone number. A driver sees your pickup only after accepting.
+their phone number. A driver sees your pickup only after accepting. Once a driver or
+technician is on the way to you, you can call them: their phone number is shown on your order
+until the job ends, then no longer.
 
 **Help chat.** Questions you type in the help chat that our built-in answers can't cover are
 sent to a hosted AI model (Groq) to word an answer, with the status of the order you are asking

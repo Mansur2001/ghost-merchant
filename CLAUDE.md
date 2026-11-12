@@ -206,7 +206,7 @@ customer wallet exists but is OFF by default (invariant 6).
   job (re-authorized per order) and to operators. Customers see a driver only while
   DISPATCHED/IN_TRANSIT. The quote shows a COUNT of drivers nearby and up to 5 to CHOOSE from
   (`choiceCard`: first name, photo flag, plate, rating, minutes away) — never positions, never
-  a phone. The home banner (`GET /api/nearby`) is counts and minutes only.
+  a phone (the assigned driver's phone reaches the customer only on the live job's card). The home banner (`GET /api/nearby`) is counts and minutes only.
 - **Maps**: Leaflet + protomaps-leaflet (vendored in `frontend/shared/vendor/`), street data
   from ONE self-hosted file `tiles/somalia.pmtiles` (`scripts/fetch-map-tiles.sh`), served by
   Caddy with range requests. No tile vendor, no key. Without the file: a plain grid with pins.
@@ -666,8 +666,10 @@ Worker that cache-first serves its shell.
   has the five steps (La xaqiijiyay → Diyaarin → Socda → Isku dhow (<500 m) → La gaarsiiyay), a
   live ETA, the driver card (photo, ★, vehicle, plate, chat), the offer countdown, extra work,
   the rating, and Share (words only — tracking needs the account, so no link). The design
-  never shows a "1–2 minutes" promise: ETAs are the route's (owner's call). No call button to
-  the driver: customers don't get drivers' numbers (the strip and card show no phone).
+  never shows a "1–2 minutes" promise: ETAs are the route's (owner's call). **Call button**
+  (owner's call, 2026-11-12): the driver card's phone comes from `GET /orders/:id/driver` only
+  while the job is DISPATCHED/IN_TRANSIT — never during the offer, after it ends, or in the
+  list of drivers to choose from.
   Light theme by default, brand yellow `#ffc20e` (`--gold-ink` for yellow text on white).
   One icon per vehicle everywhere (🛺 bajaj, 🚕 car): tracking's moving step shows the ride's
   vehicle, or the assigned driver's (🛵 before one has the job). No drawn driver illustration
