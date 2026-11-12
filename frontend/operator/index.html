@@ -199,6 +199,7 @@
               <button class="small admin-only hidden" id="newItemBtn" type="button">+ Item</button>
               <button class="small secondary admin-only hidden" id="newCatBtn" type="button">+ Category</button>
               <button class="small secondary admin-only hidden" id="newPlaceBtn" type="button">+ Place</button>
+              <button class="small secondary admin-only hidden" id="newTradeBtn" type="button">+ Trade</button>
             </div>
             <div class="workspace" id="catalogWs">
               <div class="pane list">
@@ -206,6 +207,53 @@
                 <div class="pane-body" id="catalogList"></div>
               </div>
               <div class="pane detail" id="catalogDetail"></div>
+            </div>
+          </div>
+
+          <!-- ── Customer suggestions: review (everyone), price and publish (admins) ── -->
+          <div data-panel="suggestions" class="panel hidden">
+            <div class="panel-head">
+              <h2>Suggestions</h2>
+              <p class="muted grow" style="margin:0;">Items customers asked for, with a photo. Forward the good ones; an admin prices and publishes.</p>
+            </div>
+            <div class="workspace" id="suggestionsWs">
+              <div class="pane list">
+                <div class="pane-head"><strong>Queue</strong><span class="muted" id="suggestionsCount"></span></div>
+                <div class="pane-body" id="suggestions"></div>
+              </div>
+              <div class="pane detail" id="suggestionDetail"></div>
+            </div>
+          </div>
+
+          <!-- ── Wallet top-ups sent over USSD: check the merchant phone, like a payment ── -->
+          <div data-panel="topups" class="panel hidden">
+            <div class="panel-head">
+              <h2>Wallet top-ups</h2>
+              <p class="muted grow" style="margin:0;">The customer sent money to the merchant number. Check the merchant phone, then confirm with its transaction number.</p>
+            </div>
+            <div class="workspace" id="topupsWs">
+              <div class="pane list">
+                <div class="pane-head"><strong>To check</strong><span class="muted" id="topupsCount"></span></div>
+                <div class="pane-body" id="topups"></div>
+              </div>
+              <div class="pane detail" id="topupDetail"></div>
+            </div>
+          </div>
+
+          <!-- ── Promo (admin): free delivery ── -->
+          <div data-panel="settings" class="panel hidden">
+            <div class="panel-head"><h2>Free delivery</h2></div>
+            <div class="workspace">
+              <div class="pane detail" style="display:block;">
+                <div class="pane-body"><div class="dsec">
+                  <p class="muted" style="margin:0 0 10px;">Waives the delivery fee on food and shopping orders. Never on rides, parcels or visits. Customers see a banner while it is on. Every change is in the audit log.</p>
+                  <label style="display:flex;gap:8px;align-items:center;"><input id="promoOn" type="checkbox" style="width:auto;min-height:0;" /> Free delivery is on</label>
+                  <label for="promoMin">Only when the items come to at least (USD, 0 = every order)</label>
+                  <input id="promoMin" type="number" step="0.5" min="0" max="1000" />
+                  <button id="promoSave" type="button">Save</button>
+                  <p class="muted" id="promoNow" style="margin:10px 0 0;"></p>
+                </div></div>
+              </div>
             </div>
           </div>
 
@@ -274,5 +322,6 @@
   <script src="/shared/map.js"></script>
   <script src="/shared/push.js"></script>
   <script src="/operator/app.js"></script>
+  <script src="/operator/extras.js"></script>
 </body>
 </html>

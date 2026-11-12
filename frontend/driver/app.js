@@ -12,7 +12,14 @@ let token = sessionStorage.getItem('driverToken') || null;
 let current = null; // the job on screen
 let photosOf = {}; // kind -> true, for the job on screen
 
-const label = (s) => t(`drv.st.${s}`);
+// A ride, a parcel and a technician's visit each have their own words for the same states.
+const KIND_KEY = { RIDE: 'ride', PARCEL: 'parcel', SERVICE: 'service' };
+const label = (s, o = current) => {
+  const k = KIND_KEY[o?.kind];
+  const key = `drv.st.${k}.${s}`;
+  return k && t(key) !== key ? t(key) : t(`drv.st.${s}`);
+};
+const JOB_ICON = { RIDE: '🛺', PARCEL: '📦', SERVICE: '🛠️' };
 const STATUS_KIND = {
   PAID_UNASSIGNED: 'ok', DISPATCHED: 'info', IN_TRANSIT: 'info',
   DELIVERED: 'ok', FAILED_REFUND: 'down',
@@ -180,6 +187,7 @@ let me = null;
 let stopWatch = null;
 let lastFix = null;
 async function loadMe() {
+  loadOffers();
   const res = await api('/driver/me');
   if (res.error) return;
   me = res.driver;
@@ -193,7 +201,9 @@ function renderOnline() {
   $('onlineSub').textContent = t(me.online ? 'drv.online.sub' : 'drv.offline.sub');
   $('onlineBtn').textContent = t(me.online ? 'drv.goOffline' : 'drv.goOnline');
   $('onlineBtn').className = 'small' + (me.online ? ' secondary' : '');
-  $('vehicleLine').textContent = t('drv.vehicle', { v: t(`veh.${me.vehicle}`) });
+  $('vehicleLine').textContent = me.role === 'technician'
+    ? t('drv.tech.line', { trades: (me.trades || []).join(', ') || '—' })
+    : [t('drv.vehicle', { v: t(`veh.${me.vehicle}`) }), me.plate].filter(Boolean).join(' · ');
 }
 $('onlineBtn').addEventListener('click', async () => {
   if (!me) return;
@@ -234,12 +244,12 @@ async function loadQueue() {
   $('queue').innerHTML = orders.length
     ? orders.map((o) => `
       <button class="tile" type="button" data-id="${o.id}">
-        <span class="tile-icon">${o.kind === 'RIDE' ? '🛺' : o.status === 'IN_TRANSIT' ? '🛵' : '🛍️'}</span>
+        <span class="tile-icon">${JOB_ICON[o.kind] || (o.status === 'IN_TRANSIT' ? '🛵' : '🛍️')}</span>
         <span class="tile-body">
           <span class="tile-title"><span class="t-text">${esc(o.landmark_text || t('drv.noLandmark'))}</span></span>
-          <span class="tile-sub">${esc(o.kind === 'RIDE' ? t('drv.ride.tile', { p: o.pickup_text || '' }) : (o.items || []).map((i) => i.text).filter(Boolean).join(', '))}</span>
+          <span class="tile-sub">${esc(o.kind === 'RIDE' ? t('drv.ride.tile', { p: o.pickup_text || '' }) : o.details || (o.items || []).map((i) => i.text).filter(Boolean).join(', '))}</span>
           <span class="tile-sub">#${GMIds.shortId(o.id)} · $${Number(o.total_amount).toFixed(2)}
-            · <strong style="color:var(--gold)">${label(o.status)}</strong></span>
+            · <strong style="color:var(--gold-ink)">${label(o.status, o)}</strong></span>
         </span>
         <span class="chev">›</span>
       </button>`).join('')
@@ -269,10 +279,21 @@ async function openDetail(id) {
   photosOf = {};
   showOnly('detailView');
   const ride = current.kind === 'RIDE';
+  const job = current.kind === 'PARCEL' || current.kind === 'SERVICE';
   $('dOrderId').textContent = GMIds.shortId(current.id);
   $('dBudget').textContent = Number(current.total_amount).toFixed(2);
   $('dFare').textContent = Number(current.total_amount).toFixed(2);
-  $('shopCard').classList.toggle('hidden', ride);
+  $('shopCard').classList.toggle('hidden', ride || job);
+  $('jobCard').classList.toggle('hidden', !job);
+  if (job) {
+    $('jobTitle').textContent = t(current.kind === 'PARCEL' ? 'drv.parcel.title' : current.parent_order_id ? 'drv.extra.job' : 'drv.visit.title');
+    $('jobDetails').textContent = current.details || '—';
+    $('jobPaid').textContent = Number(current.total_amount).toFixed(2);
+    $('recipientRow').classList.toggle('hidden', !current.recipient_phone);
+    if (current.recipient_phone) $('recipientCall').setAttribute('href', `tel:${current.recipient_phone}`);
+  }
+  $('stepPickLabel').textContent = t({ RIDE: 'drv.step.ride.pickup', PARCEL: 'drv.step.parcel.pickup', SERVICE: 'drv.step.visit.start' }[current.kind] || 'drv.step.pickup');
+  $('stepDeliverLabel').textContent = t({ RIDE: 'drv.step.ride.end', PARCEL: 'drv.step.deliver', SERVICE: 'drv.step.visit.done' }[current.kind] || 'drv.step.deliver');
   $('fareCard').classList.toggle('hidden', !ride);
   $('dItems').innerHTML = (current.items || [])
     .map((it) => `<div style="padding:4px 0;">• ${esc(it.text || JSON.stringify(it))}${it.price ? ` — $${esc(it.price)}` : ''}</div>`)
@@ -292,6 +313,10 @@ function targetOf(o) {
   if (o.kind === 'RIDE' && o.status === 'DISPATCHED' && o.pickup_lat != null) {
     return { lat: o.pickup_lat, lng: o.pickup_lng, text: o.pickup_text || t('ride.pinned'), title: 'drv.ride.pickupAt' };
   }
+  if (o.kind === 'PARCEL' && o.status === 'DISPATCHED' && o.pickup_lat != null) {
+    return { lat: o.pickup_lat, lng: o.pickup_lng, text: o.pickup_text || t('ride.pinned'), title: 'drv.parcel.collectAt' };
+  }
+  if (o.kind === 'SERVICE') return { lat: o.lat, lng: o.lng, text: o.landmark_text || t('drv.noLandmark'), title: 'drv.visit.at' };
   return { lat: o.lat, lng: o.lng, text: o.landmark_text || t('drv.noLandmark'), title: o.kind === 'RIDE' ? 'drv.ride.dropAt' : 'drv.dropoff' };
 }
 function renderTarget() {
@@ -426,6 +451,13 @@ function captureBox(id, inputId, titleKey, subKey, done) {
 function renderActions() {
   const s = current.status;
   const box = $('actions');
+  $('extraCard').classList.toggle('hidden', !(current.kind === 'SERVICE' && !current.parent_order_id && s === 'IN_TRANSIT'));
+  // The words of each step for a parcel or a visit; the proof is the same as a delivery's.
+  const w = (key) => {
+    const k = { PARCEL: 'parcel', SERVICE: 'visit' }[current.kind];
+    const alt = k ? `drv.${k}.${key}` : null;
+    return alt && t(alt) !== alt ? t(alt) : t(`drv.${key}`);
+  };
   $('problemBox').classList.toggle('hidden', !['DISPATCHED', 'IN_TRANSIT'].includes(s));
   $('releaseBox').classList.toggle('hidden', s !== 'DISPATCHED');
   box.classList.remove('hidden');
@@ -433,10 +465,10 @@ function renderActions() {
 
   if (s === 'DISPATCHED') {
     box.innerHTML = `
-      <div class="section-title">${t('drv.pick.title')}</div>
-      <p class="muted" style="margin:0 0 12px;">${t('drv.pick.help')}</p>
+      <div class="section-title">${w('pick.title')}</div>
+      <p class="muted" style="margin:0 0 12px;">${w('pick.help')}</p>
       ${captureBox('pickCap', 'pickPhoto', 'drv.pick.photo', 'drv.pick.photoSub', photosOf.pickup_proof)}
-      <button id="pickBtn" type="button" data-action="secured">${t('drv.pick.btn')}</button>`;
+      <button id="pickBtn" type="button" data-action="secured">${w('pick.btn')}</button>`;
     const sync = () => { $('pickBtn').disabled = !photosOf.pickup_proof; };
     sync();
     bindCapture('pickPhoto', 'pickCap', 'pickup_proof', sync);
@@ -446,12 +478,12 @@ function renderActions() {
 
   if (s === 'IN_TRANSIT') {
     box.innerHTML = `
-      <div class="section-title">${t('drv.del.title')}</div>
-      <p class="muted" style="margin:0 0 4px;">${t('drv.del.help')}</p>
+      <div class="section-title">${w('del.title')}</div>
+      <p class="muted" style="margin:0 0 4px;">${w('del.help')}</p>
       <label for="codeIn">${t('drv.del.code')}</label>
       <input id="codeIn" class="code-input" type="text" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="••••" />
       <div id="codeMsg" class="muted" style="margin-top:6px;min-height:18px;"></div>
-      <button id="deliverBtn" type="button" data-action="delivered">${t('drv.del.btn')}</button>
+      <button id="deliverBtn" type="button" data-action="delivered">${w('del.btn')}</button>
       <details class="bare" id="noCodeBox" style="margin-top:14px;">
         <summary class="muted">${t('drv.del.noCode')}</summary>
         <div style="margin-top:12px;">
@@ -529,6 +561,63 @@ function renderRideActions(box, s) {
     return;
   }
   box.innerHTML = `<p class="muted" style="margin:0;">${t('drv.act.none')}</p>`;
+}
+
+// A technician's quote for extra work: a new order the customer pays before it is done.
+$('extraSend').addEventListener('click', async () => {
+  const description = $('extraDesc').value.trim();
+  const amount = parseFloat($('extraAmount').value);
+  if (description.length < 3) return toast(t('drv.extra.needDesc'));
+  if (!(amount >= 0.5)) return toast(t('drv.extra.needAmount'));
+  $('extraSend').disabled = true;
+  const res = await api(`/driver/orders/${current.id}/extra`, { method: 'POST', body: JSON.stringify({ description, amount }) });
+  $('extraSend').disabled = false;
+  if (res.error) return toast(GMI18n.err(res.error));
+  $('extraDesc').value = '';
+  $('extraAmount').value = '';
+  toast(t('drv.extra.sent'));
+  return null;
+});
+
+// ── Offers: a rider chose this driver ──
+let offerTick = null;
+async function loadOffers() {
+  if (!token) return;
+  const res = await api('/driver/offers');
+  renderOffers(res.offers || []);
+}
+function renderOffers(offers) {
+  clearInterval(offerTick);
+  const box = $('offers');
+  box.innerHTML = offers.map((o) => `
+    <div class="card accent" data-offer="${o.id}">
+      <div class="between"><strong>${t('drv.offer.title')}</strong><span class="mono" style="font-size:20px;font-weight:800;" data-left="${o.offer_expires_at}"></span></div>
+      <div class="muted" style="margin:6px 0 2px;">${esc(t('drv.offer.from', { p: o.pickup_text || t('ride.pinned') }))}</div>
+      <div class="muted">${esc(t('drv.offer.to', { p: o.landmark_text || '' }))}</div>
+      <div style="margin-top:6px;font-weight:700;">$${Number(o.total_amount).toFixed(2)}${o.distance_m ? ` · ${GMMap.formatDistance(o.distance_m)}` : ''}</div>
+      <div class="btn-row"><button type="button" data-accept="${o.id}">${t('drv.offer.accept')}</button>
+        <button class="ghost" type="button" data-decline="${o.id}">${t('drv.offer.decline')}</button></div>
+    </div>`).join('');
+  box.querySelectorAll('[data-accept]').forEach((b) => b.addEventListener('click', () => answerOffer(b.dataset.accept, 'accept')));
+  box.querySelectorAll('[data-decline]').forEach((b) => b.addEventListener('click', () => answerOffer(b.dataset.decline, 'decline')));
+  const tick = () => {
+    let live = 0;
+    box.querySelectorAll('[data-left]').forEach((e) => {
+      const left = Math.max(0, Math.ceil((new Date(e.dataset.left).getTime() - Date.now()) / 1000));
+      e.textContent = `0:${String(left).padStart(2, '0')}`;
+      if (left > 0) live += 1; else e.closest('[data-offer]')?.remove();
+    });
+    if (!live) clearInterval(offerTick);
+  };
+  tick();
+  if (offers.length) offerTick = setInterval(tick, 1000);
+  fitQueue();
+}
+async function answerOffer(id, what) {
+  const res = await api(`/driver/offers/${id}/${what}`, { method: 'POST', body: '{}' });
+  if (res.error) toast(GMI18n.err(res.error));
+  await loadOffers();
+  if (what === 'accept' && !res.error) { await loadQueue(); openDetail(id); }
 }
 
 // "Give job back" (before pickup): two taps, then it goes to the next driver.
@@ -839,6 +928,15 @@ function connectSocket() {
       sessionStorage.removeItem('driverToken');
       token = null;
       return location.reload();
+    }
+    if (m.type === 'offer') {
+      // A rider chose me (or the offer just closed): show what is open now.
+      if (!m.closed) {
+        try { navigator.vibrate && navigator.vibrate([400, 150, 400, 150, 400]); } catch { /* not supported */ }
+        toast(t('drv.offer.toast'));
+      }
+      loadOffers();
+      return;
     }
     if (m.type === 'order_state' && current && String(m.orderId) === String(current.id) && m.to !== current.status) {
       // Released or cancelled from elsewhere: it isn't this driver's job any more.

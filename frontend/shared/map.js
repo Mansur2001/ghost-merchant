@@ -249,7 +249,8 @@
 
   function create(el, opts) {
     opts = opts || {};
-    var center = opts.center || MOGADISHU;
+    // The customer's city (shared/cities.js) when one is chosen; Mogadishu otherwise.
+    var center = opts.center || (global.GMCity ? global.GMCity.current().center : MOGADISHU);
     var map = L.map(el, {
       zoomControl: true,
       attributionControl: false,

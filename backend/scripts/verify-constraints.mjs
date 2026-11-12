@@ -20,6 +20,8 @@ const REQUIRED_INDEXES = {
   idx_order_proofs_review: "the operator's queue of deliveries to check",
   idx_payment_attempts_one_pending: 'one wallet prompt at a time per order (no double charge)',
   idx_payment_attempts_one_pending_topup: 'one top-up prompt at a time per customer',
+  idx_payment_attempts_one_claimed_topup: 'one manual top-up waiting per customer',
+  idx_orders_offer: 'the sweep of driver offers that ran out',
   idx_wallet_entries_order_once: 'an order is paid from, and refunded to, a wallet at most once',
 };
 
@@ -41,6 +43,12 @@ const REQUIRED_CHECKS = {
   payment_attempts_purpose_check: 'an attempt pays an order or tops up a wallet, never neither',
   refunds_amount_check: 'a refund can never be negative',
   refunds_status_check: 'refund status is one of owed/settled/waived',
+  drivers_role_check: 'a staff account on the driver app is a driver or a technician',
+  orders_offer_check: 'an offer always has a deadline',
+  ratings_stars_check: 'a rating is 1 to 5 stars',
+  trades_fee_check: 'a visit fee is positive',
+  catalog_items_image_check: 'an item picture is a bundled stock file or an uploaded object',
+  catalog_submissions_status_check: 'a suggestion is new, forwarded, rejected or published',
   users_has_login: 'every customer account can be signed in to (phone or email)',
 };
 

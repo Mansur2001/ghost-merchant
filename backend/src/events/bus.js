@@ -32,6 +32,12 @@ export const EVENTS = {
   DELIVERY_DISPUTED: 'delivery.disputed',
   // A customer's sessions were ended (password changed): sockets on older tokens are closed.
   CUSTOMER_SESSIONS_ENDED: 'customer.sessions_ended',
+  // A ride was offered to the driver the customer chose, or that offer closed (declined/expired).
+  DRIVER_OFFERED: 'driver.offered',
+  // A technician sent a quote for extra work (a new prepaid order under the visit).
+  EXTRA_WORK_QUOTED: 'order.extra_quoted',
+  // A customer suggestion entered the review queue, or was decided (published/rejected).
+  SUBMISSION_CHANGED: 'catalog.submission_changed',
 };
 
 // Not domain events: high-rate, latest-wins telemetry that goes straight to the bus, never

@@ -1,6 +1,6 @@
 // Operator/dispatcher dashboard routes. Payments are confirmed here — an operator checks the
 // merchant phone and confirms each one — plus dispatch, refunds, and (admins) staff management.
-import { Router } from 'express';
+import { Router, raw } from 'express';
 import { prisma, withTransaction } from '../db/prisma.js';
 import { signToken, requireRole } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
@@ -25,7 +25,17 @@ import {
 import { markProofReviewed, ProofError } from '../commands/proofs.js';
 import { getDriversWithStats, getDriverById, getDriverPositions } from '../queries/drivers.js';
 import { getCatalog, getPlaces } from '../queries/catalog.js';
-import { createEntry, updateEntry, CatalogError } from '../commands/catalog.js';
+import { createEntry, updateEntry, setItemImage, CatalogError } from '../commands/catalog.js';
+import { getTrades } from '../queries/catalog.js';
+import { STOCK_IMAGES } from '../domain/stockImages.js';
+import {
+  listSubmissions, reviewSubmission, publishSubmission, submissionPhotoKey, SubmissionError,
+} from '../commands/submissions.js';
+import { getSetting, setSetting, SettingsError } from '../commands/settings.js';
+import { confirmTopup, rejectTopup, listTopupClaims } from '../commands/wallet.js';
+import { checkPublicImage } from '../domain/images.js';
+import { putObject, deleteObject } from '../storage/objectStore.js';
+import { randomBytes } from 'node:crypto';
 import { markWithdrawalPaid, rejectWithdrawal, WalletError } from '../commands/wallet.js';
 import { listWithdrawals } from '../queries/wallet.js';
 import { triageBug } from '../commands/bugs.js';
@@ -528,6 +538,65 @@ operatorRouter.post('/operator/drivers/:id/vehicle', adminOnly, async (req, res,
   }
 });
 
+// POST /api/operator/drivers/:id/profile { role?, trades?, plate? } — what customers see and
+// which jobs dispatch gives them. Admins only, audited. Never who gets which job.
+operatorRouter.post('/operator/drivers/:id/profile', adminOnly, async (req, res, next) => {
+  try {
+    const data = {};
+    const b = req.body || {};
+    if (b.role !== undefined) {
+      if (!['driver', 'technician'].includes(b.role)) return res.status(400).json({ error: 'role is driver or technician' });
+      data.role = b.role;
+    }
+    if (b.trades !== undefined) {
+      const known = new Set((await getTrades({ includeInactive: true })).map((t) => t.slug));
+      if (!Array.isArray(b.trades) || b.trades.some((t) => !known.has(t))) return res.status(400).json({ error: 'choose trades from the list' });
+      data.trades = [...new Set(b.trades)];
+    }
+    if (b.plate !== undefined) {
+      const plate = typeof b.plate === 'string' ? b.plate.trim().toUpperCase().replace(/\s+/g, ' ') : '';
+      if (plate && !/^[A-Z0-9 -]{2,16}$/.test(plate)) return res.status(400).json({ error: 'the plate is 2 to 16 letters and numbers' });
+      data.plate = plate || null;
+    }
+    if (!Object.keys(data).length) return res.status(400).json({ error: 'nothing to change' });
+    if (data.role) {
+      // Switching someone between driving and technician work mid-job would strand the job.
+      const busy = await prisma.order.count({ where: { driver_id: BigInt(req.params.id), status: { in: ['DISPATCHED', 'IN_TRANSIT'] } } });
+      if (busy) return res.status(409).json({ error: 'they have active jobs — wait until those are done' });
+    }
+    const driver = await prisma.driver.update({
+      where: { id: BigInt(req.params.id) }, data,
+      select: { id: true, name: true, role: true, trades: true, plate: true },
+    });
+    auditAfter({ actor: actorLabel(req.auth), action: 'staff.profile', subject: `driver:${req.params.id}`, detail: data });
+    dispatchWaitingSoon();
+    res.json({ driver });
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'driver not found' });
+    next(err);
+  }
+});
+
+// POST /api/operator/drivers/:id/photo — raw image bytes: the face customers choose by.
+operatorRouter.post('/operator/drivers/:id/photo', adminOnly, raw({ type: () => true, limit: '6mb' }), async (req, res, next) => {
+  try {
+    const kind = checkPublicImage(req.body);
+    if (kind.error) return res.status(400).json({ error: kind.error });
+    let id;
+    try { id = BigInt(req.params.id); } catch { return res.status(404).json({ error: 'driver not found' }); }
+    const before = await prisma.driver.findUnique({ where: { id }, select: { photo_key: true } });
+    if (!before) return res.status(404).json({ error: 'driver not found' });
+    const key = `drivers/${id}/${randomBytes(8).toString('hex')}.${kind.ext}`;
+    await putObject(key, req.body, kind.type);
+    await prisma.driver.update({ where: { id }, data: { photo_key: key } });
+    if (before.photo_key) deleteObject(before.photo_key).catch((e) => console.warn(`[drivers] old photo ${id}: ${e.message}`));
+    auditAfter({ actor: actorLabel(req.auth), action: 'staff.photo', subject: `driver:${id}` });
+    res.status(201).json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/operator/map — drivers' latest positions and what they carry. Live updates come
 // over the socket (driver_location).
 operatorRouter.get('/operator/map', operatorOnly, async (req, res, next) => {
@@ -574,6 +643,102 @@ operatorRouter.post('/operator/catalog/items', adminOnly, createRoute('item'));
 operatorRouter.patch('/operator/catalog/items/:id', adminOnly, updateRoute('item'));
 operatorRouter.post('/operator/places', adminOnly, createRoute('place'));
 operatorRouter.patch('/operator/places/:id', adminOnly, updateRoute('place'));
+operatorRouter.post('/operator/trades', adminOnly, createRoute('trade'));
+operatorRouter.patch('/operator/trades/:id', adminOnly, updateRoute('trade'));
+operatorRouter.get('/operator/trades', operatorOnly, async (req, res) => {
+  res.json({ trades: await getTrades({ includeInactive: true }) });
+});
+
+// The bundled licence-free pictures an admin can give an item (frontend/shared/img/catalog).
+operatorRouter.get('/operator/stock-images', operatorOnly, (req, res) => {
+  res.json({ images: STOCK_IMAGES.map((f) => ({ image: `stock/${f}`, url: `/shared/img/catalog/${f}` })) });
+});
+
+// POST /api/operator/catalog/items/:id/image — raw image bytes: the item's own picture.
+const rawImage = raw({ type: () => true, limit: '6mb' });
+operatorRouter.post('/operator/catalog/items/:id/image', adminOnly, rawImage, async (req, res, next) => {
+  try {
+    const item = await setItemImage({ id: req.params.id, bytes: req.body, actor: actorLabel(req.auth) });
+    res.status(201).json({ item: { id: item.id, image: item.image } });
+  } catch (err) {
+    catalogError(err, res, next);
+  }
+});
+
+// ── Customer suggestions: operators review, admins price and publish ──
+function submissionError(err, res, next) {
+  if (err instanceof SubmissionError || err instanceof CatalogError) return res.status(err.status).json({ error: err.message });
+  next(err);
+}
+operatorRouter.get('/operator/submissions', operatorOnly, async (req, res) => {
+  res.json({ submissions: await listSubmissions() });
+});
+operatorRouter.get('/operator/submissions/:id/photo', operatorOnly, async (req, res) => {
+  const key = await submissionPhotoKey(req.params.id);
+  if (!key) return res.status(404).json({ error: 'not found' });
+  try {
+    const obj = await getObject(key);
+    res.setHeader('Content-Type', obj.contentType || 'image/jpeg');
+    res.setHeader('Cache-Control', 'no-store');
+    obj.body.pipe(res);
+  } catch {
+    res.status(404).json({ error: 'not found' });
+  }
+});
+operatorRouter.post('/operator/submissions/:id/review', operatorOnly, async (req, res, next) => {
+  try {
+    const sub = await reviewSubmission({ id: req.params.id, decision: req.body?.decision, note: req.body?.note, actor: actorLabel(req.auth) });
+    res.json({ submission: { id: sub.id, status: sub.status } });
+  } catch (err) {
+    submissionError(err, res, next);
+  }
+});
+operatorRouter.post('/operator/submissions/:id/publish', adminOnly, async (req, res, next) => {
+  try {
+    const item = await publishSubmission({ id: req.params.id, item: req.body || {}, actor: actorLabel(req.auth) });
+    res.status(201).json({ item });
+  } catch (err) {
+    submissionError(err, res, next);
+  }
+});
+
+// ── Settings (admins): the free-delivery promo ──
+operatorRouter.get('/operator/settings', operatorOnly, async (req, res) => {
+  res.json({ settings: { free_delivery: await getSetting('free_delivery') } });
+});
+operatorRouter.put('/operator/settings/:key', adminOnly, async (req, res, next) => {
+  try {
+    res.json({ value: await setSetting(req.params.key, req.body, actorLabel(req.auth)) });
+  } catch (err) {
+    if (err instanceof SettingsError) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+// ── Manual wallet top-ups: the operator checks the merchant phone, like an order payment ──
+function topupError(err, res, next) {
+  if (err instanceof WalletError) return res.status(err.status).json({ error: err.message });
+  next(err);
+}
+operatorRouter.get('/operator/topups', operatorOnly, async (req, res) => {
+  res.json({ topups: await listTopupClaims() });
+});
+operatorRouter.post('/operator/topups/:id/confirm', operatorOnly, async (req, res, next) => {
+  if (!isUuid(req.params.id)) return res.status(404).json({ error: 'not found' });
+  try {
+    res.json(await confirmTopup({ id: req.params.id, reference: req.body?.reference, actor: actorLabel(req.auth) }));
+  } catch (err) {
+    topupError(err, res, next);
+  }
+});
+operatorRouter.post('/operator/topups/:id/reject', operatorOnly, async (req, res, next) => {
+  if (!isUuid(req.params.id)) return res.status(404).json({ error: 'not found' });
+  try {
+    res.json(await rejectTopup({ id: req.params.id, note: req.body?.note, actor: actorLabel(req.auth) }));
+  } catch (err) {
+    topupError(err, res, next);
+  }
+});
 
 // ── Wallet withdrawals (admin). The admin sends the money from the business wallet, then
 // records its reference; or rejects it and the amount returns to the customer's balance. ──

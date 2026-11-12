@@ -2,7 +2,7 @@
 //   * a balance never goes below zero, and never above the cap on a top-up;
 //   * every change writes a ledger row with the balance it left;
 //   * a top-up is credited only for the exact amount asked, once per gateway reference;
-//   * the whole feature is off unless WALLET_ENABLED=true.
+//   * the whole feature is on by default (owner's licence, 2026-11-11); WALLET_ENABLED=false turns it off.
 import { jest, describe, test, expect, beforeEach } from '@jest/globals';
 
 let balance = 0n;
@@ -43,7 +43,7 @@ jest.unstable_mockModule('../src/commands/payments.js', () => ({ confirmPayment,
 const W = await import('../src/commands/wallet.js');
 const { parseWaafiPay } = await import('../src/domain/waafipay.js');
 const on = W.parseWalletSettings({ WALLET_ENABLED: 'true' });
-const off = W.parseWalletSettings({});
+const off = W.parseWalletSettings({ WALLET_ENABLED: 'false' });
 const gateway = parseWaafiPay({ WAAFIPAY_MERCHANT_UID: 'M', WAAFIPAY_API_USER_ID: '1', WAAFIPAY_API_KEY: 'k' });
 
 beforeEach(() => {
@@ -52,8 +52,9 @@ beforeEach(() => {
 });
 
 describe('settings', () => {
-  test('off unless WALLET_ENABLED=true; sensible caps', () => {
+  test('on by default, off with WALLET_ENABLED=false; sensible caps', () => {
     expect(off.enabled).toBe(false);
+    expect(W.parseWalletSettings({}).enabled).toBe(true);
     expect(on).toMatchObject({ enabled: true, maxBalanceCents: 50000, topupMinCents: 100, topupMaxCents: 20000 });
   });
   test('every wallet action refuses while off', async () => {

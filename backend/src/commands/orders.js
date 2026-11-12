@@ -36,12 +36,14 @@ import { newHandoffCode } from '../domain/proof.js';
 export async function createOrder({
   id, userId, contactPhone, items, totalAmount, lat, lng, landmark,
   kind = 'DELIVERY', pickup = null, vehicle = null, distanceM = null, subtotal = null, fee = null,
+  requestedDriverId = null, trade = null, details = null, recipientPhone = null, promo = null, parentOrderId = null,
 }) {
   if (!Number.isInteger(userId)) throw new Error('userId required');
   if (!contactPhone) throw new Error('phone required');
   if (!landmark || !landmark.trim()) throw new Error('landmark is mandatory');
   if (id != null && !isUuid(id)) throw new Error('id must be a UUID');
   const phone = normalizeMsisdnOrThrow(contactPhone);
+  const recipient = recipientPhone ? normalizeMsisdnOrThrow(recipientPhone) : null;
   const orderId = id || newOrderId();
 
   // CP path: an order is what every other write hangs off, so it must be durable before the
@@ -73,6 +75,12 @@ export async function createOrder({
         distance_m: distanceM,
         subtotal,
         fee,
+        requested_driver_id: requestedDriverId != null ? BigInt(requestedDriverId) : null,
+        trade,
+        details,
+        recipient_phone: recipient,
+        promo,
+        parent_order_id: parentOrderId,
       },
     });
 
@@ -82,7 +90,7 @@ export async function createOrder({
         from_status: null,
         to_status: 'PENDING_PAYMENT',
         actor: 'system',
-        note: kind === 'RIDE' ? 'ride booked' : 'order created',
+        note: { RIDE: 'ride booked', PARCEL: 'parcel booked', SERVICE: parentOrderId ? 'extra work quoted' : 'visit booked' }[kind] || 'order created',
       },
     });
     // The code the customer gives the driver at the door (domain/proof.js). Same commit as
@@ -122,9 +130,14 @@ export async function transitionOrder(orderId, toStatus, actor = 'system', note 
 
     assertTransition(order.status, toStatus); // throws on illegal transition
 
+    // Leaving PAID_UNASSIGNED ends any offer still open on it (domain/offers.js).
     const updated = await tx.order.update({
       where: { id: orderId },
-      data: { status: toStatus, updated_at: new Date() },
+      data: {
+        status: toStatus,
+        updated_at: new Date(),
+        ...(order.status === 'PAID_UNASSIGNED' ? { offer_driver_id: null, offer_expires_at: null } : {}),
+      },
     });
     await tx.orderEvent.create({
       data: { order_id: orderId, from_status: order.status, to_status: toStatus, actor, note },
@@ -219,7 +232,7 @@ export async function cancelOrder({ orderId }) {
     const pending = await tx.paymentAttempt.findFirst({ where: { order_id: orderId, status: 'pending' } });
     if (pending) return { error: 'finish or refuse the payment prompt on your phone first', status: 409 };
     const paid = row.status === 'PAID_UNASSIGNED';
-    const what = row.kind === 'RIDE' ? 'ride' : 'order';
+    const what = { RIDE: 'ride', PARCEL: 'parcel', SERVICE: 'visit' }[row.kind] || 'order';
     return transitionOrder(orderId, 'FAILED_REFUND', 'customer', 'cancelled by customer', {
       client: tx,
       message: paid

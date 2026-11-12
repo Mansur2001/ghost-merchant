@@ -73,16 +73,21 @@ export function cleanReason(raw) {
 // Rides prove different things (CLAUDE.md, Proof of delivery):
 //   pickup   the rider's 4-digit code — the right person got in. Without it, a reason, flagged.
 //   delivery a drop-off fix, compared with the destination. No code: the rider is in the car.
+//
+// A parcel's pickup is at the sender's door, and a technician's "started" is at the customer's
+// house: both are checked against that pin like a delivery (photo, plus GPS as evidence).
 export function buildProof({ step, method, fix, order, note = null }) {
   const isRide = order?.kind === 'RIDE';
+  const isParcel = order?.kind === 'PARCEL';
+  const isService = order?.kind === 'SERVICE';
   const pinOf = (lat, lng) => (lat != null && lng != null ? { lat, lng } : null);
-  const pin = isRide && step === 'pickup'
+  const pin = (isRide || isParcel) && step === 'pickup'
     ? pinOf(order.pickup_lat, order.pickup_lng)
     : pinOf(order?.lat, order?.lng);
   const distance = fix && pin ? distanceMeters(fix, pin) : null;
 
   const flags = [];
-  const checked = step === 'delivery' || (isRide && step === 'pickup');
+  const checked = step === 'delivery' || (step === 'pickup' && (isRide || isParcel || isService));
   if (checked) {
     if (method === 'photo_no_code' || method === 'no_code') flags.push('no_code');
     if (!fix) flags.push('no_gps');

@@ -52,9 +52,29 @@ const RIDE_RESPONSES = {
   FAILED_REFUND: 'There was a problem with your ride. An operator will contact you shortly.',
 };
 
+const PARCEL_RESPONSES = {
+  PAID_UNASSIGNED: 'Payment confirmed. We are finding a driver to collect your parcel.',
+  DISPATCHED: 'A driver is on the way to collect your parcel.',
+  IN_TRANSIT: 'Your parcel has been collected and is on the way.',
+  DELIVERED: 'Your parcel has been delivered. Thank you!',
+  FAILED_REFUND: 'There was a problem with your parcel. An operator will contact you shortly.',
+};
+
+const SERVICE_RESPONSES = {
+  PAID_UNASSIGNED: 'Payment confirmed. We are finding a technician for you.',
+  DISPATCHED: 'A technician is on the way to you.',
+  IN_TRANSIT: 'Your technician has arrived and started work.',
+  DELIVERED: 'The job is done. Thank you!',
+  FAILED_REFUND: 'There was a problem with your visit. An operator will contact you shortly.',
+};
+
+const BY_KIND = { RIDE: RIDE_RESPONSES, PARCEL: PARCEL_RESPONSES, SERVICE: SERVICE_RESPONSES };
+
 export function autoResponse(from, to, kind = 'DELIVERY') {
   if (from === 'DISPATCHED' && to === 'PAID_UNASSIGNED') {
-    return 'Your driver could not make it. We are finding you another one.';
+    return kind === 'SERVICE'
+      ? 'Your technician could not make it. We are finding you another one.'
+      : 'Your driver could not make it. We are finding you another one.';
   }
-  return (kind === 'RIDE' ? RIDE_RESPONSES : AUTO_RESPONSES)[to] || null;
+  return (BY_KIND[kind] || AUTO_RESPONSES)[to] || null;
 }

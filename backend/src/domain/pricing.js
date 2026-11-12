@@ -14,6 +14,8 @@ export const DEFAULT_TARIFF = {
     car: { base: 2.0, perKm: 0.7, min: 3.0 },
   },
   delivery: { base: 1.0, perKm: 0.3, freeKm: 2, min: 1.0 },
+  // A parcel from one door to another: a little more than a delivery (a second address).
+  parcel: { base: 1.5, perKm: 0.35, freeKm: 2, min: 1.5 },
   // Further than this and it isn't a city job: refuse rather than quote a fare nobody expects.
   maxRideKm: 50,
   maxDeliveryKm: 30,
@@ -50,6 +52,10 @@ const ENV_KEYS = [
   ['DELIVERY_PER_KM', ['delivery', 'perKm']],
   ['DELIVERY_FREE_KM', ['delivery', 'freeKm']],
   ['DELIVERY_MIN', ['delivery', 'min']],
+  ['PARCEL_BASE', ['parcel', 'base']],
+  ['PARCEL_PER_KM', ['parcel', 'perKm']],
+  ['PARCEL_FREE_KM', ['parcel', 'freeKm']],
+  ['PARCEL_MIN', ['parcel', 'min']],
 ];
 
 export function parseTariff(env) {
@@ -86,6 +92,32 @@ export function deliveryFeeCents(meters, tariff = DEFAULT_TARIFF) {
   const chargedKm = Math.max(0, meters / 1000 - t.freeKm);
   const raw = toCents(t.base) + Math.round(chargedKm * toCents(t.perKm));
   return roundUpTo10(Math.max(raw, toCents(t.min)));
+}
+
+// A parcel from the sender's door to the receiver's.
+export function parcelFeeCents(meters, tariff = DEFAULT_TARIFF) {
+  const t = tariff.parcel;
+  if (meters > tariff.maxDeliveryKm * 1000) throw new PricingError('those two addresses are too far apart');
+  const chargedKm = Math.max(0, meters / 1000 - t.freeKm);
+  const raw = toCents(t.base) + Math.round(chargedKm * toCents(t.perKm));
+  return roundUpTo10(Math.max(raw, toCents(t.min)));
+}
+
+// The admin's free-delivery promo (commands/settings.js). Waives the DELIVERY fee when it is on
+// and the items reach `minSubtotal` dollars (0 = every order). Only the fee: never the goods,
+// and never a ride, parcel or visit — those fees are the whole job.
+export function promoApplies(promo, subtotalCents) {
+  if (!promo?.enabled) return false;
+  return subtotalCents >= toCents(promo.minSubtotal || 0);
+}
+
+// What the customer writes about a parcel or a problem: their words, trimmed, bounded.
+export const DETAILS_MAX = 500;
+export function cleanDetails(raw, { required = true, what = 'describe it' } = {}) {
+  const s = typeof raw === 'string' ? raw.trim() : '';
+  if (required && s.length < 3) throw new PricingError(what);
+  if (s.length > DETAILS_MAX) throw new PricingError(`keep it under ${DETAILS_MAX} characters`);
+  return s || null;
 }
 
 // Validate a cart against the catalog and price it. `catalog` is a Map of item id -> active

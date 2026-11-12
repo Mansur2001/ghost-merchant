@@ -1,6 +1,7 @@
 // Read side for the customer wallet (commands/wallet.js writes it).
 import { prisma } from '../db/prisma.js';
 import { config } from '../config.js';
+import { appPayWallets } from '../domain/ussd.js';
 
 const dollars = (c) => (Number(c) / 100).toFixed(2);
 
@@ -28,7 +29,14 @@ export async function getWallet(userId, settings = config.wallet) {
     withdrawals: withdrawals.map((w) => ({
       id: String(w.id), amount: dollars(w.amount_cents), status: w.status, note: w.note, created_at: w.created_at,
     })),
-    lastTopup: topup ? { id: topup.id, status: topup.status, amount: String(topup.amount), wallet: topup.wallet, created_at: topup.created_at } : null,
+    lastTopup: topup ? {
+      id: topup.id, status: topup.status, amount: String(topup.amount), wallet: topup.wallet, provider: topup.provider,
+      detail: topup.status === 'rejected' ? topup.detail : null, created_at: topup.created_at,
+    } : null,
+    // How money can come in: the gateway's prompt, and/or USSD to the merchant then a check
+    // by the desk (operator mode only).
+    gateway: appPayWallets(),
+    ussd: config.paymentConfirmation === 'operator' && config.payment.wallets.length > 0,
   };
 }
 

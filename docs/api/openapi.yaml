@@ -1934,6 +1934,367 @@ paths:
         "404": { description: "Webhook off (operator mode), or no such order" }
         "409": { description: "Wrong amount, already paid, or reference used for another order", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
+  # ── The full customer app (2026-11-11) ──
+  /api/trades:
+    get:
+      tags: [Public]
+      summary: Farsamo trades and their prepaid visit fee
+      security: []
+      responses:
+        "200": { description: Trades, content: { application/json: { schema: { type: object, properties: { trades: { type: array, items: { type: object, properties: { slug: { type: string }, name_en: { type: string }, name_so: { type: string }, icon: { type: string }, visit_fee: { type: string } } } } } } } } }
+
+  /api/settings/public:
+    get:
+      tags: [Public]
+      summary: What the customer app shows as a banner (the free-delivery promo)
+      security: []
+      responses:
+        "200": { description: Settings, content: { application/json: { schema: { type: object, properties: { freeDelivery: { type: object, properties: { enabled: { type: boolean }, minSubtotal: { type: string } } } } } } } }
+
+  /api/catalog/items/{id}/image:
+    get:
+      tags: [Public]
+      summary: A live catalog item's own picture (an approved upload; stock pictures are static files)
+      security: []
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: The image bytes, content: { image/*: {} } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/drivers/{id}/photo:
+    get:
+      tags: [Orders (shared)]
+      summary: A driver's photo (signed in only; active drivers only)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: The image bytes, content: { image/*: {} } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/nearby:
+    get:
+      tags: [Customer — orders]
+      summary: How many free drivers are near a point, and how many minutes away the nearest is
+      description: Counts and minutes per vehicle, never positions.
+      parameters:
+        - { name: lat, in: query, required: true, schema: { type: number } }
+        - { name: lng, in: query, required: true, schema: { type: number } }
+      responses:
+        "200": { description: Per vehicle, content: { application/json: { schema: { type: object, properties: { nearby: { type: object, additionalProperties: { type: object, properties: { count: { type: integer }, eta_min: { type: [integer, "null"] } } } } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/me:
+    get:
+      tags: [Customer — account]
+      summary: The name the app greets the customer with
+      responses:
+        "200": { description: Name or null, content: { application/json: { schema: { type: object, properties: { name: { type: [string, "null"] } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/me/name:
+    post:
+      tags: [Customer — account]
+      summary: Set (or clear) the greeting name — optional, at most 40 characters
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { name: { type: string } } } } } }
+      responses:
+        "200": { description: Saved, content: { application/json: { schema: { type: object, properties: { name: { type: [string, "null"] } } } } } }
+
+  /api/inbox:
+    get:
+      tags: [Customer — account]
+      summary: The notifications inbox (the bell)
+      description: Derived from order status changes, wallet movements, suggestion decisions and extra-work quotes of the last 30 days. Only "read up to" is stored.
+      responses:
+        "200": { description: Items and the unread count, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { type: object } }, unread: { type: integer }, seen_at: { type: [string, "null"] } } } } } }
+
+  /api/inbox/seen:
+    post:
+      tags: [Customer — account]
+      summary: Mark the inbox read
+      responses:
+        "200": { description: Done, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+
+  /api/orders/{id}/driver:
+    get:
+      tags: [Customer — orders]
+      summary: The driver (or technician) on this order, or the one it was offered to
+      description: First name, vehicle, plate, whether a photo exists, average rating. No phone, no position. `offer` is true while the chosen driver has not accepted yet.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200": { description: Driver card or null, content: { application/json: { schema: { type: object } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/orders/{id}/rating:
+    get:
+      tags: [Customer — orders]
+      summary: This job's rating, if given
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200": { description: Rating or null, content: { application/json: { schema: { type: object } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Customer — orders]
+      summary: Rate a finished job, 1–5 stars (once, within 14 days)
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [stars], properties: { stars: { type: integer, minimum: 1, maximum: 5 }, comment: { type: string, maxLength: 300 } } } } } }
+      responses:
+        "201": { description: Rated, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Not finished, already rated, or too late, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/orders/{id}/extras:
+    get:
+      tags: [Customer — orders]
+      summary: Extra-work quotes under a technician's visit (each its own prepaid order)
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200": { description: Extra orders, content: { application/json: { schema: { type: object, properties: { extras: { type: array, items: { type: object } } } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/catalog/submissions:
+    post:
+      tags: [Customer — orders]
+      summary: Suggest an item for the catalog (a name now, the photo next)
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string, maxLength: 80 }, note: { type: string, maxLength: 300 }, service: { type: string, enum: [food, grocery, pharmacy, water, shop] } } } } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { description: Five waiting already, or ten today }
+
+  /api/catalog/submissions/{id}/photo:
+    post:
+      tags: [Customer — orders]
+      summary: The suggestion's photo (raw JPEG/PNG/WebP bytes, 3 MB; type checked from the bytes)
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody: { required: true, content: { image/*: {} } }
+      responses:
+        "201": { description: Stored, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Already reviewed }
+
+  /api/catalog/submissions/mine:
+    get:
+      tags: [Customer — orders]
+      summary: My suggestions and what became of them
+      responses:
+        "200": { description: Suggestions, content: { application/json: { schema: { type: object, properties: { submissions: { type: array, items: { type: object } } } } } } }
+
+  /api/wallet/topup-options:
+    get:
+      tags: [Customer — wallet]
+      summary: USSD dial links for topping up an amount (operator mode only)
+      parameters: [{ name: amount, in: query, required: true, schema: { type: number } }]
+      responses:
+        "200": { description: One %23-encoded tel link per configured wallet, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { description: The wallet is off }
+
+  /api/wallet/topup-claim:
+    post:
+      tags: [Customer — wallet]
+      summary: "\"I've sent it\": a USSD top-up for an operator to confirm against the merchant phone"
+      description: Credits nothing by itself. An operator confirms it with the telecom reference (UNIQUE like every payment). Refused in api mode.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [amount, wallet, reference], properties: { amount: { type: number }, wallet: { type: string }, reference: { type: string } } } } } }
+      responses:
+        "201": { description: Waiting for a check, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { description: One already waiting, or over the wallet cap }
+
+  /api/driver/offers:
+    get:
+      tags: [Driver]
+      summary: Rides a customer chose me for, still open (30 s each)
+      description: Pickup and destination words, distance and fare — no phone and no name until accepted.
+      responses:
+        "200": { description: Open offers, content: { application/json: { schema: { type: object, properties: { offers: { type: array, items: { type: object } } } } } } }
+
+  /api/driver/offers/{id}/accept:
+    post:
+      tags: [Driver]
+      summary: Take the ride a customer chose me for
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200": { description: Assigned (DISPATCHED), content: { application/json: { schema: { type: object } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: The offer expired }
+
+  /api/driver/offers/{id}/decline:
+    post:
+      tags: [Driver]
+      summary: Pass — the ride goes to the nearest free driver at once
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200": { description: Passed on, content: { application/json: { schema: { type: object } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/driver/orders/{id}/extra:
+    post:
+      tags: [Driver]
+      summary: A technician on site quotes extra work — a new prepaid order the customer pays
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [description, amount], properties: { description: { type: string, maxLength: 500 }, amount: { type: number, minimum: 0.5, maximum: 500 } } } } } }
+      responses:
+        "201": { description: The extra order, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Not a visit, not started, or the last quote is unpaid }
+
+  /api/operator/trades:
+    get:
+      tags: [Operator — catalog]
+      summary: All Farsamo trades, hidden ones too
+      responses:
+        "200": { description: Trades, content: { application/json: { schema: { type: object } } } }
+    post:
+      tags: [Operator — catalog]
+      summary: Add a trade (admin; audited)
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { description: Code already used }
+
+  /api/operator/trades/{id}:
+    patch:
+      tags: [Operator — catalog]
+      summary: Change a trade's names, fee or visibility (admin; audited)
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses:
+        "200": { description: Updated, content: { application/json: { schema: { type: object } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/operator/stock-images:
+    get:
+      tags: [Operator — catalog]
+      summary: The bundled licence-free pictures an item can be given
+      responses:
+        "200": { description: Images, content: { application/json: { schema: { type: object } } } }
+
+  /api/operator/catalog/items/{id}/image:
+    post:
+      tags: [Operator — catalog]
+      summary: Upload an item's own picture (admin; raw JPEG/PNG/WebP, audited)
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody: { required: true, content: { image/*: {} } }
+      responses:
+        "201": { description: Stored, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/operator/submissions:
+    get:
+      tags: [Operator]
+      summary: Customers' item suggestions (open ones, and those decided in the last 14 days)
+      responses:
+        "200": { description: Suggestions — no customer contact details, content: { application/json: { schema: { type: object } } } }
+
+  /api/operator/submissions/{id}/photo:
+    get:
+      tags: [Operator]
+      summary: A suggestion's photo (no-store)
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: The image bytes, content: { image/*: {} } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/operator/submissions/{id}/review:
+    post:
+      tags: [Operator]
+      summary: Forward a suggestion to the admins, or reject it (the photo is deleted; audited)
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [decision], properties: { decision: { type: string, enum: [forward, reject] }, note: { type: string } } } } } }
+      responses:
+        "200": { description: Decided, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { description: Already decided }
+
+  /api/operator/submissions/{id}/publish:
+    post:
+      tags: [Admin]
+      summary: Price a suggestion and put it in the catalog with its photo (admin; audited)
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CatalogItemInput" } } } }
+      responses:
+        "201": { description: The new item, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { description: Already decided }
+
+  /api/operator/settings:
+    get:
+      tags: [Operator]
+      summary: Admin settings (the free-delivery promo)
+      responses:
+        "200": { description: Settings, content: { application/json: { schema: { type: object } } } }
+
+  /api/operator/settings/{key}:
+    put:
+      tags: [Admin]
+      summary: Change a setting (admin; audited with before/after)
+      parameters: [{ name: key, in: path, required: true, schema: { type: string, enum: [free_delivery] } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { enabled: { type: boolean }, minSubtotal: { type: number } } } } } }
+      responses:
+        "200": { description: Saved, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/operator/topups:
+    get:
+      tags: [Operator]
+      summary: USSD wallet top-ups to check, and those decided in the last 3 days
+      responses:
+        "200": { description: Top-ups, content: { application/json: { schema: { type: object } } } }
+
+  /api/operator/topups/{id}/confirm:
+    post:
+      tags: [Operator]
+      summary: The money is on the merchant phone — credit the wallet (reference required, UNIQUE)
+      description: 403 in api mode, where only the gateway credits a wallet.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [reference], properties: { reference: { type: string } } } } } }
+      responses:
+        "200": { description: Credited, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { description: api mode }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Already decided, or the reference was used }
+
+  /api/operator/topups/{id}/reject:
+    post:
+      tags: [Operator]
+      summary: Not on the merchant phone — reject with a reason the customer sees
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [note], properties: { note: { type: string } } } } } }
+      responses:
+        "200": { description: Rejected, content: { application/json: { schema: { type: object } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/operator/drivers/{id}/profile:
+    post:
+      tags: [Admin]
+      summary: Role (driver/technician), trades and plate — what customers see and which jobs dispatch gives (audited)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { role: { type: string, enum: [driver, technician] }, trades: { type: array, items: { type: string } }, plate: { type: string } } } } } }
+      responses:
+        "200": { description: Saved, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Has active jobs (role change) }
+
+  /api/operator/drivers/{id}/photo:
+    post:
+      tags: [Admin]
+      summary: The driver's photo customers choose by (raw JPEG/PNG/WebP; audited)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { image/*: {} } }
+      responses:
+        "201": { description: Stored, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+
 components:
   securitySchemes:
     bearer:
@@ -2142,7 +2503,7 @@ components:
         payment_claimed_at: { type: [string, "null"], format: date-time }
         payment_claim_ref: { type: [string, "null"] }
         payment_claim_wallet: { type: [string, "null"] }
-        kind: { type: string, enum: [DELIVERY, RIDE] }
+        kind: { type: string, enum: [DELIVERY, RIDE, PARCEL, SERVICE] }
         pickup_lat: { type: [number, "null"] }
         pickup_lng: { type: [number, "null"] }
         pickup_text: { type: [string, "null"] }

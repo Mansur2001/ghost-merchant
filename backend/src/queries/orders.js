@@ -76,6 +76,7 @@ export async function getShoppingList(orderId) {
       id: true, items: true, total_amount: true, lat: true, lng: true,
       landmark_text: true, status: true, user_phone: true,
       kind: true, pickup_lat: true, pickup_lng: true, pickup_text: true, vehicle: true, distance_m: true,
+      details: true, recipient_phone: true, trade: true, parent_order_id: true,
     },
   });
 }

@@ -39,6 +39,24 @@ export const TEXT = {
     topup_ok: ['Money added', 'Your wallet top-up went through.'],
     withdrawal_paid: ['Withdrawal sent', 'The money from your wallet was sent to your number.'],
     withdrawal_rejected: ['Withdrawal returned', 'Your withdrawal was not sent; the money is back in your wallet.'],
+    paid_parcel: ['Payment received', 'We are finding a driver to collect your parcel.'],
+    dispatched_parcel: ['Driver on the way', 'A driver is coming to collect your parcel.'],
+    in_transit_parcel: ['Parcel collected', 'Your parcel is on the way.'],
+    delivered_parcel: ['Parcel delivered', 'Your parcel has arrived.'],
+    failed_parcel: ['Parcel stopped', 'Your parcel was stopped. Open the app for details.'],
+    paid_service: ['Payment received', 'We are finding a technician for you.'],
+    dispatched_service: ['Technician on the way', 'Your technician is coming to you.'],
+    in_transit_service: ['Work started', 'Your technician has started.'],
+    delivered_service: ['Job done', 'Thank you for using GuriKaabe!'],
+    failed_service: ['Visit stopped', 'Your visit was stopped. Open the app for details.'],
+    offer: ['A rider chose you', 'Accept the ride quickly, or it goes to someone else.'],
+    new_visit: ['New visit', 'A customer needs your help. Open the app.'],
+    extra_quote: ['Extra work quote', 'Your technician sent a price for more work. Open the app.'],
+    submission_live: ['Your suggestion is live', 'The item you suggested can now be ordered.'],
+    submission_rejected: ['Suggestion not added', 'We could not add the item you suggested. Open the app.'],
+    topup_rejected: ['Top-up not added', 'We could not confirm your top-up. Open the app.'],
+    op_submission: ['New item suggestion', 'A customer suggested an item for the catalog.'],
+    op_topup: ['Top-up to check', 'A customer says they topped up. Check the merchant phone.'],
   },
   so: {
     paid: ['Lacagta waa la helay', 'Darawal ayaan kuu raadinaynaa.'],
@@ -68,6 +86,24 @@ export const TEXT = {
     topup_ok: ['Lacag waa lagu daray', 'Lacag-ku-darka boorsadaadu wuu dhacay.'],
     withdrawal_paid: ['Lacagta waa la diray', 'Lacagtii boorsada waxaa loo diray lambarkaaga.'],
     withdrawal_rejected: ['Lacagta waa la celiyay', 'Lacag bixintaada lama dirin; lacagtu boorsada ayay ku jirtaa.'],
+    paid_parcel: ['Lacagta waa la helay', 'Darawal ayaan u raadinaynaa xirmadaada.'],
+    dispatched_parcel: ['Darawalku waa soo socdaa', 'Darawal ayaa u imanaya inuu xirmada qaado.'],
+    in_transit_parcel: ['Xirmada waa la qaaday', 'Xirmadaadu waa socotaa.'],
+    delivered_parcel: ['Xirmada waa la gaarsiiyay', 'Xirmadaadu way gaartay.'],
+    failed_parcel: ['Xirmada waa la joojiyay', 'Xirmadaada waa la joojiyay. App-ka fur.'],
+    paid_service: ['Lacagta waa la helay', 'Farsamoyaqaan ayaan kuu raadinaynaa.'],
+    dispatched_service: ['Farsamoyaqaanku waa soo socdaa', 'Farsamoyaqaankaagu waa kuu imanayaa.'],
+    in_transit_service: ['Shaqadu way bilaabatay', 'Farsamoyaqaanku wuu bilaabay.'],
+    delivered_service: ['Shaqadu way dhammaatay', 'Mahadsanid inaad GuriKaabe isticmaashay!'],
+    failed_service: ['Booqashada waa la joojiyay', 'Booqashadaada waa la joojiyay. App-ka fur.'],
+    offer: ['Macmiil ayaa ku doortay', 'Dhaqso u aqbal safarka, haddii kale mid kale ayaa qaadanaya.'],
+    new_visit: ['Booqasho cusub', 'Macmiil ayaa caawimaad u baahan. App-ka fur.'],
+    extra_quote: ['Qiimo shaqo dheeraad ah', 'Farsamoyaqaankaagu qiimo ayuu kuu soo diray. App-ka fur.'],
+    submission_live: ['Alaabtii aad soo jeedisay waa diyaar', 'Hadda waad dalban kartaa.'],
+    submission_rejected: ['Alaabta lama darin', 'Ma darin karin alaabtii aad soo jeedisay. App-ka fur.'],
+    topup_rejected: ['Lacagta lama darin', 'Ma xaqiijin karin lacag-ku-darkaaga. App-ka fur.'],
+    op_submission: ['Alaab la soo jeediyay', 'Macmiil ayaa alaab cusub soo jeediyay.'],
+    op_topup: ['Lacag-ku-dar la hubiyo', 'Macmiil ayaa sheegay inuu lacag ku shubay. Hubi taleefanka ganacsiga.'],
   },
 };
 
@@ -88,8 +124,9 @@ const CUSTOMER_STATE = {
   DELIVERED: 'delivered',
   FAILED_REFUND: 'failed',
 };
-// These words differ for a ride.
-const RIDE_VARIANT = new Set(['paid', 'dispatched', 'in_transit', 'delivered', 'failed']);
+// These words differ for a ride, a parcel and a technician's visit.
+const KIND_VARIANT = new Set(['paid', 'dispatched', 'in_transit', 'delivered', 'failed']);
+const KIND_SUFFIX = { RIDE: '_ride', PARCEL: '_parcel', SERVICE: '_service' };
 
 // event: { name, payload }; order: the order row as it is NOW (user_id, driver_id, kind), or
 // null for events not about an order. `previousDriverId` for a release/failure, when known.
@@ -97,9 +134,10 @@ export function targetsFor(event, order) {
   const p = event.payload || {};
   const out = [];
   const ride = order?.kind === 'RIDE';
+  const suffix = KIND_SUFFIX[order?.kind] || '';
   const forCustomer = (kind, extraTag = '') => {
     if (!order || !Number.isInteger(order.user_id)) return;
-    const k = ride && RIDE_VARIANT.has(kind) ? `${kind}_ride` : kind;
+    const k = suffix && KIND_VARIANT.has(kind) ? `${kind}${suffix}` : kind;
     out.push({ to: { role: 'customer', id: order.user_id }, kind: k, url: customerUrl(order.id), tag: `order-${order.id}${extraTag}` });
   };
   const forDriver = (driverId, kind) => {
@@ -120,7 +158,7 @@ export function targetsFor(event, order) {
       }
       const kind = CUSTOMER_STATE[p.to];
       if (kind) forCustomer(kind);
-      if (p.to === 'DISPATCHED') forDriver(order.driver_id, ride ? 'new_ride' : 'new_job');
+      if (p.to === 'DISPATCHED') forDriver(order.driver_id, ride ? 'new_ride' : order.kind === 'SERVICE' ? 'new_visit' : 'new_job');
       // Stopped by someone else (operator, customer) while a driver had it.
       const byDriver = String(p.actor || '').startsWith('driver:');
       if (p.to === 'FAILED_REFUND' && order.driver_id != null && !byDriver) forDriver(order.driver_id, 'job_removed');
@@ -141,6 +179,16 @@ export function targetsFor(event, order) {
     case 'payment.attempt':
       if (p.status === 'declined' && order) forCustomer('pay_declined', '-pay');
       if (p.status === 'unknown') forOperators('op_pay_unknown', { orderId: p.orderId });
+      break;
+    case 'driver.offered':
+      // A new offer buzzes the chosen driver. A closed one needs nobody told: the customer's
+      // screen updates and the next driver gets 'new_ride' from the dispatch.
+      if (!p.closed && order) {
+        out.push({ to: { role: 'driver', id: String(p.driverId) }, kind: 'offer', url: '/driver/', tag: `offer-${order.id}` });
+      }
+      break;
+    case 'order.extra_quoted':
+      forCustomer('extra_quote', '-extra');
       break;
     case 'delivery.disputed':
       forOperators('op_disputed', { orderId: p.orderId });

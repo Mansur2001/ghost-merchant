@@ -8,7 +8,14 @@
 //             fee = market -> door distance. No market chosen: the nearest one to the door.
 //   RIDE      { kind, vehicle, pickup: {lat,lng}|{placeId}, dropoff: {lat,lng}|{placeId},
 //               pickupNote?, landmark?, phone }
-//             fare = pickup -> destination distance, per vehicle.
+//             fare = pickup -> destination distance, per vehicle. `driverId` (optional) is the
+//             driver the customer chose from the quote's list: offered the ride first.
+//   PARCEL    { kind, pickup, dropoff, details, recipientPhone, pickupNote?, landmark, phone }
+//             fee = sender's door -> receiver's door distance (domain/pricing.js parcelFeeCents).
+//   SERVICE   { kind, trade, dropoff (where the visit is), details, landmark, phone }
+//             fee = the trade's visit fee. Extra work is quoted later by the technician.
+//
+// The admin's free-delivery promo (commands/settings.js) can waive a DELIVERY fee.
 //
 // `expectedTotal` (what the customer saw) is checked against the fresh price: if a price
 // changed in between, the order is refused with the new quote rather than charging an amount
@@ -16,12 +23,16 @@
 import { prisma } from '../db/prisma.js';
 import { config } from '../config.js';
 import {
-  priceCart, rideFareCents, deliveryFeeCents, fromCents, toCents, PricingError, VEHICLES,
+  priceCart, rideFareCents, deliveryFeeCents, parcelFeeCents, promoApplies, cleanDetails,
+  fromCents, toCents, PricingError, VEHICLES,
 } from '../domain/pricing.js';
 import { parsePoint, inServiceArea, nearestPlace, distanceMeters } from '../domain/geo.js';
-import { pickRideDriver, LOCATION_FRESH_MS } from '../domain/dispatch.js';
+import { rideChoices, pickTechnician, etaMinutes } from '../domain/dispatch.js';
+import { dispatchCandidates } from './dispatch.js';
+import { getSetting } from './settings.js';
+import { driverRatings } from '../queries/ratings.js';
 import { routeBetween } from '../routing/route.js';
-import { getActiveItems, getPlaces, getPlace } from '../queries/catalog.js';
+import { getActiveItems, getPlaces, getPlace, getTrade } from '../queries/catalog.js';
 import { createOrder } from './orders.js';
 import { isUuid } from '../domain/ids.js';
 
@@ -40,34 +51,39 @@ async function resolvePoint(raw, what) {
   return { ...p, label: null };
 }
 
-// How many free drivers of each vehicle are near the pickup: shown before paying, so nobody
-// pays for a ride that has no driver to take it. Counts only — never positions.
+// The free drivers of each vehicle near the pickup: a COUNT, and the few the customer may
+// choose from (first name, photo, plate, rating, minutes away). Never a position: a list of
+// where drivers are is a map of where to find them.
+export function choiceCard(d, ratings) {
+  const r = ratings.get(String(d.id));
+  return {
+    id: String(d.id),
+    name: String(d.name || '').trim().split(/\s+/)[0],
+    vehicle: d.vehicle,
+    plate: d.plate || null,
+    photo: Boolean(d.photo_key),
+    rating: r ? r.avg : null,
+    ratings: r ? r.count : 0,
+    eta_min: etaMinutes(d.distance_m),
+  };
+}
+
 async function availableNear(pickup) {
-  const since = new Date(Date.now() - LOCATION_FRESH_MS);
-  const candidates = await prisma.$queryRaw`
-    SELECT d.id, d.active, d.online, d.vehicle, (d.pin_set_at IS NOT NULL) AS ready, d.last_assigned_at,
-           l.lat, l.lng, l.updated_at AS located_at,
-           COUNT(o.id) FILTER (WHERE o.kind = 'DELIVERY')::int AS active_orders,
-           COUNT(o.id) FILTER (WHERE o.kind = 'RIDE')::int AS active_rides
-      FROM drivers d
-      JOIN driver_locations l ON l.driver_id = d.id AND l.updated_at >= ${since}
-      LEFT JOIN orders o ON o.driver_id = d.id AND o.status IN ('DISPATCHED', 'IN_TRANSIT')
-     WHERE d.active AND d.online
-     GROUP BY d.id, l.lat, l.lng, l.updated_at
-  `;
+  const candidates = await dispatchCandidates(prisma);
+  const extra = await prisma.driver.findMany({
+    where: { id: { in: candidates.map((c) => c.id) } }, select: { id: true, plate: true, photo_key: true },
+  });
+  const byId = new Map(extra.map((d) => [String(d.id), d]));
+  const pool = candidates.map((c) => ({ ...c, ...byId.get(String(c.id)) }));
   const out = {};
+  const chosen = [];
   for (const vehicle of VEHICLES) {
-    let n = 0;
-    const pool = [...candidates];
-    // pickRideDriver returns one; count by removing each pick until none is left.
-    for (;;) {
-      const d = pickRideDriver(pool, { pickup, vehicle });
-      if (!d) break;
-      n += 1;
-      pool.splice(pool.findIndex((c) => String(c.id) === String(d.id)), 1);
-    }
-    out[vehicle] = n;
+    const all = rideChoices(pool, { pickup, vehicle, limit: 50 });
+    out[vehicle] = { count: all.length, list: all.slice(0, 5) };
+    chosen.push(...out[vehicle].list);
   }
+  const ratings = await driverRatings(chosen.map((d) => d.id));
+  for (const vehicle of VEHICLES) out[vehicle].list = out[vehicle].list.map((d) => choiceCard(d, ratings));
   return out;
 }
 
@@ -81,7 +97,10 @@ async function quoteRide(body, tariff) {
   const available = await availableNear(pickup);
   const options = VEHICLES.map((vehicle) => {
     const fare = rideFareCents(route.meters, vehicle, tariff);
-    return { vehicle, fee: fromCents(fare), total: fromCents(fare), available: available[vehicle] };
+    return {
+      vehicle, fee: fromCents(fare), total: fromCents(fare),
+      available: available[vehicle].count, drivers: available[vehicle].list,
+    };
   });
   return {
     kind: 'RIDE', pickup, dropoff, distance_m: route.meters, minutes: route.minutes,
@@ -105,11 +124,49 @@ async function quoteDelivery(body, tariff) {
     if (near) pickup = { lat: near.place.lat, lng: near.place.lng, label: near.place.name_en, placeId: near.place.id };
   }
   const route = pickup ? await routeBetween(pickup, dropoff) : { meters: 0, minutes: null, source: 'none' };
-  const fee = deliveryFeeCents(route.meters, tariff);
+  const fullFee = deliveryFeeCents(route.meters, tariff);
+  const promo = promoApplies(await getSetting('free_delivery'), subtotalCents) ? 'free_delivery' : null;
+  const fee = promo ? 0 : fullFee;
   return {
     kind: 'DELIVERY', pickup, dropoff, items, distance_m: pickup ? route.meters : null,
     minutes: route.minutes, route_source: route.source,
     subtotal: fromCents(subtotalCents), fee: fromCents(fee), total: fromCents(subtotalCents + fee),
+    promo, fee_before: promo ? fromCents(fullFee) : null,
+  };
+}
+
+async function quoteParcel(body, tariff) {
+  const pickup = await resolvePoint(body.pickup, 'pickup');
+  const dropoff = await resolvePoint(body.dropoff, 'drop-off');
+  if (distanceMeters(pickup, dropoff) < MIN_RIDE_M) {
+    throw new PricingError('the two addresses are too close together');
+  }
+  const route = await routeBetween(pickup, dropoff);
+  const fee = parcelFeeCents(route.meters, tariff);
+  return {
+    kind: 'PARCEL', pickup, dropoff, distance_m: route.meters, minutes: route.minutes, route_source: route.source,
+    subtotal: '0.00', fee: fromCents(fee), total: fromCents(fee),
+  };
+}
+
+async function quoteService(body) {
+  const trade = await getTrade(body.trade);
+  if (!trade) throw new PricingError('choose the kind of work again');
+  const dropoff = await resolvePoint(body.dropoff, 'place for the visit');
+  const candidates = await dispatchCandidates(prisma);
+  let available = 0;
+  const pool = [...candidates];
+  for (;;) {
+    const t = pickTechnician(pool, { trade: trade.slug, site: dropoff });
+    if (!t) break;
+    available += 1;
+    pool.splice(pool.findIndex((c) => String(c.id) === String(t.id)), 1);
+  }
+  const fee = toCents(trade.visit_fee);
+  return {
+    kind: 'SERVICE', dropoff, available,
+    trade: { slug: trade.slug, name_en: trade.name_en, name_so: trade.name_so, icon: trade.icon },
+    subtotal: '0.00', fee: fromCents(fee), total: fromCents(fee),
   };
 }
 
@@ -117,7 +174,9 @@ export async function quote(body, { tariff = config.pricing.tariff } = {}) {
   const kind = body?.kind;
   if (kind === 'RIDE') return quoteRide(body, tariff);
   if (kind === 'DELIVERY') return quoteDelivery(body, tariff);
-  throw new PricingError('kind must be RIDE or DELIVERY');
+  if (kind === 'PARCEL') return quoteParcel(body, tariff);
+  if (kind === 'SERVICE') return quoteService(body);
+  throw new PricingError('kind must be RIDE, DELIVERY, PARCEL or SERVICE');
 }
 
 export async function placeOrder({ userId, body, tariff = config.pricing.tariff }) {
@@ -135,6 +194,7 @@ export async function placeOrder({ userId, body, tariff = config.pricing.tariff 
   let subtotal;
   let fee;
   let vehicle = null;
+  let requestedDriverId = null;
   if (q.kind === 'RIDE') {
     const option = q.options.find((o) => o.vehicle === body.vehicle);
     if (!option) throw new PricingError('choose bajaj or car');
@@ -142,6 +202,16 @@ export async function placeOrder({ userId, body, tariff = config.pricing.tariff 
     subtotal = '0.00';
     fee = option.fee;
     vehicle = option.vehicle;
+    // The driver must still be on the list the customer would see now: free, near, online.
+    if (body.driverId != null && body.driverId !== '') {
+      const pick = option.drivers.find((d) => d.id === String(body.driverId));
+      if (!pick) {
+        const err = new PricingError('that driver is no longer free — choose again', 409);
+        err.quote = q;
+        throw err;
+      }
+      requestedDriverId = pick.id;
+    }
   } else {
     ({ total, subtotal, fee } = q);
   }
@@ -156,13 +226,22 @@ export async function placeOrder({ userId, body, tariff = config.pricing.tariff 
   // Where the job ends, in words. Mandatory for a delivery (the driver reads it at the door);
   // a ride can use the chosen place's name.
   const landmark = landmarkIn || q.dropoff.label || (q.kind === 'RIDE' ? 'Pinned destination' : '');
-  const pickupText = [q.pickup?.label, note].filter(Boolean).join(' — ') || (q.kind === 'RIDE' ? 'Pinned pickup' : null);
+  const pickupText = [q.pickup?.label, note].filter(Boolean).join(' — ')
+    || ({ RIDE: 'Pinned pickup', PARCEL: 'Pinned pickup' }[q.kind] ?? null);
+  let details = null;
+  let recipientPhone = null;
+  if (q.kind === 'PARCEL') {
+    details = cleanDetails(body.details, { what: 'say what is in the parcel' });
+    if (!body.recipientPhone) throw new PricingError('enter the phone of the person receiving it');
+    recipientPhone = body.recipientPhone;
+  }
+  if (q.kind === 'SERVICE') details = cleanDetails(body.details, { what: 'describe the problem' });
 
   return createOrder({
     id: body.id,
     userId,
     contactPhone: body.phone,
-    items: q.kind === 'RIDE' ? [] : q.items,
+    items: q.kind === 'DELIVERY' ? q.items : [],
     totalAmount: total,
     lat: q.dropoff.lat,
     lng: q.dropoff.lng,
@@ -173,5 +252,10 @@ export async function placeOrder({ userId, body, tariff = config.pricing.tariff 
     distanceM: q.distance_m,
     subtotal,
     fee,
+    requestedDriverId,
+    trade: q.kind === 'SERVICE' ? q.trade.slug : null,
+    details,
+    recipientPhone,
+    promo: q.promo || null,
   });
 }

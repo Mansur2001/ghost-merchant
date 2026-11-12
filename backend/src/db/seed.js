@@ -14,7 +14,7 @@ import { SEED_OPERATORS, SEED_DRIVERS, SEED_CUSTOMERS } from './seedFixtures.js'
 import { seedRefusal } from './seedSafety.js';
 import { buildProof } from '../domain/proof.js';
 import { ensureStarterCatalog } from './starterCatalog.js';
-import { priceCart, deliveryFeeCents, rideFareCents, fromCents } from '../domain/pricing.js';
+import { priceCart, deliveryFeeCents, rideFareCents, parcelFeeCents, fromCents } from '../domain/pricing.js';
 import { estimateRoadMeters } from '../domain/geo.js';
 
 // Rows this seed would never have created: evidence that real (or at least someone's) data
@@ -54,10 +54,12 @@ const OPERATORS = SEED_OPERATORS;
 // What each seeded driver drives, whether they are online, and where they are. Amina (busy with
 // deliveries) and Bashir (car, free) start OFFLINE, so the paid order stays "waiting for a
 // driver" until someone goes online — the way a shift starts. Cali (bajaj) has a rider.
+// Daahir is a technician (plumber, electrician) on a visit, with extra work quoted.
 const DRIVER_STATE = [
-  { vehicle: 'bajaj', online: false, at: { lat: 2.0472, lng: 45.3190 } },
-  { vehicle: 'car', online: false, at: { lat: 2.0340, lng: 45.3405 } },
-  { vehicle: 'bajaj', online: true, at: { lat: 2.0301, lng: 45.3060 } },
+  { vehicle: 'bajaj', online: false, at: { lat: 2.0472, lng: 45.3190 }, plate: 'BAJ 123' },
+  { vehicle: 'car', online: false, at: { lat: 2.0340, lng: 45.3405 }, plate: 'MOG 4521' },
+  { vehicle: 'bajaj', online: true, at: { lat: 2.0301, lng: 45.3060 }, plate: 'BAJ 777' },
+  { vehicle: 'moto', online: true, at: { lat: 2.0390, lng: 45.3180 }, role: 'technician', trades: ['plumber', 'electrician'] },
 ];
 const DRIVERS = SEED_DRIVERS.map((d, i) => ({ ...d, ...DRIVER_STATE[i] }));
 const USERS = SEED_CUSTOMERS;
@@ -89,11 +91,27 @@ const ORDERS = [
   { kind: 'RIDE', status: 'PENDING_PAYMENT', phone: '+252651234567', driverIdx: null, vehicle: 'car',
     pickup: { lat: 2.0480, lng: 45.3288, text: 'Mogadishu Stadium' },
     landmark: 'Aden Adde Airport', lat: 2.0144, lng: 45.3047, items: [] },
+  // Finished rides with ratings, so "choose your driver" shows stars.
+  { kind: 'RIDE', status: 'DELIVERED', phone: '+252612345678', driverIdx: 3, vehicle: 'bajaj', rating: 5,
+    pickup: { lat: 2.0320, lng: 45.3100, text: 'Hodan' },
+    landmark: 'Bakaara Market', lat: 2.0469, lng: 45.3182, items: [] },
+  { kind: 'RIDE', status: 'DELIVERED', phone: '+252771234567', driverIdx: 1, vehicle: 'bajaj', rating: 4,
+    pickup: { lat: 2.0150, lng: 45.2950, text: 'Wadajir' },
+    landmark: 'KM4 junction', lat: 2.0295, lng: 45.3045, items: [] },
+  // A parcel being collected, and a plumber's visit under way with extra work quoted.
+  { kind: 'PARCEL', status: 'DISPATCHED', phone: '+252612345678', driverIdx: 1,
+    pickup: { lat: 2.0320, lng: 45.3100, text: 'Hodan — blue gate' },
+    details: 'Documents in an envelope', recipient: '+252651234567',
+    landmark: 'Hamar Weyne, shop 4', lat: 2.0336, lng: 45.3420, items: [] },
+  { kind: 'SERVICE', status: 'IN_TRANSIT', phone: '+252612345678', driverIdx: 4, trade: 'plumber', fee: '5.00',
+    details: 'Kitchen tap is leaking', extra: { details: 'New tap and fitting', amount: '8.00' },
+    landmark: 'Green house next to the yellow pharmacy', lat: 2.0469, lng: 45.3182, items: [] },
 ];
 
 // The first pending delivery is a priced cart from the starter catalog (the new checkout);
 // the rest keep the legacy typed-request shape older app builds created.
-const SEED_CART = { lines: [{ itemId: 7, qty: 1 }, { itemId: 11, qty: 1 }, { itemId: 12, qty: 1 }] };
+// By name: ids follow the starter's order, which grows.
+const SEED_CART_NAMES = [['Tomatoes', 2], ['Milk', 1], ['Rice', 1], ['Cooking oil', 1]];
 
 async function seed() {
   const refusal = seedRefusal({
@@ -117,11 +135,15 @@ async function seed() {
       TRUNCATE outbox, otp_codes, staff_invites, order_photos, order_events, messages, transactions,
                refunds, access_requests, order_proofs, delivery_handoffs, audit_log, payment_attempts,
                wallet_entries, wallet_withdrawals, wallet_accounts, bug_reports, push_subscriptions,
-               driver_locations, orders, drivers, users, operators, catalog_items, catalog_categories, places
+               ratings, catalog_submissions, driver_locations, orders, drivers, users, operators, catalog_items, catalog_categories, places, trades, app_settings
       RESTART IDENTITY CASCADE
     `);
     await ensureStarterCatalog(tx);
-    const catalog = new Map((await tx.catalogItem.findMany()).map((i) => [i.id, i]));
+    const allItems = await tx.catalogItem.findMany();
+    const catalog = new Map(allItems.map((i) => [i.id, i]));
+    const SEED_CART = {
+      lines: SEED_CART_NAMES.map(([n, qty]) => ({ itemId: allItems.find((i) => i.name_en === n).id, qty })),
+    };
     const bakaara = await tx.place.findFirst({ where: { name_en: 'Bakaara Market' } });
 
     const userIds = {};
@@ -146,7 +168,8 @@ async function seed() {
       const created = await tx.driver.create({
         data: {
           name: d.name, msisdn: d.msisdn, pin_hash: hashSecret(d.pin), pin_set_at: new Date(),
-          vehicle: d.vehicle, online: d.online,
+          vehicle: d.vehicle, online: d.online, plate: d.plate || null,
+          role: d.role || 'driver', trades: d.trades || [],
         },
         select: { id: true },
       });
@@ -168,6 +191,18 @@ async function seed() {
           kind: 'RIDE', vehicle: o.vehicle, distance_m: meters, subtotal: '0.00', fee: fare,
           pickup_lat: o.pickup.lat, pickup_lng: o.pickup.lng, pickup_text: o.pickup.text,
         };
+      } else if (o.kind === 'PARCEL') {
+        const meters = estimateRoadMeters(o.pickup, o);
+        const fee = fromCents(parcelFeeCents(meters));
+        o.amount = fee;
+        priced = {
+          kind: 'PARCEL', distance_m: meters, subtotal: '0.00', fee,
+          pickup_lat: o.pickup.lat, pickup_lng: o.pickup.lng, pickup_text: o.pickup.text,
+          details: o.details, recipient_phone: o.recipient,
+        };
+      } else if (o.kind === 'SERVICE') {
+        o.amount = o.fee;
+        priced = { kind: 'SERVICE', subtotal: '0.00', fee: o.fee, trade: o.trade, details: o.details };
       } else if (o === ORDERS[0]) {
         const { items, subtotalCents } = priceCart(SEED_CART, catalog);
         const meters = estimateRoadMeters(bakaara, o);
@@ -213,7 +248,8 @@ async function seed() {
       // A couple of chat messages so the thread isn't empty.
       const messages = [{
         order_id: orderId, sender: 'user',
-        body: o.kind === 'RIDE' ? 'I am waiting outside.' : o.items.map((i) => i.text).join(', '),
+        body: { RIDE: 'I am waiting outside.', PARCEL: 'Please call the receiver before you go.', SERVICE: 'The tap is under the sink.' }[o.kind]
+          || o.items.map((i) => i.text).join(', '),
       }];
       if (o.status !== 'PENDING_PAYMENT') {
         messages.push({
@@ -282,6 +318,27 @@ async function seed() {
         });
       }
 
+      if (o.rating) {
+        // eslint-disable-next-line no-await-in-loop
+        await tx.rating.create({ data: { order_id: orderId, user_id: userIds[o.phone], driver_id: driverId, stars: o.rating } });
+      }
+      // The technician's quote for more work: its own order, waiting to be paid.
+      if (o.extra) {
+        // eslint-disable-next-line no-await-in-loop
+        const extra = await tx.order.create({
+          data: {
+            user_phone: o.phone, user_id: userIds[o.phone], status: 'PENDING_PAYMENT', total_amount: o.extra.amount,
+            items: [], lat: o.lat, lng: o.lng, landmark_text: o.landmark, kind: 'SERVICE', subtotal: '0.00',
+            fee: o.extra.amount, trade: o.trade, details: o.extra.details, parent_order_id: orderId, requested_driver_id: driverId,
+          },
+          select: { id: true },
+        });
+        // eslint-disable-next-line no-await-in-loop
+        await tx.orderEvent.create({ data: { order_id: extra.id, to_status: 'PENDING_PAYMENT', actor: 'system', note: 'extra work quoted' } });
+        // eslint-disable-next-line no-await-in-loop
+        await tx.deliveryHandoff.create({ data: { order_id: extra.id, code: '6390' } });
+      }
+
       if (o.refPhoto) photoJobs.push({ orderId, kind: 'order_ref', label: 'Reference', bg: '#e6c65c' });
       if (o.proofPhoto) photoJobs.push({ orderId, kind: 'delivery_proof', label: '📦 Delivered', bg: '#d4af37' });
     }
@@ -291,6 +348,26 @@ async function seed() {
     await tx.order.updateMany({
       where: { status: 'PENDING_PAYMENT', kind: 'DELIVERY' },
       data: { payment_claimed_at: new Date(), payment_claim_ref: 'SEED-EVC-0001' },
+    });
+
+    // A wallet with money in it (the mockup's $25.60), and a USSD top-up waiting for the desk.
+    const walletUser = userIds['+252612345678'];
+    await tx.transaction.create({
+      data: { telecom_receipt_id: 'SEED-TOPUP-1', sender_msisdn: '', amount: '25.60', matched: true, provider: 'manual', sender_name: 'wallet-topup:seed' },
+    });
+    await tx.walletAccount.create({ data: { user_id: walletUser, balance_cents: 2560n } });
+    await tx.walletEntry.create({
+      data: { user_id: walletUser, amount_cents: 2560n, balance_after_cents: 2560n, kind: 'topup', reference: 'SEED-TOPUP-1', actor: 'operator:seed' },
+    });
+    await tx.paymentAttempt.create({
+      data: {
+        id: '00000000-0000-4000-8000-00000000a001', user_id: userIds['+252651234567'], purpose: 'topup', provider: 'manual',
+        wallet: 'evcplus', payer: '', amount: '10.00', status: 'claimed', claim_ref: 'SEED-EVC-0002',
+      },
+    });
+    // A customer's suggestion for the catalog, waiting for review.
+    await tx.catalogSubmission.create({
+      data: { user_id: userIds['+252771234567'], name: 'Camel meat', note: 'Sold at Bakaara, about $8 a kilo', service: 'grocery' },
     });
   }, { timeout: 30000 });
 

@@ -287,6 +287,18 @@ export function attachSocketServer(httpServer) {
       }
     }
   });
+  // A ride offered to the driver the customer chose, or that offer closing. The driver hears it
+  // on their own feed (the job isn't theirs yet, so the room rule wouldn't reach them); the
+  // customer and operators through the order, as for any change to it.
+  subscribe(EVENTS.DRIVER_OFFERED, bridge(async (p) => {
+    const message = { type: 'offer', ...p };
+    const feed = driverFeeds.get(String(p.driverId));
+    if (feed) sendTo(feed, message);
+    await broadcastToOrder(p.orderId, message);
+  }));
+  subscribe(EVENTS.EXTRA_WORK_QUOTED, bridge((p) =>
+    broadcastToOrder(p.orderId, { type: 'extra_quoted', ...p })
+  ));
   // Operators only: it's a prompt to go and check the merchant phone.
   subscribe(EVENTS.PAYMENT_CLAIMED, (p) => sendTo(operators, { type: 'payment_claimed', ...p }));
 

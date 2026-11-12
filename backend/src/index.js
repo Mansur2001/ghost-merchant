@@ -5,6 +5,7 @@ import http from 'node:http';
 import express from 'express';
 import { config } from './config.js';
 import { ordersRouter } from './routes/orders.js';
+import { appRouter } from './routes/app.js';
 import { mapsRouter } from './routes/maps.js';
 import { pushRouter } from './routes/push.js';
 import { startPushBridge } from './realtime/pushBridge.js';
@@ -15,7 +16,7 @@ import { authRouter } from './routes/auth.js';
 import { signupRouter } from './routes/signup.js';
 import { staffSetupRouter } from './routes/staffSetup.js';
 import { sweepExpiredSetupCodes } from './commands/staffAccounts.js';
-import { dispatchWaitingSoon } from './commands/dispatch.js';
+import { dispatchWaitingSoon, expireOffers } from './commands/dispatch.js';
 import { sweepStaleAttempts } from './commands/providerPayments.js';
 import { sweepClosedBugs } from './commands/bugs.js';
 import { ensureStarterCatalog } from './db/starterCatalog.js';
@@ -69,6 +70,7 @@ app.use('/api', authRouter);
 app.use('/api', signupRouter);
 app.use('/api', staffSetupRouter);
 app.use('/api', ordersRouter);
+app.use('/api', appRouter);
 app.use('/api', mapsRouter);
 app.use('/api', pushRouter);
 app.use('/api', driversRouter);
@@ -105,6 +107,13 @@ housekeeping.unref();
 // 30s, in case a driver freed up in a way that didn't trigger it directly.
 const dispatchTimer = setInterval(dispatchWaitingSoon, 30 * 1000);
 dispatchTimer.unref();
+
+// A ride offered to the driver the customer chose: when its 30 s run out, automatic dispatch
+// takes over (domain/offers.js). Checked every 5 s, so nobody waits much past the deadline.
+const offerTimer = setInterval(() => {
+  expireOffers().catch((err) => console.error('offer sweep failed:', err.message));
+}, 5 * 1000);
+offerTimer.unref();
 
 // Wallet prompts left 'pending' by a restart mid-call become 'unknown' (commands/providerPayments.js).
 const attemptTimer = setInterval(() => {
@@ -274,6 +283,7 @@ async function shutdown(signal) {
   for (const client of wss.clients) client.close(1001, 'server shutting down');
   wss.close();
   clearInterval(housekeeping);
+  clearInterval(offerTimer);
   // Undelivered outbox rows are safe: they stay in Postgres and the next boot relays them.
   // Releasing relay leadership explicitly means a rolling deploy doesn't pause delivery
   // while another instance waits for this connection to time out.

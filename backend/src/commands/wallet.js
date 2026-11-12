@@ -1,14 +1,16 @@
-// The customer wallet: a balance topped up through the gateway (WaafiPay) and spent on orders.
-// Switched OFF unless WALLET_ENABLED=true — holding customer money is stored value, which is a
-// licensing question for the owner, not a deploy.
+// The customer wallet: a balance topped up through the gateway (WaafiPay) — or, until the
+// gateway has keys, over USSD and confirmed by an operator with the telecom reference — and
+// spent on orders. ON by default since 2026-11-11: the owner holds the licence stored value
+// needs. WALLET_ENABLED=false still switches it off.
 //
 // Rules, each enforced in the database as well as here:
 //   * the LEDGER is the truth (wallet_entries, append-only); every row records the balance it
 //     left, and wallet_accounts.balance_cents moves only with a ledger row, under a row lock;
 //   * a balance never goes below zero (CHECK) and never above WALLET_MAX_BALANCE;
-//   * money comes IN only through the gateway (a top-up's transaction id is UNIQUE in
-//     `transactions`, like any payment) or as a refund of a wallet-paid order. No operator, no
-//     admin, no route can credit a balance by hand;
+//   * money comes IN only through the gateway, or an operator-confirmed USSD top-up with its
+//     telecom reference (operator mode only) — either way the reference is UNIQUE in
+//     `transactions`, like any payment — or as a refund of a wallet-paid order. No operator, no
+//     admin, no route can credit a balance without a telecom reference;
 //   * money goes OUT only to pay an order (once per order: partial UNIQUE index) or as a
 //     withdrawal an admin pays from the business wallet and records with its reference.
 import { prisma, withCriticalTransaction, withTransaction } from '../db/prisma.js';
@@ -249,3 +251,100 @@ export async function rejectWithdrawal({ id, note, actor }) {
   });
 }
 
+
+// ── Manual top-up (no gateway yet): pay the merchant over USSD, then claim it ──
+// The same trust model as an order payment in operator mode (invariant 3): the customer's
+// claim is a hint; an OPERATOR confirms it against the merchant phone with the telecom
+// reference, which is UNIQUE in `transactions` like every payment. In api mode only the
+// gateway credits a balance, so this path is closed there.
+export async function claimTopup({ userId, amount, wallet, reference, settings = config.wallet, wallets = config.payment.wallets, mode = config.paymentConfirmation }) {
+  requireOn(settings);
+  if (mode !== 'operator') throw new WalletError('top up in the app instead', 404);
+  const c = cents(amount);
+  if (!Number.isFinite(c) || c < settings.topupMinCents || c > settings.topupMaxCents) {
+    throw new WalletError(`top up between $${dollars(settings.topupMinCents)} and $${dollars(settings.topupMaxCents)}`);
+  }
+  const w = (wallets || []).find((x) => x.id === wallet);
+  if (!w) throw new WalletError('choose the wallet you paid with');
+  const ref = normalizeReference(reference);
+  if (!ref) throw new WalletError('enter the transaction number from your payment message');
+  const acct = await prisma.walletAccount.findUnique({ where: { user_id: userId } });
+  if (BigInt(acct?.balance_cents ?? 0) + BigInt(c) > BigInt(settings.maxBalanceCents)) {
+    throw new WalletError(`a wallet can hold at most $${dollars(settings.maxBalanceCents)}`, 409);
+  }
+  try {
+    const attempt = await prisma.paymentAttempt.create({
+      data: {
+        id: newOrderId(), order_id: null, user_id: userId, purpose: 'topup', provider: 'manual',
+        wallet: w.id, payer: '', amount: dollars(c), status: 'claimed', claim_ref: ref,
+      },
+    });
+    notifyAfter([{ to: { role: 'operator' }, kind: 'op_topup', url: '/operator/', tag: `topup-${attempt.id}` }]);
+    return attempt;
+  } catch (err) {
+    if (err?.code === 'P2002') throw new WalletError('you already have a top-up waiting to be checked', 409);
+    throw err;
+  }
+}
+
+async function lockClaim(tx, id) {
+  const rows = await tx.$queryRaw`
+    SELECT id, user_id, amount, status, wallet, claim_ref FROM payment_attempts
+     WHERE id = ${String(id)}::uuid AND purpose = 'topup' AND provider = 'manual' FOR UPDATE
+  `;
+  if (!rows[0]) throw new WalletError('not found', 404);
+  if (rows[0].status !== 'claimed') throw new WalletError(`this top-up is already ${rows[0].status}`, 409);
+  return rows[0];
+}
+
+// Operator: the money is on the merchant phone. Reference REQUIRED, amount as claimed.
+export async function confirmTopup({ id, reference, actor, settings = config.wallet, mode = config.paymentConfirmation }) {
+  if (mode !== 'operator') throw new WalletError('top-ups are confirmed by the payment provider', 403);
+  const ref = normalizeReference(reference);
+  if (!ref) throw new WalletError('enter the transaction number you see on the merchant phone');
+  const done = await withCriticalTransaction(async (tx) => {
+    const a = await lockClaim(tx, id);
+    const used = await tx.transaction.findUnique({ where: { telecom_receipt_id: ref }, select: { order_id: true } });
+    if (used) throw new WalletError(`reference ${ref} was already used`, 409);
+    await tx.transaction.create({
+      data: {
+        order_id: null, telecom_receipt_id: ref, sender_msisdn: '', amount: a.amount, matched: true,
+        provider: 'manual', sender_name: `wallet-topup:${a.user_id}:${actor}`,
+      },
+    });
+    await postEntry(tx, {
+      userId: a.user_id, amountCents: cents(a.amount), kind: 'topup', reference: ref, actor, maxCents: settings.maxBalanceCents,
+    });
+    await tx.paymentAttempt.update({ where: { id: a.id }, data: { status: 'approved', reference: ref, updated_at: new Date() } });
+    await audit({ actor, action: 'wallet.topup', subject: `user:${a.user_id}`, detail: { reference: ref, amount: String(a.amount), claimed: a.claim_ref } }, { client: tx });
+    return a;
+  });
+  notifyAfter([{ to: { role: 'customer', id: done.user_id }, kind: 'topup_ok', url: '/?wallet=1', tag: `wallet-${done.id}` }]);
+  return { ok: true };
+}
+
+export async function rejectTopup({ id, note, actor }) {
+  const why = String(note || '').trim();
+  if (!why) throw new WalletError('say why — the customer is told');
+  const done = await withCriticalTransaction(async (tx) => {
+    const a = await lockClaim(tx, id);
+    await tx.paymentAttempt.update({ where: { id: a.id }, data: { status: 'rejected', detail: why.slice(0, 200), updated_at: new Date() } });
+    await audit({ actor, action: 'wallet.topup.rejected', subject: `user:${a.user_id}`, detail: { note: why, claimed: a.claim_ref } }, { client: tx });
+    return a;
+  });
+  notifyAfter([{ to: { role: 'customer', id: done.user_id }, kind: 'topup_rejected', url: '/?wallet=1', tag: `wallet-${done.id}` }]);
+  return { ok: true };
+}
+
+export async function listTopupClaims() {
+  const rows = await prisma.paymentAttempt.findMany({
+    where: { purpose: 'topup', provider: 'manual', OR: [{ status: 'claimed' }, { updated_at: { gte: new Date(Date.now() - 3 * 86400 * 1000) } }] },
+    orderBy: { created_at: 'asc' }, take: 200,
+    include: { user: { select: { email: true, phone_number: true } } },
+  });
+  return rows.map((a) => ({
+    id: a.id, amount: String(a.amount), wallet: a.wallet, claim_ref: a.claim_ref, status: a.status,
+    reference: a.reference, detail: a.detail, created_at: a.created_at, updated_at: a.updated_at,
+    account: a.user ? (a.user.email || a.user.phone_number) : null,
+  }));
+}

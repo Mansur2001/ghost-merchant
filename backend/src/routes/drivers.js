@@ -8,7 +8,10 @@ import { transitionOrder, postMessage } from '../commands/orders.js';
 import { savePhoto } from '../commands/photos.js';
 import { confirmPickup, confirmDelivery, confirmDropoff, ProofError } from '../commands/proofs.js';
 import { cleanReason } from '../domain/proof.js';
-import { dispatchWaitingSoon, releaseOrder } from '../commands/dispatch.js';
+import { dispatchWaitingSoon, releaseOrder, acceptOffer, declineOffer } from '../commands/dispatch.js';
+import { quoteExtraWork } from '../commands/extraWork.js';
+import { PricingError } from '../domain/pricing.js';
+import { isUuid } from '../domain/ids.js';
 import { setDriverOnline, recordDriverLocation } from '../commands/locations.js';
 import { getDriverSelf } from '../queries/drivers.js';
 import { getDriverQueue, getShoppingList } from '../queries/orders.js';
@@ -137,6 +140,46 @@ driversRouter.post('/driver/orders/:id/release', ...myOrder, async (req, res) =>
   const result = await releaseOrder({ orderId: req.params.id, driverId: req.auth.id, reason });
   if (result.error) return res.status(result.status).json({ error: result.error });
   res.json(result);
+});
+
+// ── Offers: a rider chose this driver (domain/offers.js). 30 s to take it. ──
+// Not order-scoped in the usual sense: the job isn't theirs yet, so requireOrderAccess would
+// (rightly) refuse. The commands check that the offer names this driver; anything else is 404.
+// What an offer shows: where from, where to, how far, the fare. No phone, no name — those come
+// with the job once accepted.
+driversRouter.get('/driver/offers', driverOnly, async (req, res) => {
+  const rows = await prisma.order.findMany({
+    where: { offer_driver_id: BigInt(req.auth.id), offer_expires_at: { gt: new Date() }, status: STATUS.PAID_UNASSIGNED },
+    select: {
+      id: true, kind: true, vehicle: true, pickup_text: true, pickup_lat: true, pickup_lng: true,
+      landmark_text: true, lat: true, lng: true, distance_m: true, total_amount: true, offer_expires_at: true,
+    },
+  });
+  res.json({ offers: rows });
+});
+// Written out (not a loop) so every path is greppable and the API-doc test can see it.
+const offerRoute = (fn, after) => async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(404).json({ error: 'not found' });
+  const result = await fn({ orderId: req.params.id, driverId: req.auth.id });
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  if (after) after();
+  return res.json(result);
+};
+driversRouter.post('/driver/offers/:id/accept', driverOnly, offerRoute(acceptOffer));
+driversRouter.post('/driver/offers/:id/decline', driverOnly, offerRoute(declineOffer, dispatchWaitingSoon));
+
+// POST /api/driver/orders/:id/extra { description, amount } — a technician on site quotes
+// extra work. The customer pays it as its own order (commands/extraWork.js).
+driversRouter.post('/driver/orders/:id/extra', ...myOrder, async (req, res, next) => {
+  try {
+    const order = await quoteExtraWork({
+      orderId: req.params.id, driverId: req.auth.id, description: req.body?.description, amount: req.body?.amount,
+    });
+    res.status(201).json({ order: { id: order.id, total_amount: order.total_amount, status: order.status } });
+  } catch (err) {
+    if (err instanceof PricingError) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
 });
 
 // GET /api/driver/me — the switch and vehicle the app shows.

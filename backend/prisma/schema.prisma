@@ -44,7 +44,13 @@ model User {
   password_reset_until DateTime? @db.Timestamptz(6)
   /// Customer sign-ins carry this (`sv`); raising it signs out every older one (commands/sessions.js).
   session_version      Int       @default(0)
+  /// The inbox (bell) has been read up to here. The inbox itself is derived, never stored.
+  notifications_seen_at DateTime? @db.Timestamptz(6)
+  /// What the greeting calls them. Optional.
+  display_name         String?
   orders       Order[]
+  ratings      Rating[]
+  catalog_submissions CatalogSubmission[]
   email_challenge EmailChallenge?
   wallet       WalletAccount?
   wallet_entries WalletEntry[]
@@ -71,8 +77,17 @@ model Driver {
   vehicle    String   @default("bajaj")
   /// The driver's "I want work" switch. Dispatch only picks drivers who are online.
   online     Boolean  @default(false)
+  /// 'driver' | 'technician'. Technicians do SERVICE jobs in `trades` (trades.slug).
+  role       String   @default("driver")
+  trades     String[] @default([])
+  /// What a customer reads on the vehicle, and the photo they see before choosing.
+  plate      String?
+  photo_key  String?
   orders     Order[]
   location   DriverLocation?
+  ratings    Rating[]
+  requested_orders Order[] @relation("RequestedDriver")
+  offered_orders   Order[] @relation("OfferDriver")
 
   @@map("drivers")
 }
@@ -133,8 +148,27 @@ model Order {
   fee           Decimal?     @db.Decimal(12, 2)
   /// Drivers who released this job before pickup; dispatch skips them for it.
   released_by   BigInt[]     @default([])
+  /// The driver the customer chose (rides). Offered the job first, for 30 s.
+  requested_driver_id BigInt?
+  /// A live offer: still PAID_UNASSIGNED until the driver accepts (domain/offers.js).
+  offer_driver_id  BigInt?
+  offer_expires_at DateTime? @db.Timestamptz(6)
+  /// SERVICE: trades.slug. Extra work is a new prepaid SERVICE order with parent_order_id.
+  trade           String?
+  parent_order_id String?   @db.Uuid
+  /// PARCEL: what is in it. SERVICE: what is wrong. The customer's own words.
+  details         String?
+  /// PARCEL: who the driver calls at the drop-off.
+  recipient_phone String?
+  /// 'free_delivery' when the admin's promo waived the fee.
+  promo           String?
 
   driver       Driver?       @relation(fields: [driver_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  requested_driver Driver?   @relation("RequestedDriver", fields: [requested_driver_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  offer_driver Driver?       @relation("OfferDriver", fields: [offer_driver_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  parent       Order?        @relation("ExtraWork", fields: [parent_order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  extras       Order[]       @relation("ExtraWork")
+  rating       Rating?
   user         User          @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   messages     Message[]
   order_events OrderEvent[]
@@ -424,6 +458,8 @@ model AuditLog {
 enum order_kind {
   DELIVERY
   RIDE
+  PARCEL
+  SERVICE
 }
 
 /// Latest fix per driver, overwritten — not a movement history (see the migration).
@@ -464,6 +500,8 @@ model CatalogCategory {
   icon    String        @default("")
   active  Boolean       @default(true)
   sort    Int           @default(0)
+  /// Which home tile shows it: food | grocery | pharmacy | water | shop.
+  service String        @default("shop")
   items   CatalogItem[]
 
   @@map("catalog_categories")
@@ -481,6 +519,10 @@ model CatalogItem {
   active      Boolean  @default(true)
   sort        Int      @default(0)
   updated_at  DateTime @default(now()) @db.Timestamptz(6)
+  /// 'stock/<file>' (bundled, licence-free) or 'obj/<key>' (an approved upload in MinIO).
+  image          String?
+  description_en String   @default("")
+  description_so String   @default("")
 
   category CatalogCategory @relation(fields: [category_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -503,6 +545,8 @@ model PaymentAttempt {
   status     String   @default("pending")
   reference  String?
   detail     String?
+  /// A manual top-up: the reference the customer typed (a hint; the operator confirms).
+  claim_ref  String?
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
 
@@ -602,4 +646,70 @@ model BugReport {
 
   @@index([status, created_at(sort: Desc)], map: "idx_bug_reports_status")
   @@map("bug_reports")
+}
+
+/// One rating per finished job, by its customer. The driver's score is the average.
+model Rating {
+  order_id   String   @id @db.Uuid
+  user_id    Int
+  driver_id  BigInt
+  stars      Int      @db.SmallInt
+  comment    String?
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  order  Order  @relation(fields: [order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user   User   @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  driver Driver @relation(fields: [driver_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([driver_id], map: "idx_ratings_driver")
+  @@map("ratings")
+}
+
+/// Farsamo trades and their prepaid visit fee. Admin-edited, never deleted.
+model Trade {
+  id        Int     @id @default(autoincrement())
+  slug      String  @unique
+  name_en   String
+  name_so   String
+  icon      String  @default("")
+  visit_fee Decimal @db.Decimal(12, 2)
+  active    Boolean @default(true)
+  sort      Int     @default(0)
+
+  @@map("trades")
+}
+
+/// A customer's suggestion for the catalog: a name and a photo. An operator reviews it, an
+/// admin prices and publishes it. A rejected one loses its photo.
+model CatalogSubmission {
+  id                Int       @id @default(autoincrement())
+  user_id           Int
+  name              String
+  note              String?
+  service           String?
+  photo_key         String?
+  status            String    @default("new")
+  review_note       String?
+  reviewed_by       String?
+  reviewed_at       DateTime? @db.Timestamptz(6)
+  published_item_id Int?
+  published_by      String?
+  published_at      DateTime? @db.Timestamptz(6)
+  created_at        DateTime  @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([status, created_at], map: "idx_catalog_submissions_status")
+  @@index([user_id, created_at], map: "idx_catalog_submissions_user")
+  @@map("catalog_submissions")
+}
+
+/// Admin settings (the free-delivery promo). Every change audited.
+model AppSetting {
+  key        String   @id
+  value      Json
+  updated_by String?
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("app_settings")
 }

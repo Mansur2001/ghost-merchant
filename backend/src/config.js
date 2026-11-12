@@ -93,7 +93,7 @@ export const config = {
   // Push notifications: Web Push (our VAPID keys) and FCM (the Android app). Each off until set.
   push: parsePush(process.env),
 
-  // Customer wallet (stored value). OFF unless WALLET_ENABLED=true: a licensing decision.
+  // Customer wallet (stored value). ON since the owner's licence (2026-11-11); WALLET_ENABLED=false turns it off.
   wallet: parseWalletSettings(process.env),
 
   // Fares and delivery fees (domain/pricing.js). Defaults in code; each overridable.

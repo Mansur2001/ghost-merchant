@@ -69,7 +69,14 @@ const STATES = [
 ];
 // Rides say "Driver on the way", deliveries "Driver getting your items": same states, own words.
 const isRide = (o) => o && o.kind === 'RIDE';
-const label = (s, o = order) => t(isRide(o) ? `st.ride.${s}` : `st.${s}`);
+// Each kind has its own words for the same states (a parcel is "collected", a visit "started").
+const KIND_KEY = { RIDE: 'ride', PARCEL: 'parcel', SERVICE: 'service' };
+const label = (s, o = order) => {
+  const k = KIND_KEY[o?.kind];
+  const key = k ? `st.${k}.${s}` : `st.${s}`;
+  const v = t(key);
+  return v === key ? t(`st.${s}`) : v;
+};
 // Server errors arrive in English; show them in the customer's language.
 const errText = (res) => (res.retryAfter
   ? t('auth.retry', { err: GMI18n.err(res.error), s: res.retryAfter })
@@ -582,7 +589,9 @@ async function locateForRide() {
   }
 }
 
-function openRide() {
+function openRide(vehicle) {
+  // From the Bajaj / Taxi tiles: that vehicle is chosen when the prices arrive.
+  if (vehicle === 'bajaj' || vehicle === 'car') ride.vehicle = vehicle;
   showView('rideView', 'home');
   if (!ride.map) {
     ride.map = GMMap.create($('rideMap'), { locate: true });
@@ -593,7 +602,6 @@ function openRide() {
   if (!$('ridePhone').value) { $('ridePhone').value = localStorage.getItem(CONTACT_KEY) || ''; refreshRidePhone(); }
   if (!ride.pickup) locateForRide();
 }
-$('goRide').addEventListener('click', openRide);
 $('rideBack').addEventListener('click', () => goTab('home'));
 $('rideLocate').addEventListener('click', locateForRide);
 
@@ -642,7 +650,9 @@ async function quoteRide() {
 function renderRideOptions() {
   const q = ride.quote;
   const box = $('rideOptions');
+  renderRidePay();
   if (!q) {
+    $('rideDriversBox').classList.add('hidden');
     if (!ride.pickup || !ride.dropoff) box.innerHTML = `<p class="muted">${t('ride.setBoth')}</p>`;
     $('rideBook').disabled = true;
     $('rideBook').textContent = t('ride.book');
@@ -665,6 +675,7 @@ function renderRideOptions() {
     return b;
   }));
   const chosen = q.options.find((o) => o.vehicle === ride.vehicle);
+  renderRideDrivers(chosen);
   if (chosen && chosen.available === 0) {
     const warn = document.createElement('p');
     warn.className = 'callout warn';
@@ -691,6 +702,7 @@ $('rideBook').addEventListener('click', async () => {
       kind: 'RIDE',
       id: pendingRideId,
       vehicle: ride.vehicle,
+      ...(ride.driverId ? { driverId: ride.driverId } : {}),
       pickup: pointBody(ride.pickup),
       dropoff: pointBody(ride.dropoff),
       pickupNote: $('pickupNote').value.trim(),
@@ -702,10 +714,11 @@ $('rideBook').addEventListener('click', async () => {
   $('rideBook').disabled = false;
   if (res.error) {
     // The fare moved under us (tariff edited): show the new one, never book at a price unseen.
-    if (res.quote) { ride.quote = res.quote; renderRideOptions(); }
+    if (res.quote) { ride.quote = res.quote; ride.driverId = null; renderRideOptions(); }
     return toast(GMI18n.err(res.error));
   }
   pendingRideId = null;
+  ride.driverId = null;
   localStorage.setItem(CONTACT_KEY, ridePhoneE164);
   order = res.order;
   localStorage.setItem('gm_last', JSON.stringify({ orderId: order.id }));
@@ -716,6 +729,11 @@ $('rideBook').addEventListener('click', async () => {
   $('pickupNote').value = '';
   ride.quote = null;
   enterOrderView(res);
+  // Paid from the wallet at once, when it was chosen and covers the fare: one tap to book.
+  if (ride.payWallet && walletState?.enabled && Number(walletState.balance) >= Number(order.total_amount)) {
+    const paid = await api(`/orders/${order.id}/pay-wallet`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (paid.order) { order = { ...order, ...paid.order }; updateBadge(order.status); walletState = null; toast(t('pay.confirmed')); }
+  }
 });
 
 // ── Catalog + cart ──
@@ -792,7 +810,9 @@ function rerenderQty() {
 }
 
 function renderCatalog() {
-  const cats = catalog || [];
+  const all = catalog || [];
+  const cats = shopService ? all.filter((c) => c.service === shopService) : all;
+  const q = fold($('shopSearch').value).trim();
   if (!activeCat || !cats.some((c) => c.id === activeCat)) activeCat = cats[0]?.id ?? null;
   $('catChips').replaceChildren(...cats.map((c) => {
     const b = document.createElement('button');
@@ -803,22 +823,52 @@ function renderCatalog() {
     b.addEventListener('click', () => { activeCat = c.id; renderCatalog(); });
     return b;
   }));
-  const cat = cats.find((c) => c.id === activeCat);
-  if (!cat) { $('catItems').innerHTML = `<p class="muted">${t('shop.empty')}</p>`; return; }
-  $('catItems').replaceChildren(...cat.items.map((i) => {
-    const row = document.createElement('div');
-    row.className = 'cat-item';
-    const body = document.createElement('span');
-    body.className = 'cat-body';
-    const name = document.createElement('strong');
-    name.textContent = itemName(i);
-    const sub = document.createElement('span');
-    sub.className = 'muted';
-    sub.textContent = [itemUnit(i), `$${Number(i.price).toFixed(2)}`].filter(Boolean).join(' · ');
-    body.append(name, sub);
-    row.append(body, stepper(i.id));
-    return row;
-  }));
+  $('catChips').classList.toggle('hidden', Boolean(q));
+  // Searching looks through every category of this shop.
+  const items = q
+    ? cats.flatMap((c) => c.items.map((i) => ({ ...i, icon: c.icon })))
+      .filter((i) => fold(i.name_en).includes(q) || fold(i.name_so).includes(q))
+    : (cats.find((c) => c.id === activeCat)?.items || []).map((i) => ({ ...i, icon: cats.find((c) => c.id === activeCat).icon }));
+  if (!items.length) { $('catItems').innerHTML = `<p class="muted">${t(q ? 'shop.noMatch' : 'shop.empty')}</p>`; return; }
+  $('catItems').replaceChildren(...items.map(productCard));
+}
+
+// One product: its picture (a stock photo or an approved upload) or the category's icon.
+function productPicture(i, cls = 'ph') {
+  const ph = document.createElement('span');
+  ph.className = cls;
+  if (i.image_url) {
+    const img = document.createElement('img');
+    img.loading = 'lazy';
+    img.alt = '';
+    img.src = GMConfig.base + i.image_url;
+    img.addEventListener('error', () => { img.remove(); ph.textContent = i.icon || '🛒'; }, { once: true });
+    ph.append(img);
+  } else {
+    ph.textContent = i.icon || '🛒';
+  }
+  return ph;
+}
+function productCard(i) {
+  const card = document.createElement('div');
+  card.className = 'prod';
+  const body = document.createElement('div');
+  body.className = 'pb';
+  const name = document.createElement('span');
+  name.className = 'pn';
+  name.textContent = itemName(i);
+  const unit = document.createElement('span');
+  unit.className = 'pu';
+  unit.textContent = itemUnit(i);
+  const foot = document.createElement('div');
+  foot.className = 'pf';
+  const price = document.createElement('span');
+  price.className = 'pp mono';
+  price.textContent = `$${Number(i.price).toFixed(2)}`;
+  foot.append(price, stepper(i.id));
+  body.append(name, unit, foot);
+  card.append(productPicture(i), body);
+  return card;
 }
 
 function cartSummary() {
@@ -839,18 +889,24 @@ function renderCartBar() {
   $('cartSum').textContent = (cents / 100).toFixed(2);
 }
 
-async function openShop() {
+// Which home tile opened the shop: food | grocery | pharmacy | water | null (everything).
+let shopService = null;
+async function openShop(service) {
+  if (service !== undefined) { shopService = service; activeCat = null; $('shopSearch').value = ''; }
+  $('shopTitle').textContent = t(shopService ? `shop.title.${shopService}` : 'shop.title');
+  $('shopNote').textContent = shopService === 'pharmacy' ? t('shop.pharmacyNote') : '';
+  $('shopNote').classList.toggle('hidden', shopService !== 'pharmacy');
   showView('shopView', 'home');
   if (!catalog) $('catItems').innerHTML = `<p class="muted">${t('shop.loading')}</p>`;
   await loadCatalog();
   renderCatalog();
   renderCartBar();
 }
-$('goShop').addEventListener('click', openShop);
 $('shopBack').addEventListener('click', () => goTab('home'));
 $('cartOpen').addEventListener('click', () => openCheckout());
 $('shopCustom').addEventListener('click', () => openCheckout({ custom: true }));
-$('checkoutBack').addEventListener('click', openShop);
+$('checkoutBack').addEventListener('click', () => openShop());
+$('shopSearch').addEventListener('input', () => renderCatalog());
 
 // ── Checkout ──
 const drop = { point: null, map: null, quote: null, seq: 0 };
@@ -864,16 +920,20 @@ function renderCartLines() {
   $('cartLines').replaceChildren(...ids.map((id) => {
     const i = itemById(id);
     const row = document.createElement('div');
-    row.className = 'cat-item';
+    row.className = 'cart-row';
     const body = document.createElement('span');
-    body.className = 'cat-body';
+    body.className = 'cb';
     const name = document.createElement('strong');
     name.textContent = itemName(i);
-    const sub = document.createElement('span');
-    sub.className = 'muted';
-    sub.textContent = `${itemUnit(i)} · $${(Number(i.price) * cart[id]).toFixed(2)}`;
-    body.append(name, sub);
-    row.append(body, stepper(Number(id)));
+    const unit = document.createElement('span');
+    unit.className = 'muted';
+    unit.textContent = itemUnit(i);
+    const price = document.createElement('span');
+    price.className = 'pp mono';
+    price.textContent = `$${(Number(i.price) * cart[id]).toFixed(2)}`;
+    body.append(name, unit, price);
+    const cat = (catalog || []).find((c) => c.items.some((x) => x.id === i.id));
+    row.append(productPicture({ ...i, icon: cat?.icon }, 'thumb'), body, stepper(Number(id)));
     return row;
   }));
 }
@@ -925,10 +985,15 @@ async function runDeliveryQuote() {
   drop.quote = null;
   const body = deliveryBody();
   const empty = !body.cart.lines.length && !body.cart.custom;
-  const show = (sub, fee, total, note) => {
+  const show = (sub, fee, total, note, q = null) => {
     $('qSubtotal').textContent = sub; $('qFee').textContent = fee; $('qTotal').textContent = total;
     $('qNote').textContent = note || '';
+    const free = Boolean(q?.promo);
+    $('qFree').classList.toggle('hidden', !free);
+    $('qFeeBefore').classList.toggle('hidden', !free || !q.fee_before);
+    $('qFeeBefore').textContent = free && q.fee_before ? `$${q.fee_before}` : '';
   };
+  renderCartPromo();
   if (empty) return show('—', '—', '—', t('cart.empty'));
   if (!drop.point) return show('—', '—', '—', t('quote.needPlace'));
   const seq = ++drop.seq;
@@ -942,7 +1007,7 @@ async function runDeliveryQuote() {
   drop.quote = res.quote;
   const q = res.quote;
   const from = q.pickup ? t('quote.from', { m: q.pickup.label, d: GMMap.formatDistance(q.distance_m) }) : '';
-  show(q.subtotal, q.fee, q.total, from);
+  show(q.subtotal, q.fee, q.total, [from, q.minutes ? t('quote.eta', { n: q.minutes }) : ''].filter(Boolean).join(' · '), q);
 }
 ['request', 'budget'].forEach((id) => $(id).addEventListener('input', quoteDelivery));
 
@@ -1064,6 +1129,7 @@ function enterOrderView(payment) {
   loadPhotos(order.id);
   refreshEvidence();
   renderOrderMap();
+  renderOrderExtras();
   loadAttempt();
   maybeAskPush();
   if (!ws) connectSocket();
@@ -1180,6 +1246,7 @@ function showDriver(loc) {
   if (!(trackRoute.tracker && trackRoute.key === key)) $('driverEta').textContent = ` · ${t('drv.eta', { d: GMMap.formatDistance(d), n: minutes })}`;
   showSeen();
   $('driverStrip').classList.remove('hidden');
+  setTrackEta(minutes, d);
   if (first && !orderMap.dragged) orderMap.fit([driverAt, target]);
 }
 
@@ -1504,6 +1571,9 @@ function connectSocket() {
       if (!order || String(m.orderId) !== String(order.id)) return;
       attemptState = m.status;
       renderAppPay(lastPayment);
+    } else if (m.type === 'offer' || m.type === 'extra_quoted') {
+      if (!order || String(m.orderId) !== String(order.id)) return;
+      resumeOrderQuietly();
     } else if (m.type === 'payment_confirmed') {
       if (!order || String(m.orderId) !== String(order.id)) return;
       toast(t('pay.confirmed'));
@@ -1523,6 +1593,7 @@ async function resumeOrderQuietly() {
   if (!res.order || String(res.order.id) !== String(order.id)) return;
   order = res.order;
   renderOrderMap();
+  renderOrderExtras();
 }
 
 // ── Timeline + badge ──
@@ -1548,7 +1619,10 @@ function renderHero(status) {
   const isFail = status === 'FAILED_REFUND';
   const idx = STATES.indexOf(status);
   $('statusTitle').textContent = label(status);
-  $('statusSub').textContent = t(isRide(order) ? `st.ride.sub.${status}` : `st.sub.${status}`);
+  const k = KIND_KEY[order?.kind];
+  const subKey = k ? `st.${k}.sub.${status}` : `st.sub.${status}`;
+  $('statusSub').textContent = t(subKey) === subKey ? t(`st.sub.${status}`) : t(subKey);
+  renderSteps5(status);
   const track = $('track');
   track.className = 'track' + (isFail ? ' fail' : '');
   track.innerHTML = STATES.map((s, i) => {
@@ -1714,7 +1788,7 @@ function helpLine(role, text) {
 // The widget: a launcher in the corner on the screens without their own bottom button, a
 // panel that opens over the page (a bottom sheet on a phone). Esc or the chevron collapses it.
 // Signed out too: the questions people most need answered come before they have an account.
-const NO_LAUNCHER = ['rideView', 'shopView', 'startView'];
+const NO_LAUNCHER = ['rideView', 'shopView', 'startView', 'parcelView', 'serviceView'];
 let currentView = null;
 function updateLauncher() {
   const open = !$('chatPanel').hidden;
@@ -1749,8 +1823,8 @@ $('chatLauncher').addEventListener('click', () => openChat(currentView === 'orde
 $('chatMin').addEventListener('click', closeChat);
 $('openChat').addEventListener('click', () => openChat(null));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeChat(); });
-async function sendHelp() {
-  const message = $('helpInput').value.trim();
+async function sendHelp(preset) {
+  const message = (typeof preset === 'string' ? preset : $('helpInput').value).trim();
   if (!message) return;
   $('helpInput').value = '';
   helpLine('user', message);
@@ -1764,10 +1838,12 @@ async function sendHelp() {
   $('helpSend').disabled = false;
   if (res.error) { wait.textContent = GMI18n.err(res.error); return; }
   wait.textContent = res.reply;
+  // AI Caawiye drafted a cart or a ride: a button that opens it for the customer to check.
+  if (res.draft) applyDraft(res.draft, wait);
   helpHistory = [...helpHistory, { role: 'user', content: message }, { role: 'assistant', content: res.reply }].slice(-6);
   if (res.handoff) $('helpHuman').classList.add('pulse');
 }
-$('helpSend').addEventListener('click', sendHelp);
+$('helpSend').addEventListener('click', () => sendHelp());
 $('helpInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendHelp(); });
 $('orderHelp').addEventListener('click', () => openChat(order?.id || null));
 // A person: on an order, its chat (operators read it live); otherwise the owner's contact.
@@ -1812,10 +1888,14 @@ async function loadWallet() {
 }
 function renderWallet() {
   const w = walletState;
-  $('walletCard').classList.toggle('hidden', !w?.enabled);
+  $('walletOff').classList.toggle('hidden', Boolean(w?.enabled));
+  $('walletTopupBtn').disabled = !w?.enabled;
+  $('wdBox').classList.toggle('hidden', !w?.enabled);
+  renderRidePay();
   if (!w?.enabled) return;
   $('walletBalance').textContent = w.balance;
-  const wallets = lastPayment.appPay?.length ? lastPayment.appPay : [{ id: 'evc', name: 'EVC Plus' }, { id: 'zaad', name: 'Zaad' }, { id: 'sahal', name: 'Sahal' }];
+  renderTopupWays(w);
+  const wallets = w.gateway || [];
   const busy = w.lastTopup?.status === 'pending';
   $('topupButtons').replaceChildren(...wallets.map((x) => {
     const b = document.createElement('button');
@@ -1833,16 +1913,7 @@ function renderWallet() {
     st.className = 'callout' + (s === 'declined' || s === 'unknown' ? ' warn' : '');
     st.textContent = t(`wallet.topup.${s}`, { amt: w.lastTopup.amount });
   }
-  $('walletHistory').replaceChildren(...(w.entries.length ? w.entries.map((e) => {
-    const li = document.createElement('li');
-    const what = document.createElement('span');
-    what.textContent = `${t(WALLET_KIND[e.kind] || e.kind)} · ${new Date(e.created_at).toLocaleDateString()}`;
-    const amt = document.createElement('strong');
-    amt.className = 'mono ' + (Number(e.amount) > 0 ? 'plus' : 'minus');
-    amt.textContent = `${Number(e.amount) > 0 ? '+' : ''}${e.amount}`;
-    li.append(what, amt);
-    return li;
-  }) : [Object.assign(document.createElement('li'), { className: 'muted', textContent: t('wallet.empty') })]));
+  renderWalletHistory(w);
 }
 let topupPoll = null;
 async function topUp(walletId) {
@@ -1940,7 +2011,8 @@ function openFromUrl(href) {
   try { u = new URL(href, location.origin); } catch { return; }
   const id = u.searchParams.get('order');
   if (id) { resumeOrder(id); return; }
-  if (u.searchParams.has('wallet')) goTab('account');
+  if (u.searchParams.has('wallet')) goTab('wallet');
+  if (u.searchParams.has('inbox')) openInbox();
 }
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('message', (e) => { if (e.data?.type === 'gm:open') openFromUrl(e.data.url); });
@@ -2028,10 +2100,13 @@ $('bugForm').addEventListener('submit', async (e) => {
 // ── Navigation: bottom tabs ──
 // Home = the new-order screen when signed in, the landing page when not. Orders and Account
 // need a session, so they send a signed-out visitor to sign-in first and come back after.
-const VIEWS = ['landingView', 'joinView', 'authView', 'homeView', 'rideView', 'shopView', 'startView', 'orderView', 'resumeView', 'faqView', 'accountView'];
+const VIEWS = ['landingView', 'joinView', 'authView', 'homeView', 'rideView', 'shopView', 'startView', 'orderView', 'resumeView', 'faqView', 'accountView',
+  'parcelView', 'serviceView', 'nearbyView', 'suggestView', 'inboxView', 'trackView', 'walletView'];
 const TAB_OF = {
   landingView: 'home', joinView: 'home', authView: null, homeView: 'home', rideView: 'home', shopView: 'home', startView: 'home',
-  orderView: 'orders', resumeView: 'orders', faqView: 'help', accountView: 'account',
+  parcelView: 'home', serviceView: 'home', nearbyView: 'home', inboxView: 'home',
+  orderView: 'track', resumeView: 'orders', faqView: 'account', accountView: 'account', suggestView: 'account',
+  trackView: 'track', walletView: 'wallet',
 };
 let afterSignIn = null;
 function showView(id, tab) {
@@ -2053,26 +2128,32 @@ function goTab(tab, { start = false } = {}) {
   if (!token) {
     if (tab === 'home' && !start) return showView('landingView');
     afterSignIn = tab;
-    // Orders and Account are what a returning customer taps: open on Sign in for them.
-    if (tab === 'orders' || tab === 'account') setAuthMode('signin');
+    // A returning customer taps these: open on Sign in for them.
+    if (['orders', 'account', 'track', 'wallet'].includes(tab)) setAuthMode('signin');
     return showView('authView', tab);
   }
   if (tab === 'home') {
-    $('signedInAs').textContent = myPhone || '';
-    return showView('homeView');
+    showView('homeView');
+    // features.js loads after this file; on the very first call it fills Home itself.
+    if (typeof renderHome === 'function') renderHome();
+    return null;
   }
   if (tab === 'orders') return openOrders();
+  if (tab === 'track') return openTracking();
+  if (tab === 'wallet') {
+    showView('walletView');
+    return loadWallet();
+  }
   if (tab === 'account') {
     showSignedIn();
     loadEmailBox();
     loadPasswordBox();
-    loadWallet();
     renderPush();
+    loadProfile();
     return showView('accountView');
   }
 }
 function showSignedIn() {
-  $('signedInAs').textContent = myPhone || '';
   $('acctLogin').textContent = myPhone || '';
 }
 document.querySelectorAll('.tabbar [data-tab]').forEach((b) =>
@@ -2134,7 +2215,7 @@ if (token) { showSignedIn(); goTab('home'); } else showView('landingView');
   try {
     if (!token) return;
     // Opened from a notification: go where it points, not to the last order.
-    if (new URLSearchParams(location.search).has('order') || new URLSearchParams(location.search).has('wallet')) {
+    if (['order', 'wallet', 'inbox'].some((k) => new URLSearchParams(location.search).has(k))) {
       openFromUrl(location.href);
       history.replaceState(null, '', location.pathname);
       return;
@@ -2289,6 +2370,7 @@ document.addEventListener('gm:lang', () => {
   if (!$('shopView').classList.contains('hidden')) renderCatalog();
   if (!$('startView').classList.contains('hidden')) renderCartLines();
   if (ride.quote) renderRideOptions();
+  document.dispatchEvent(new CustomEvent('gm:redraw'));
   if (order) {
     renderOrderDetails();
     renderPayment(lastPayment);
@@ -2301,7 +2383,7 @@ document.addEventListener('gm:lang', () => {
   if (lastSyncStats) renderSyncState(lastSyncStats);
   // Re-run the live phone hints in the new language.
   if (walletState) renderWallet();
-  ['phone', 'joinPhone', 'orderPhone', 'ridePhone', 'payPhone', 'topupPhone', 'wdPhone'].forEach((id) => $(id).dispatchEvent(new Event('input')));
+  ['phone', 'joinPhone', 'orderPhone', 'ridePhone', 'payPhone', 'topupPhone', 'wdPhone', 'parcelPhone', 'parcelRecipient', 'svcPhone'].forEach((id) => $(id).dispatchEvent(new Event('input')));
   if (!$('resumeView').classList.contains('hidden')) openOrders();
   updateIdHint();
   $('otpStatus').textContent = '';

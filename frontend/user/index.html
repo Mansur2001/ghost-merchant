@@ -187,26 +187,59 @@
 
       <!-- Home (signed in): what do you want — a ride or a delivery. -->
       <section id="homeView" class="hidden">
-        <div class="screen-head">
-          <h2 data-i18n="home.title">Where are you going?</h2>
-          <p class="muted"><span data-i18n="start.as">Signed in as</span> <strong id="signedInAs"></strong></p>
+        <div class="home-top">
+          <button class="city-btn" id="cityBtn" type="button"><span class="pin"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/></svg></span><span id="cityName"></span> <span aria-hidden="true">▾</span></button>
+          <button class="bell" id="bellBtn" type="button" data-i18n-title="inbox.title" title="Notifications">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>
+            <span class="count hidden" id="bellCount"></span>
+          </button>
         </div>
-        <button class="service service-ride" id="goRide" type="button">
-          <span class="service-icon" aria-hidden="true">🛺</span>
-          <span class="service-body">
-            <span class="service-title" data-i18n="home.ride">Ride</span>
-            <span class="service-sub" data-i18n="home.ride.sub">Bajaj or car. Fixed price before you book.</span>
-          </span>
-          <span class="chev">›</span>
-        </button>
-        <button class="service" id="goShop" type="button">
-          <span class="service-icon" aria-hidden="true">🛍️</span>
-          <span class="service-body">
-            <span class="service-title" data-i18n="home.shop">Food &amp; shopping</span>
-            <span class="service-sub" data-i18n="home.shop.sub">Meals, groceries and more, brought to your door.</span>
-          </span>
-          <span class="chev">›</span>
-        </button>
+        <div class="greet">
+          <div>
+            <h2 id="greetName"></h2>
+            <p data-i18n="home.greetSub">AI Caawiye is ready to help you.</p>
+          </div>
+          <img class="bot" src="/shared/img/robot.svg" alt="" />
+        </div>
+        <div class="banner">
+          <h3 data-i18n="home.bannerTitle">Any service, to your home</h3>
+          <p data-i18n="home.bannerSub">Order what you need. We bring it fast.</p>
+          <button id="bannerOrder" type="button"><span data-i18n="home.orderNow">Order now</span> →</button>
+          <img class="art" src="/shared/img/rider.svg" alt="" />
+        </div>
+        <div class="home-search">
+          <svg class="s-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="homeSearch" type="search" autocomplete="off" enterkeyhint="search" data-i18n-ph="home.search.ph" placeholder="Search a service or item…" />
+          <button class="ai-btn" id="homeAi" type="button" data-i18n-title="home.askAi" title="Ask AI">✨</button>
+        </div>
+        <div class="search-results" id="homeResults"></div>
+        <div class="svc-grid" id="svcGrid">
+          <button class="svc" type="button" data-svc="bajaj"><span class="em">🛺</span><span data-i18n="svc.bajaj">Bajaj</span></button>
+          <button class="svc" type="button" data-svc="taxi"><span class="em">🚕</span><span data-i18n="svc.taxi">Taxi</span></button>
+          <button class="svc" type="button" data-svc="food"><span class="em">🍔</span><span data-i18n="svc.food">Food</span></button>
+          <button class="svc" type="button" data-svc="grocery"><span class="em">🧺</span><span data-i18n="svc.grocery">Groceries</span></button>
+          <button class="svc" type="button" data-svc="pharmacy"><span class="em">💊</span><span data-i18n="svc.pharmacy">Pharmacy</span></button>
+          <button class="svc" type="button" data-svc="repair"><span class="em">🛠️</span><span data-i18n="svc.repair">Repairs</span></button>
+          <button class="svc" type="button" data-svc="water"><span class="em">💧</span><span data-i18n="svc.water">Water</span></button>
+          <button class="svc" type="button" data-svc="parcel"><span class="em">📦</span><span data-i18n="svc.parcel">Delivery</span></button>
+        </div>
+        <div class="strip" id="etaStrip">
+          <span class="ic">⚡</span>
+          <div><strong id="etaTitle" data-i18n="home.eta.title">Fast, live to your door</strong><span id="etaSub" data-i18n="home.eta.sub">See the time before you order, and track it live.</span></div>
+        </div>
+        <div class="strip hidden" id="promoStrip">
+          <span class="ic">🎁</span>
+          <div><strong data-i18n="promo.title">Free delivery</strong><span id="promoSub"></span></div>
+        </div>
+        <button class="tile hidden" id="activeOrderTile" type="button"></button>
+        <div class="ai-card">
+          <div class="ai-body">
+            <strong>AI Caawiye ✨</strong>
+            <p data-i18n="home.aiSub">Ask anything. It can fill a cart or a ride for you to check.</p>
+            <button id="aiTalk" type="button" data-i18n="home.aiTalk">Talk to AI</button>
+          </div>
+          <img class="bot" src="/shared/img/robot.svg" alt="" />
+        </div>
       </section>
 
       <!-- Book a ride: pickup and destination on the map, then a vehicle and its fare. -->
@@ -243,6 +276,16 @@
         <div class="section-title" data-i18n="ride.choose">Choose a ride</div>
         <div id="rideOptions" class="ride-options"><p class="muted" data-i18n="ride.setBoth">Set the pickup and the destination to see prices.</p></div>
 
+        <!-- The drivers near the pickup: the customer may choose one (offered the ride first,
+             30 s to accept; otherwise the nearest takes it). One fare for every driver. -->
+        <div id="rideDriversBox" class="hidden">
+          <div class="section-title" id="rideDriversTitle"></div>
+          <div class="drv-list" id="rideDrivers"></div>
+          <p class="muted" style="margin:6px 2px 0;" data-i18n="ride.chooseNote">Same price with every driver. If yours can't come, the nearest one will.</p>
+        </div>
+        <div class="section-title" data-i18n="pay.method">How you pay</div>
+        <div class="pay-row" id="ridePayRow"><span>👛</span><span class="grow" id="ridePayLabel"></span><span class="muted" id="ridePayBal"></span></div>
+
         <div class="card">
           <label for="ridePhone" style="margin-top:0;" data-i18n="ride.phone">Phone for the driver</label>
           <input id="ridePhone" type="tel" inputmode="tel" placeholder="61 234 5678" autocomplete="tel" />
@@ -256,14 +299,27 @@
       <!-- The generic catalog: pick items, then the cart. -->
       <section id="shopView" class="hidden">
         <button class="linkbtn" id="shopBack" type="button" style="margin-bottom:12px;" data-i18n="nav.back">← Back</button>
-        <div class="screen-head"><h2 data-i18n="shop.title">Food &amp; shopping</h2></div>
+        <div class="screen-head"><h2 id="shopTitle" data-i18n="shop.title">Food &amp; shopping</h2>
+          <p class="muted hidden" id="shopNote"></p></div>
+        <div class="home-search">
+          <svg class="s-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="shopSearch" type="search" autocomplete="off" data-i18n-ph="shop.search.ph" placeholder="Search this shop…" />
+        </div>
         <div class="chips" id="catChips" role="tablist"></div>
-        <div id="catItems" class="catalog scroll-list"></div>
+        <div id="catItems" class="prod-grid scroll-list"></div>
         <button class="tile custom-tile" id="shopCustom" type="button">
           <span class="tile-icon">📷</span>
           <span class="tile-body">
             <span class="tile-title" data-i18n="shop.custom">Something else?</span>
             <span class="tile-sub" data-i18n="shop.custom.sub">Describe it and add a photo at checkout.</span>
+          </span>
+          <span class="chev">›</span>
+        </button>
+        <button class="tile custom-tile" id="shopSuggest" type="button">
+          <span class="tile-icon">💡</span>
+          <span class="tile-body">
+            <span class="tile-title" data-i18n="sug.tile">Suggest an item</span>
+            <span class="tile-sub" data-i18n="sug.tile.sub">Send a photo. We add it to the shop.</span>
           </span>
           <span class="chev">›</span>
         </button>
@@ -279,6 +335,10 @@
           <h2 data-i18n="start.title">New order</h2>
         </div>
 
+        <div class="promo-banner hidden" id="cartPromo">
+          <div><strong data-i18n="promo.banner">FREE DELIVERY</strong><span id="cartPromoSub"></span></div>
+          <span class="em">🛵</span>
+        </div>
         <div class="section-title" data-i18n="cart.title">Your cart</div>
         <div class="card">
           <div class="scroll-list short" id="cartLines"></div>
@@ -322,7 +382,7 @@
         <div class="card" id="quoteBox">
           <dl class="kv">
             <dt data-i18n="quote.items">Items</dt><dd class="mono">$<span id="qSubtotal">—</span></dd>
-            <dt data-i18n="quote.fee">Delivery</dt><dd class="mono">$<span id="qFee">—</span></dd>
+            <dt data-i18n="quote.fee">Delivery</dt><dd class="mono"><span class="strike hidden" id="qFeeBefore"></span><span class="free-tag hidden" id="qFree" data-i18n="promo.free">FREE</span> $<span id="qFee">—</span></dd>
             <dt><strong data-i18n="quote.total">Total</strong></dt><dd class="mono"><strong>$<span id="qTotal">—</span></strong></dd>
           </dl>
           <p class="muted" id="qNote" style="margin:6px 0 0;"></p>
@@ -333,18 +393,233 @@
         </div>
       </section>
 
+      <!-- Send a parcel: from one door to another (the Delivery tile). -->
+      <section id="parcelView" class="hidden">
+        <button class="linkbtn" id="parcelBack" type="button" style="margin-bottom:12px;" data-i18n="nav.back">← Back</button>
+        <div class="screen-head"><h2 data-i18n="parcel.title">Send a parcel</h2>
+          <p class="muted" data-i18n="parcel.sub">A driver collects it and takes it across town.</p></div>
+        <div class="map-card"><div class="map" id="parcelMap"></div>
+          <div class="map-hint muted" data-i18n="ride.tapHint">Tap the map to set the point you are choosing.</div></div>
+        <div class="card">
+          <div class="cc-switch point-pick" id="parcelPick" role="group">
+            <button type="button" data-point="pickup" aria-pressed="true"><span class="pt pt-a">A</span> <span data-i18n="parcel.from">Collect from</span></button>
+            <button type="button" data-point="dropoff" aria-pressed="false"><span class="pt pt-b">B</span> <span data-i18n="parcel.to">Deliver to</span></button>
+          </div>
+          <div class="point-row"><span class="pt pt-a">A</span><span class="point-text" id="parcelFromText" data-i18n="ride.pickup.none">Pickup not set</span>
+            <button class="iconbtn" id="parcelLocate" type="button" data-i18n-title="loc.btn" title="Use my location"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/></svg></button></div>
+          <div class="point-row"><span class="pt pt-b">B</span><span class="point-text" id="parcelToText" data-i18n="parcel.to.none">Where does it go?</span></div>
+          <label for="parcelSearch" data-i18n="ride.search">Search a place</label>
+          <div class="search-row">
+            <input id="parcelSearch" type="search" autocomplete="off" enterkeyhint="search" data-i18n-ph="ride.search.ph" placeholder="Bakaara, KM4, Lido…" />
+            <button class="secondary small" id="parcelOsm" type="button" data-i18n="search.btn">Search</button>
+          </div>
+          <div class="place-results scroll-list short" id="parcelResults"></div>
+          <label for="parcelNote" data-i18n="ride.note">Where exactly? (optional)</label>
+          <input id="parcelNote" type="text" maxlength="200" data-i18n-ph="ride.note.ph" placeholder="Outside the pharmacy, blue gate" />
+        </div>
+        <div class="card">
+          <label for="parcelDetails" style="margin-top:0;" data-i18n="parcel.details">What is in it?</label>
+          <input id="parcelDetails" type="text" maxlength="500" data-i18n-ph="parcel.details.ph" placeholder="Documents, a small box…" />
+          <label for="parcelLandmark" data-i18n="parcel.landmark">Landmark at the drop-off</label>
+          <input id="parcelLandmark" type="text" maxlength="300" data-i18n-ph="start.landmark.ph" placeholder="Green house next to the yellow pharmacy" />
+          <label for="parcelRecipient" data-i18n="parcel.recipient">Phone of the person receiving it</label>
+          <input id="parcelRecipient" type="tel" inputmode="tel" placeholder="61 234 5678" />
+          <div class="phone-hint muted" id="parcelRecipientHint"></div>
+          <label for="parcelPhone" data-i18n="start.phone">Phone for the driver</label>
+          <input id="parcelPhone" type="tel" inputmode="tel" placeholder="61 234 5678" autocomplete="tel" />
+          <div class="phone-hint muted" id="parcelPhoneHint"></div>
+        </div>
+        <div class="card"><dl class="kv">
+          <dt data-i18n="parcel.fee">Delivery fee</dt><dd class="mono"><strong>$<span id="parcelFee">—</span></strong></dd></dl>
+          <p class="muted" id="parcelQuoteNote" style="margin:6px 0 0;"></p></div>
+        <div class="action-bar"><button id="parcelBook" type="button" disabled data-i18n="parcel.book">Send parcel</button></div>
+      </section>
+
+      <!-- Farsamo: book a technician for a prepaid visit. -->
+      <section id="serviceView" class="hidden">
+        <button class="linkbtn" id="serviceBack" type="button" style="margin-bottom:12px;" data-i18n="nav.back">← Back</button>
+        <div class="screen-head"><h2 data-i18n="svc.title">Repairs and home services</h2>
+          <p class="muted" data-i18n="svc.sub">Pay the visit fee now. If more work is needed, the technician sends a price in the app.</p></div>
+        <div class="trade-grid" id="tradeGrid"></div>
+        <div class="card" style="margin-top:14px;">
+          <label for="svcDetails" style="margin-top:0;" data-i18n="svc.details">What is the problem?</label>
+          <textarea id="svcDetails" maxlength="500" data-i18n-ph="svc.details.ph" placeholder="The kitchen tap is leaking…"></textarea>
+          <label data-i18n="svc.where">Where?</label>
+          <div class="map small" id="svcMap"></div>
+          <button class="secondary" id="svcLocate" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/></svg> <span data-i18n="loc.btn">Use my location</span></button>
+          <div id="svcLocStatus" class="muted" style="margin-top:8px;" data-i18n="loc.none">Location not set.</div>
+          <label for="svcLandmark" data-i18n="start.landmark">Nearest landmark (required)</label>
+          <input id="svcLandmark" type="text" maxlength="300" data-i18n-ph="start.landmark.ph" placeholder="Green house next to the yellow pharmacy" />
+          <label for="svcPhone" data-i18n="svc.phone">Phone for the technician</label>
+          <input id="svcPhone" type="tel" inputmode="tel" placeholder="61 234 5678" autocomplete="tel" />
+          <div class="phone-hint muted" id="svcPhoneHint"></div>
+        </div>
+        <div class="card"><dl class="kv"><dt data-i18n="svc.fee">Visit fee</dt><dd class="mono"><strong>$<span id="svcFee">—</span></strong></dd></dl>
+          <p class="muted" id="svcQuoteNote" style="margin:6px 0 0;"></p></div>
+        <div class="action-bar"><button id="svcBook" type="button" disabled data-i18n="svc.book">Book a visit</button></div>
+      </section>
+
+      <!-- Places near me (AI "Goobaha ugu dhow"): tap one to ride there. -->
+      <section id="nearbyView" class="hidden">
+        <button class="linkbtn" id="nearbyBack" type="button" style="margin-bottom:12px;" data-i18n="nav.back">← Back</button>
+        <div class="screen-head"><h2 data-i18n="near.title">Places near you</h2><p class="muted" id="nearbyNote"></p></div>
+        <div class="place-results scroll-list tall" id="nearbyList"></div>
+      </section>
+
+      <!-- Suggest an item: a name and a photo; staff review it, an admin prices it. -->
+      <section id="suggestView" class="hidden">
+        <button class="linkbtn" id="suggestBack" type="button" style="margin-bottom:12px;" data-i18n="nav.back">← Back</button>
+        <div class="screen-head"><h2 data-i18n="sug.title">Suggest an item</h2>
+          <p class="muted" data-i18n="sug.sub">Can't find something? Send us its name and a photo. If we can get it, we add it to the shop.</p></div>
+        <div class="card">
+          <label for="sugName" style="margin-top:0;" data-i18n="sug.name">Name of the item</label>
+          <input id="sugName" type="text" maxlength="80" data-i18n-ph="sug.name.ph" placeholder="Camel meat, a brand of milk…" />
+          <label for="sugService" data-i18n="sug.where">Which shop?</label>
+          <select id="sugService">
+            <option value="grocery" data-i18n="svc.grocery">Groceries</option>
+            <option value="food" data-i18n="svc.food">Food</option>
+            <option value="pharmacy" data-i18n="svc.pharmacy">Pharmacy</option>
+            <option value="water" data-i18n="svc.water">Water</option>
+            <option value="shop" data-i18n="sug.other">Other</option>
+          </select>
+          <label for="sugNote" data-i18n="sug.note">Where is it sold, and for about how much? (optional)</label>
+          <input id="sugNote" type="text" maxlength="300" />
+          <label class="capture" id="sugCapture">
+            <input id="sugPhoto" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" />
+            <span class="thumb" id="sugThumb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span>
+            <span><span data-i18n="sug.photo">Add a photo (required)</span><span class="cap-sub" data-i18n="sug.photo.sub">A clear photo of the item</span></span>
+          </label>
+          <button id="sugSend" type="button" data-i18n="sug.send">Send suggestion</button>
+        </div>
+        <div class="section-title" data-i18n="sug.mine">Your suggestions</div>
+        <div class="card"><div id="sugList"></div></div>
+      </section>
+
+      <!-- The bell: what happened to your orders, wallet and suggestions. -->
+      <section id="inboxView" class="hidden">
+        <button class="linkbtn" id="inboxBack" type="button" style="margin-bottom:12px;" data-i18n="nav.back">← Back</button>
+        <div class="screen-head"><h2 data-i18n="inbox.title">Notifications</h2></div>
+        <div class="note-list scroll-list tall" id="inboxList"></div>
+      </section>
+
+      <!-- Tracking tab: the live job(s). -->
+      <section id="trackView" class="hidden">
+        <div class="screen-head"><h2 data-i18n="track.title">Tracking</h2></div>
+        <div id="trackList" class="scroll-list tall"></div>
+      </section>
+
+      <!-- Wallet tab. -->
+      <section id="walletView" class="hidden">
+        <div class="screen-head"><h2 data-i18n="wallet.title">Wallet</h2></div>
+        <div class="wallet-hero">
+          <div class="lbl" data-i18n="wallet.hero">GuriKaabe Wallet</div>
+          <div class="bal mono">$<span id="walletBalance">0.00</span></div>
+          <button id="walletTopupBtn" type="button">+ <span data-i18n="wallet.topup.cta">Top up wallet</span></button>
+          <span class="art">👛</span>
+        </div>
+        <div class="card hidden" id="walletOff"><p class="muted" style="margin:0;" data-i18n="wallet.off">The wallet is not available right now.</p></div>
+        <div class="card hidden" id="topupCard">
+          <div class="section-title" data-i18n="wallet.topup.cta">Top up wallet</div>
+          <label for="topupAmount" style="margin-top:0;" data-i18n="wallet.topup.amount">Add money (USD)</label>
+          <input id="topupAmount" type="number" inputmode="decimal" step="0.01" min="1" placeholder="10.00" />
+          <!-- In the app (WaafiPay) when the gateway is on. -->
+          <div id="topupApp" class="hidden">
+            <label for="topupPhone" data-i18n="apppay.phone">Wallet number that pays</label>
+            <input id="topupPhone" type="tel" inputmode="tel" placeholder="90 123 4567" />
+            <div class="phone-hint muted" id="topupPhoneHint"></div>
+            <div id="topupButtons"></div>
+          </div>
+          <!-- Otherwise: dial the merchant, then give the transaction number; staff confirm it. -->
+          <div id="topupUssd" class="hidden">
+            <p class="muted" style="margin:10px 0 0;" data-i18n="wallet.ussd.how">1. Send the money with your wallet. 2. Type the transaction number from the message. 3. We add it after we check.</p>
+            <div id="topupDial"></div>
+            <label for="topupRef" data-i18n="paid.refLabel">Transaction number</label>
+            <input id="topupRef" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" data-i18n-ph="paid.refPh" placeholder="From your payment text message" />
+            <button id="topupClaim" type="button" data-i18n="wallet.ussd.claim">I've sent it</button>
+          </div>
+          <p class="callout hidden" id="topupStatus"></p>
+        </div>
+        <div class="card">
+          <div class="between"><div class="section-title" style="margin:0;" data-i18n="wallet.tx">Transactions</div></div>
+          <div id="walletHistory" class="scroll-list"></div>
+        </div>
+        <details class="card bare" id="wdBox">
+          <summary class="muted" data-i18n="wallet.withdraw">Take money out</summary>
+          <label for="wdAmount" data-i18n="wallet.withdraw.amount">Amount (USD)</label>
+          <input id="wdAmount" type="number" inputmode="decimal" step="0.01" min="1" />
+          <label for="wdPhone" data-i18n="wallet.withdraw.phone">Send it to</label>
+          <input id="wdPhone" type="tel" inputmode="tel" placeholder="61 234 5678" />
+          <div class="phone-hint muted" id="wdPhoneHint"></div>
+          <button class="secondary" id="wdBtn" type="button" data-i18n="wallet.withdraw.btn">Request withdrawal</button>
+        </details>
+      </section>
+
       <!-- Track one order: status, code, pay, proof, chat. -->
       <section id="orderView" class="hidden">
         <button class="linkbtn" id="orderBack" type="button" style="margin-bottom:12px;" data-i18n="nav.orders">← My orders</button>
 
-        <div class="card status-hero raised">
+        <div class="card status-hero raised track-hero">
           <div class="between">
             <span class="badge pending" id="statusBadge"></span>
-            <span class="muted mono"><span data-i18n="order.num">Order #</span><span id="orderId"></span></span>
+            <span class="muted mono"><span data-i18n="order.num">Order #</span><span id="orderId"></span>
+              <button class="iconbtn" id="shareBtn" type="button" data-i18n-title="track.share" title="Share" style="margin-left:4px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg>
+              </button></span>
           </div>
           <div class="status-title" id="statusTitle"></div>
           <p class="status-sub" id="statusSub"></p>
-          <div class="track" id="track"></div>
+          <div class="muted hidden" id="etaLabel" data-i18n="track.eta">Estimated arrival</div>
+          <div class="eta hidden" id="etaValue"></div>
+          <img class="art" id="trackArt" src="/shared/img/rider.svg" alt="" />
+          <div class="track hidden" id="track"></div>
+          <div class="steps5" id="steps5"></div>
+        </div>
+
+        <!-- The customer chose this driver: they have 30 s to take it. -->
+        <div class="card accent hidden" id="offerCard">
+          <div class="offer-wait">
+            <span class="avatar" id="offerAvatar"></span>
+            <div class="grow"><strong id="offerName"></strong><div class="muted" data-i18n="offer.waiting">Waiting for your driver to accept…</div></div>
+            <span class="count mono" id="offerCount"></span>
+          </div>
+        </div>
+
+        <!-- Who is coming: photo, rating, vehicle and plate; call and chat. -->
+        <div class="card hidden" id="driverCard">
+          <div class="driver-card">
+            <span class="avatar" id="dcAvatar"></span>
+            <div class="db">
+              <strong id="dcName"></strong>
+              <span class="stars" id="dcStars"></span>
+              <div class="muted" id="dcVehicle"></div>
+              <span class="plate hidden" id="dcPlate"></span>
+            </div>
+            <div class="round-btns">
+              <a id="dcCall" href="#" class="hidden" data-i18n-title="track.call" title="Call">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/></svg>
+              </a>
+              <button id="dcChat" type="button" data-i18n-title="order.chat" title="Chat">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Farsamo: extra work the technician quoted, each its own prepaid order. -->
+        <div class="card accent hidden" id="extrasCard">
+          <div class="section-title" data-i18n="extra.title">Extra work</div>
+          <div id="extrasList"></div>
+        </div>
+
+        <!-- Finished: how was it? One rating per job. -->
+        <div class="card hidden" id="rateCard">
+          <div class="section-title" style="text-align:center;" id="rateTitle" data-i18n="rate.title">How was your driver?</div>
+          <div class="rate-stars" id="rateStars"></div>
+          <div id="rateMore" class="hidden">
+            <input id="rateComment" type="text" maxlength="300" data-i18n-ph="rate.comment" placeholder="Anything to add? (optional)" />
+            <button id="rateSend" type="button" data-i18n="rate.send">Send rating</button>
+          </div>
+          <p class="muted hidden" id="rateDone" style="text-align:center;margin:0;"></p>
         </div>
 
         <!-- Once, after the first order: offer notifications at the moment they make sense. -->
@@ -453,10 +728,20 @@
 
       <!-- Account -->
       <section id="accountView" class="hidden">
-        <div class="screen-head"><h2 data-i18n="acct.title">Account</h2></div>
+        <div class="screen-head"><h2 data-i18n="acct.profile">Profile</h2></div>
         <div class="card">
-          <div class="muted" data-i18n="start.as">Signed in as</div>
-          <div style="font-weight:700;font-size:17px;" id="acctLogin"></div>
+          <div class="profile-head">
+            <span class="avatar" id="profileAvatar">👤</span>
+            <div class="grow">
+              <div style="font-weight:800;font-size:18px;" id="profileName"></div>
+              <div class="muted" id="acctLogin"></div>
+            </div>
+          </div>
+          <details class="bare" style="margin-top:10px;">
+            <summary class="muted" data-i18n="acct.name.edit">Change the name we greet you with</summary>
+            <input id="nameInput" type="text" maxlength="40" autocomplete="given-name" style="margin-top:8px;" data-i18n-ph="acct.name.ph" placeholder="Your name" />
+            <button class="secondary" id="nameSave" type="button" data-i18n="acct.name.save">Save</button>
+          </details>
           <!-- Phone accounts only: an email that can also sign in to this account. -->
           <details id="emailBox" class="hidden bare" style="margin-top:12px;">
             <summary data-i18n="email.title">Get sign-in codes by email</summary>
@@ -489,31 +774,6 @@
           </div>
         </div>
 
-        <div class="card hidden" id="walletCard">
-          <div class="between">
-            <div class="section-title" style="margin:0;" data-i18n="wallet.title">Wallet</div>
-            <strong class="mono" style="font-size:22px;">$<span id="walletBalance">0.00</span></strong>
-          </div>
-          <label for="topupAmount" data-i18n="wallet.topup.amount">Add money (USD)</label>
-          <input id="topupAmount" type="number" inputmode="decimal" step="0.01" min="1" placeholder="10.00" />
-          <label for="topupPhone" data-i18n="apppay.phone">Wallet number that pays</label>
-          <input id="topupPhone" type="tel" inputmode="tel" placeholder="90 123 4567" />
-          <div class="phone-hint muted" id="topupPhoneHint"></div>
-          <div id="topupButtons"></div>
-          <p class="callout hidden" id="topupStatus"></p>
-          <details class="bare" style="margin-top:12px;">
-            <summary class="muted" data-i18n="wallet.withdraw">Take money out</summary>
-            <label for="wdAmount" data-i18n="wallet.withdraw.amount">Amount (USD)</label>
-            <input id="wdAmount" type="number" inputmode="decimal" step="0.01" min="1" />
-            <label for="wdPhone" data-i18n="wallet.withdraw.phone">Send it to</label>
-            <input id="wdPhone" type="tel" inputmode="tel" placeholder="61 234 5678" />
-            <div class="phone-hint muted" id="wdPhoneHint"></div>
-            <button class="secondary" id="wdBtn" type="button" data-i18n="wallet.withdraw.btn">Request withdrawal</button>
-          </details>
-          <div class="section-title" style="margin-top:14px;" data-i18n="wallet.history">History</div>
-          <ul class="wallet-history scroll-list short" id="walletHistory"></ul>
-        </div>
-
         <div class="card hidden" id="pwSetBox">
           <div class="section-title" id="pwSetTitle" data-i18n="acct.pw.title.set">Set a password</div>
           <p class="callout hidden" id="pwResetNote" data-i18n="acct.pw.reset">You signed in with a code. Set a new password now.</p>
@@ -530,6 +790,16 @@
           <div id="pwSetStatus" class="muted" style="margin-top:8px;"></div>
           <p class="muted" style="margin:6px 0 0;font-size:13px;" data-i18n="acct.pw.notice">We email you whenever your password changes, and sign out your other devices.</p>
         </div>
+        <div class="card">
+          <div class="menu-list">
+            <button type="button" id="menuWallet"><span class="mi">👛</span><span data-i18n="wallet.title">Wallet</span><span class="chev">›</span></button>
+            <button type="button" id="menuInbox"><span class="mi">🔔</span><span data-i18n="inbox.title">Notifications</span><span class="chev">›</span></button>
+            <button type="button" id="menuSuggest"><span class="mi">💡</span><span data-i18n="sug.title">Suggest an item</span><span class="chev">›</span></button>
+            <button type="button" id="menuHelp"><span class="mi">❓</span><span data-i18n="acct.help">Help and FAQ</span><span class="chev">›</span></button>
+            <button type="button" id="menuAi"><span class="mi">✨</span><span>AI Caawiye</span><span class="chev">›</span></button>
+            <button type="button" id="menuTheme"><span class="mi">🌓</span><span data-i18n="acct.theme">Light or dark</span><span class="chev">›</span></button>
+          </div>
+        </div>
         <div class="section-title" data-i18n="role.staff">For our team</div>
         <a class="tile" href="/driver/"><span class="tile-body"><span class="tile-title" data-i18n="role.driver">I'm a driver</span></span><span class="chev">›</span></a>
         <a class="tile" href="/operator/"><span class="tile-body"><span class="tile-title" data-i18n="role.operator">I'm an operator</span></span><span class="chev">›</span></a>
@@ -541,6 +811,7 @@
 
       <!-- Help -->
       <section id="faqView" class="hidden">
+        <button class="linkbtn" id="faqBack" type="button" style="margin-bottom:12px;" data-i18n="nav.back">← Back</button>
         <div class="screen-head"><h2 data-i18n="faq.title">FAQ</h2></div>
         <button class="secondary" id="openChat" type="button" style="margin:0 0 14px;" data-i18n="help.open">Chat with us</button>
 
@@ -616,6 +887,12 @@
         </button>
       </header>
       <div class="thread chat-thread" id="helpThread" aria-live="polite"></div>
+      <div class="chips-row" id="helpChips">
+        <button class="chip" type="button" data-ask="help.chip.grocery">🧺 <span data-i18n="help.chip.grocery">Order groceries for me</span></button>
+        <button class="chip" type="button" data-ask="help.chip.bajaj">🛺 <span data-i18n="help.chip.bajaj">Book me a bajaj</span></button>
+        <button class="chip" type="button" data-ask="help.chip.near">📍 <span data-i18n="help.chip.near">Places near me</span></button>
+        <button class="chip" type="button" data-ask="help.chip.other">💬 <span data-i18n="help.chip.other">Other help</span></button>
+      </div>
       <footer class="chat-foot">
         <div class="composer">
           <input id="helpInput" type="text" maxlength="500" data-i18n-ph="help.ph" placeholder="Ask a question…" />
@@ -631,6 +908,14 @@
       </footer>
     </section>
 
+    <div class="sheet-back" id="sheetBack" hidden>
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+        <div class="grab"></div>
+        <h3 id="sheetTitle"></h3>
+        <div id="sheetBody"></div>
+      </div>
+    </div>
+
     <nav class="tabbar" aria-label="Main">
       <div class="tabbar-inner">
         <button class="tab" type="button" data-tab="home" aria-current="page">
@@ -641,13 +926,17 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg>
           <span data-i18n="nav.orders.tab">Orders</span>
         </button>
-        <button class="tab" type="button" data-tab="help">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14"/><path d="M12 17.5h.01"/></svg>
-          <span data-i18n="nav.faq">Help</span>
+        <button class="tab" type="button" data-tab="track">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></svg>
+          <span data-i18n="nav.track">Tracking</span><span class="tab-dot hidden" id="trackDot"></span>
+        </button>
+        <button class="tab" type="button" data-tab="wallet">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h13v4"/><path d="M3 7v11a2 2 0 0 0 2 2h15V9H5a2 2 0 0 1-2-2z"/><circle cx="16" cy="14.5" r="1.3"/></svg>
+          <span data-i18n="wallet.title">Wallet</span>
         </button>
         <button class="tab" type="button" data-tab="account">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></svg>
-          <span data-i18n="nav.account">Account</span>
+          <span data-i18n="acct.profile">Profile</span>
         </button>
       </div>
     </nav>
@@ -661,10 +950,12 @@
   <script src="/shared/i18n.js"></script>
   <script src="/shared/vendor/leaflet-1.9.4.js"></script>
   <script src="/shared/vendor/protomaps-leaflet-5.1.0.js"></script>
+  <script src="/shared/cities.js"></script>
   <script src="/shared/map.js"></script>
   <script src="/shared/location.js"></script>
   <script src="/shared/nav.js"></script>
   <script src="/shared/push.js"></script>
   <script src="/app.js"></script>
+  <script src="/features.js"></script>
 </body>
 </html>

@@ -1,5 +1,6 @@
 // CQRS read side for drivers. Powers the operator's assignment picker + driver stats panel.
 import { prisma } from '../db/prisma.js';
+import { driverRatings } from './ratings.js';
 
 // All drivers with their current workload (active = dispatched or in-transit).
 //
@@ -11,7 +12,8 @@ export async function getDriversWithStats() {
     prisma.driver.findMany({
       select: {
         id: true, name: true, msisdn: true, active: true, pin_set_at: true, email: true,
-        vehicle: true, online: true, location: { select: { updated_at: true } },
+        vehicle: true, online: true, role: true, trades: true, plate: true, photo_key: true,
+        location: { select: { updated_at: true } },
       },
       orderBy: { name: 'asc' },
     }),
@@ -34,8 +36,12 @@ export async function getDriversWithStats() {
 
   // The dashboard renders these as numbers; pg returned them as counts, so keep that.
   // Only whether an email is on file (so "re-send" can say where it goes), not the address.
-  return drivers.map(({ email, location, ...d }) => ({
+  const ratings = await driverRatings(drivers.map((d) => d.id));
+  return drivers.map(({ email, location, photo_key: photoKey, ...d }) => ({
     ...d,
+    has_photo: Boolean(photoKey),
+    rating: ratings.get(String(d.id))?.avg ?? null,
+    ratings: ratings.get(String(d.id))?.count ?? 0,
     has_email: Boolean(email),
     located_at: location?.updated_at ?? null,
     // An invited driver who hasn't chosen a PIN yet can't sign in — the desk needs to see that.
@@ -63,7 +69,7 @@ export async function getDriverById(id) {
 export async function getDriverSelf(id) {
   return prisma.driver.findUnique({
     where: { id: BigInt(id) },
-    select: { id: true, name: true, vehicle: true, online: true },
+    select: { id: true, name: true, vehicle: true, online: true, role: true, trades: true, plate: true },
   });
 }
 
