@@ -1,7 +1,7 @@
 // Email + password: signing in must not depend on an email arriving. And a password set on
 // someone else's email must stop working the moment the real owner proves the address.
 import { test, expect } from '@playwright/test';
-import { openApp, codeIn } from './helpers.js';
+import { openApp, codeIn, expectSignedInAs } from './helpers.js';
 
 const PASSWORD = 'market day 2026';
 
@@ -15,7 +15,7 @@ test('create an account with a password, sign out, sign back in — no email nee
   await page.fill('#pwPass2', PASSWORD);
   await page.click('#pwBtn');
   await expect(page.locator('#homeView')).toBeVisible();
-  await expect(page.locator('#signedInAs')).toHaveText(email);
+  await expectSignedInAs(page, email);
 
   await page.locator('.tabbar [data-tab="account"]').click();
   await expect(page.locator('#pwSetBox')).toBeVisible();

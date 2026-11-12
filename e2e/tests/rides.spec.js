@@ -23,18 +23,18 @@ test('book a car → pay in the app → nearest driver → rider code → drop-o
 
   const rider = await openApp(browser, testInfo, { permissions: ['geolocation'], geolocation: PICKUP });
   await signInCustomer(rider, somaliNumber());
-  await rider.click('#goRide');
+  await rider.click('#svcGrid [data-svc="bajaj"]');
   await expect(rider.locator('#pickupText')).toContainText('My location');
   await rider.fill('#placeSearch', 'Airport');
   await rider.locator('#placeResults .place-result').first().click();
   await expect(rider.locator('#dropoffText')).toContainText('Airport');
 
   // A fare for each vehicle; the car shows a driver nearby.
-  const car = rider.locator('#rideOptions .ride-option', { hasText: 'Car' });
+  const car = rider.locator('#rideOptions .ride-option', { hasText: 'Taxi' });
   await expect(car).toContainText('1 nearby');
   await car.click();
   const fare = (await car.locator('.ro-price').textContent()).trim();
-  await expect(rider.locator('#rideBook')).toHaveText(`Book Car · ${fare}`);
+  await expect(rider.locator('#rideBook')).toHaveText(`Book Taxi · ${fare}`);
   await rider.fill('#ridePhone', '612345678');
   await rider.click('#rideBook');
   await expect(rider.locator('#orderView')).toBeVisible();
@@ -86,7 +86,7 @@ test('book a car → pay in the app → nearest driver → rider code → drop-o
 test('a rider can cancel before a driver is found, and is owed a refund if they paid', async ({ browser }, testInfo) => {
   const rider = await openApp(browser, testInfo, { permissions: ['geolocation'], geolocation: PICKUP });
   await signInCustomer(rider, somaliNumber());
-  await rider.click('#goRide');
+  await rider.click('#svcGrid [data-svc="bajaj"]');
   await expect(rider.locator('#pickupText')).toContainText('My location');
   await rider.fill('#placeSearch', 'Lido');
   await rider.locator('#placeResults .place-result').first().click();

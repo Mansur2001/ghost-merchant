@@ -430,7 +430,11 @@ const fold = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-
 function searchPlaces(q) {
   const f = fold(q).trim();
   if (f.length < 2) return [];
-  return (placesCache || []).filter((p) => fold(p.name_en).includes(f) || fold(p.name_so).includes(f)).slice(0, 8);
+  // The customer's own city first: "Airport" in Mogadishu is Aden Adde, not Bosaso's.
+  const city = window.GMCity ? GMCity.current() : null;
+  const near = (p) => (city ? (p.city === city.id ? 0 : 1) * 1e9 + GMMap.distance(city.center, p) : 0);
+  return (placesCache || []).filter((p) => fold(p.name_en).includes(f) || fold(p.name_so).includes(f))
+    .sort((x, y) => near(x) - near(y)).slice(0, 8);
 }
 // Results as buttons; `onPick(place)` sets the point. OpenStreetMap results show how far they
 // are (no credit line: OpenStreetMap is credited in the privacy policy).
@@ -2242,6 +2246,8 @@ $('joinBtn').addEventListener('click', async () => {
   loadOwnerContact();
 });
 $('joinHome').addEventListener('click', () => showView('landingView'));
+// Signed out, Help lives on the landing page (the Profile tab asks to sign in first).
+$('landingHelp').addEventListener('click', () => goTab('help'));
 
 // Show the reference photo they picked, so they know it's attached.
 $('refPhoto').addEventListener('change', () => {

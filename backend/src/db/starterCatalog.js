@@ -12,6 +12,8 @@
 // knows each city checks every pin (Operator → Catalog → Places) and every price before launch.
 // Pharmacy items are over-the-counter only: nothing that needs a prescription.
 
+import { STOCK_IMAGES } from '../domain/stockImages.js';
+
 // [name_en, name_so, unit_en, unit_so, price, picture]
 export const STARTER_CATEGORIES = [
   {
@@ -197,7 +199,8 @@ export const STARTER_PLACES = [
   ['Galkayo', 'market', 'Galkayo Market', 'Suuqa Gaalkacyo', 6.7697, 47.4308],
 ];
 
-const stock = (slug) => (slug ? `stock/${slug}.jpg` : null);
+// Only a picture that is really bundled: an item without one shows its category icon.
+const stock = (slug) => (slug && STOCK_IMAGES.includes(`${slug}.jpg`) ? `stock/${slug}.jpg` : null);
 const itemRow = ([name_en, name_so, unit_en, unit_so, price, pic], i) => ({
   name_en, name_so, unit_en, unit_so, price, sort: i, image: stock(pic),
 });

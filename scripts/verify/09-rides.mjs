@@ -235,16 +235,18 @@ const legacy = await call('/orders', { method: 'POST', token: bob, body: { id: r
 chk('the legacy order shape (installed old apps) still works', legacy.status === 201 && legacy.body.order.kind === 'DELIVERY');
 
 console.log('\n── cancel and refunds ──');
+// Places come sorted by city; the destination must be in Mogadishu like the pickup.
+const lido = places.find((p) => p.name_en === 'Lido Beach');
 const r2 = randomUUID();
-const q2 = await call('/quote', { method: 'POST', token: alice, body: { kind: 'RIDE', pickup, dropoff: { placeId: stadium.id === airport.id ? places[0].id : places[0].id } } });
-const b2 = await call('/orders', { method: 'POST', token: alice, body: { kind: 'RIDE', id: r2, vehicle: 'bajaj', pickup, dropoff: { placeId: places[0].id }, phone: '+252612345678', expectedTotal: q2.body.quote?.options.find((o) => o.vehicle === 'bajaj').total } });
+const q2 = await call('/quote', { method: 'POST', token: alice, body: { kind: 'RIDE', pickup, dropoff: { placeId: lido.id } } });
+const b2 = await call('/orders', { method: 'POST', token: alice, body: { kind: 'RIDE', id: r2, vehicle: 'bajaj', pickup, dropoff: { placeId: lido.id }, phone: '+252612345678', expectedTotal: q2.body.quote?.options.find((o) => o.vehicle === 'bajaj').total } });
 chk('a second ride booked', b2.status === 201);
 const c2 = await call(`/orders/${r2}/cancel`, { method: 'POST', token: alice, body: {} });
 chk('unpaid ride cancelled; nothing owed', c2.status === 200 && c2.body.order.status === 'FAILED_REFUND'
   && sql(`SELECT count(*) FROM refunds WHERE order_id = '${r2}'`) === '0');
 // A paid bajaj ride with no free bajaj: Amina has deliveries, Cali has a rider (seed). It waits.
 const r3 = randomUUID();
-await call('/orders', { method: 'POST', token: alice, body: { kind: 'RIDE', id: r3, vehicle: 'bajaj', pickup, dropoff: { placeId: places[0].id }, phone: '+252612345678' } });
+await call('/orders', { method: 'POST', token: alice, body: { kind: 'RIDE', id: r3, vehicle: 'bajaj', pickup, dropoff: { placeId: lido.id }, phone: '+252612345678' } });
 await call(`/orders/${r3}/pay`, { method: 'POST', token: alice, body: { wallet: 'evc', phone: '612345678' } });
 const waiting = await waitFor(async () => {
   const o = (await call(`/orders/${r3}`, { token: alice })).body.order;

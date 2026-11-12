@@ -19,8 +19,8 @@ Change the owner with `backend/scripts/set-owner.mjs` on the server, never by ed
 
 ### Business posture — read before proposing features
 
-**The model: GuriKaabe is the merchant of record, not an escrow or a wallet.** (A customer
-wallet now exists for the client, switched off by default — invariant 6.) The customer
+**The model: GuriKaabe is the merchant of record, not an escrow.** (A customer wallet exists
+and is ON since 2026-11-11: the owner holds the stored-value licence — invariant 6.) The customer
 buys from GuriKaabe: one price per order (goods + delivery fee + margin), paid upfront to
 GuriKaabe's merchant wallet. The driver buys the goods with the **company's float** (GuriKaabe's
 own operating money), delivers, and the company keeps the fee. Revenue is the fee and margin on
@@ -31,10 +31,10 @@ frozen. Anything that looks like easy money in this niche (customer balances, sk
 flow, sidestepping telecom terms, harvesting contact lists, gray-market FX) is illegal, gets the
 merchant MSISDN frozen, or gets the app pulled from Play. **We don't build those.** Consequences:
 
-- **Every payment belongs to exactly one order.** No customer balance, no top-up, no wallet, no
-  customer-to-customer or customer-to-driver transfer, no credit carried to "next time". A
-  payment is spent on that order's goods, kept as its fee, or refunded — the refund ledger is
-  how the third is never forgotten.
+- **Every payment belongs to exactly one order — or to the licensed wallet's ledger.** No
+  customer-to-customer or customer-to-driver transfer, no credit typed in by a person. A payment
+  is spent on that order's goods, kept as its fee, or refunded (to the wallet when it was paid
+  from it) — the refund ledger is how the third is never forgotten.
 - **Drivers never hold customer money.** They buy with the company float; customer money is never
   forwarded to a driver's phone. Driver float and driver fees are company bookkeeping, done
   outside the app for now; when a payout API exists they become automated, audited transfers
@@ -115,17 +115,17 @@ customer's page flips to paid live.`
    pre-encoded. A bare `#` reaching the browser makes Android truncate the dial string.
    Each wallet's template is validated at boot (`domain/wallets.js`), so a bare `#` refuses to
    start rather than reaching a customer.
-6. **No stored value — unless the owner switches the wallet on.** By default: no balance, no
-   top-up; payments land in GuriKaabe's merchant wallet, one per order. The client asked for a
-   customer wallet anyway (2026-11-07), so it exists behind `WALLET_ENABLED` (default off):
-   holding balances is e-money, which normally needs a licence — turning it on is the owner's
-   legal decision, not a deploy. When on (`commands/wallet.js`): the append-only ledger
-   (`wallet_entries`, DB trigger) is the truth; balances never go below zero (CHECK) or above
-   `WALLET_MAX_BALANCE`; money comes IN only through the gateway (top-up reference UNIQUE in
-   `transactions`) or as a refund of a wallet-paid order (credited in the failing transaction,
-   refund row settled by `system:wallet`); it goes OUT only to pay one order (partial UNIQUE)
+6. **Stored value only through the ledger.** The customer wallet is ON (the owner holds the
+   licence, 2026-11-11; `WALLET_ENABLED=false` still switches it off). `commands/wallet.js`: the
+   append-only ledger (`wallet_entries`, DB trigger) is the truth; balances never go below zero
+   (CHECK) or above `WALLET_MAX_BALANCE`; money comes IN only through the gateway, or — in
+   operator mode, while the gateway has no keys — a USSD top-up the customer claims and an
+   OPERATOR confirms with the telecom reference from the merchant phone (`claimTopup` /
+   `confirmTopup`, the same check as an order payment); either way the reference is UNIQUE in
+   `transactions`. Or as a refund of a wallet-paid order (credited in the failing transaction,
+   refund row settled by `system:wallet`). It goes OUT only to pay one order (partial UNIQUE)
    or as a withdrawal an ADMIN sends and records with its reference. No route credits a
-   balance by hand.
+   balance without a telecom reference, and in api mode only the gateway does.
 7. **Domain events are written in the same transaction as the state they describe.** Commands
    call `enqueue(client, EVENT, payload)` with the transaction's client — never `publish()`
    directly (`events/outbox.js`). Publishing after COMMIT is two steps with a crash-shaped gap
@@ -138,7 +138,8 @@ customer's page flips to paid live.`
    missing feature. The same rule governs WebSocket `subscribe`.
 
 10. **No operator leverage over money, dispatch or people** (see the section below). Never add a
-   driver picker, a manual "mark paid" in api mode, an operator path that moves or closes money,
+   driver picker for STAFF (the customer's own choice of a ride driver is the one exception, and
+   it only ever offers the job), a manual "mark paid" in api mode, an operator path that moves or closes money,
    or a review screen that shows an applicant's contact details before the decision.
 9. **A driver step needs evidence, checked on the server** (`domain/proof.js`,
    `commands/proofs.js`). Pickup needs a `pickup_proof` photo; delivery needs the customer's
@@ -152,7 +153,12 @@ customer's page flips to paid live.`
 
 The desk coordinates; it does not decide who gets paid, who gets work, or who gets hired.
 
-- **Dispatch is automatic** (`domain/dispatch.js`, `commands/dispatch.js`). A paid order goes
+- **Dispatch is automatic** (`domain/dispatch.js`, `commands/dispatch.js`) — the only human
+  choice is the CUSTOMER's: a rider may pick a driver from the nearby list (one fare for all).
+  That driver is OFFERED the paid ride for 30 s (`domain/offers.js`; order stays
+  PAID_UNASSIGNED with `offer_driver_id`/`offer_expires_at`); a decline or silence
+  (`expireOffers`, every 5 s) adds them to `released_by` and auto-dispatch sends the nearest.
+  Nobody at the desk can choose. A paid order otherwise goes
   to the active, set-up driver with the fewest active orders (max 3), ties to whoever has
   waited longest (`drivers.last_assigned_at`). It runs in the payment's transaction, under a
   `pg_advisory_xact_lock` so two at once can't pick the same "free" driver. When nobody is free
@@ -174,7 +180,7 @@ The desk coordinates; it does not decide who gets paid, who gets work, or who ge
 ## Rides, catalog, maps, help chat
 
 GuriKaabe is **rides first, delivery second** (the Yassir model), on one order table
-(`orders.kind` RIDE | DELIVERY) and one state machine. Same merchant-of-record rule: every job
+(`orders.kind` RIDE | DELIVERY | PARCEL | SERVICE) and one state machine. Same merchant-of-record rule: every job
 is prepaid to the business wallet; no cash on delivery (drivers never hold customer money). A
 customer wallet exists but is OFF by default (invariant 6).
 
@@ -188,7 +194,8 @@ customer wallet exists but is OFF by default (invariant 6).
   boot: placeholder prices, approximate pins — check them before launch.
 - **Ride dispatch** (`domain/dispatch.js` `pickRideDriver`): the nearest ONLINE driver in the
   chosen vehicle with no job, a fix under 3 min old, within 8 km; 300 m bands, then longest
-  wait. Deliveries keep fewest-jobs rotation but skip offline drivers and anyone carrying a
+  wait — after the customer's chosen driver has had their 30 s offer (above). Anyone with a
+  live offer is skipped by every other dispatch. Deliveries keep fewest-jobs rotation but skip offline drivers and anyone carrying a
   rider. `drivers.online` is the driver's own switch.
 - **Ride proof**: pickup = the rider's 4-digit code (same `delivery_handoffs`, 5 tries) or a
   reason (flagged); drop-off = the GPS fix vs the destination (flagged if far, never refused).
@@ -197,7 +204,9 @@ customer wallet exists but is OFF by default (invariant 6).
   can be tested from abroad — dispatch stays local by itself (rides: within 8 km of a pickup
   checkout holds to Somalia). Sent to the customer of that driver's ACTIVE
   job (re-authorized per order) and to operators. Customers see a driver only while
-  DISPATCHED/IN_TRANSIT. The quote shows a COUNT of drivers nearby, never positions.
+  DISPATCHED/IN_TRANSIT. The quote shows a COUNT of drivers nearby and up to 5 to CHOOSE from
+  (`choiceCard`: first name, photo flag, plate, rating, minutes away) — never positions, never
+  a phone. The home banner (`GET /api/nearby`) is counts and minutes only.
 - **Maps**: Leaflet + protomaps-leaflet (vendored in `frontend/shared/vendor/`), street data
   from ONE self-hosted file `tiles/somalia.pmtiles` (`scripts/fetch-map-tiles.sh`), served by
   Caddy with range requests. No tile vendor, no key. Without the file: a plain grid with pins.
@@ -231,16 +240,51 @@ customer wallet exists but is OFF by default (invariant 6).
   search-as-you-type; our own `places` still filter as you type). Show "© OpenStreetMap
   contributors". The apps send `near` (the map's centre): ~28 km around it first, the country
   only if that is empty, in Nominatim's order (nearest-first ranked junk above the right place). Heavy use → our own Nominatim via `NOMINATIM_URL`. Only the query leaves.
+- **Parcels** (the Delivery tile, `kind = PARCEL`): sender's door → receiver's door, fee by road
+  distance (`parcelFeeCents`, `PARCEL_*` env). Contents (`details`, ≤500) and the receiver's
+  phone (`recipient_phone`, the number the driver calls — never an identity). Proof as a
+  delivery: a photo at pickup (checked against the SENDER's pin), the code at the door — the
+  sender passes it to the receiver. Dispatched like deliveries.
+- **Farsamo** (`kind = SERVICE`, `trades` table, admin-edited): the customer picks a trade and
+  pays its fixed **visit fee** upfront. Technicians are driver accounts with `role =
+  'technician'` and `trades` (same invite, same PIN app); `pickTechnician` sends the nearest
+  free online one with that trade, one visit at a time; drivers never get visits and
+  technicians nothing else. Proof: a photo of the problem to start (`/secured`, checked against
+  the house's pin), the customer's code to finish. **Extra work** is a new prepaid SERVICE
+  order the technician quotes in the app (`commands/extraWork.js`, $0.50–$500, one unpaid at a
+  time, `parent_order_id`); once paid it goes straight to that technician. No cash, ever.
+- **Ratings** (`ratings`, one per finished job, 1–5, 14 days, audited): the average is what
+  riders choose drivers by. Admin sets each driver's plate and photo (public pictures: type from
+  the BYTES — JPEG/PNG/WebP only, `domain/images.js`; a driver photo needs a session).
+- **Catalog pictures and suggestions**: every starter item carries a licence-free stock photo
+  (`frontend/shared/img/catalog/`, sources and licences in its `LICENSES.txt`;
+  `catalog_items.image = 'stock/<file>'` or `'obj/<key>'` for an upload). Categories belong to
+  a home tile (`service`: food, grocery, pharmacy, water, shop); pharmacy is over-the-counter
+  only. Customers SUGGEST an item with a photo (`catalog_submissions`): any operator forwards
+  or rejects (a rejection deletes the photo); an ADMIN prices and publishes it — prices stay an
+  admin decision. The starter upgrade (`upgradeStarter`, `app_settings.starter_version`) only
+  ADDS to an existing install: new categories, pictures for items without one, cities without
+  places, trades. It never changes a price or a name.
+- **Free delivery** (`app_settings.free_delivery`, admin, audited): waives a DELIVERY fee when
+  the items reach `minSubtotal`; never a ride, parcel or visit fee. The order records `promo`.
+- **Inbox** (the bell, `queries/inbox.js`): DERIVED from order events, wallet entries,
+  suggestion decisions and extra-work quotes; only `users.notifications_seen_at` is stored.
 - **Help chat** (`domain/assistant.js`): FAQ first (EN + plain Somali), then a hosted open
   model (Groq `openai/gpt-oss-120b` by default — `llama-3.3-70b-versatile` was retired there in
   Aug 2026; reasoning models get `reasoning_effort: low` and room to answer, `assistant/client.js`
   `requestBody`), any OpenAI-compatible URL, only when `ASSISTANT_URL`+`_API_KEY` are set.
+  **Drafts** (`domain/assistantDraft.js`, the mockup's "Raashin iiga dalbo" / "Bajaj ii dalbo" /
+  "Goobaha ugu dhow"): a REQUEST (not a question) becomes a draft — cart lines matched to real
+  catalog ids (quantities in digits or Somali/English words; the model is asked for ids only
+  when no words match, and its answer is checked), or a ride's vehicle and destination words,
+  or "places near me". The app shows a button that opens the normal screen; the customer
+  checks, sees the server's price and pays. It still never places, pays or changes anything.
   Failures are logged with their reason; `scripts/assistant-check.mjs` on the server shows the
   live answer and, on a bad model name, the models the key can use. Open to everyone, signed
   in or not (`POST /assistant` is public, 30 per 10 min per account or per IP; an `orderId`
   needs that order's owner signed in). UI: the standard support
   widget — a corner launcher, a collapsible panel (bottom sheet on a phone), hidden on screens
-  with their own bottom button (ride booking, cart, checkout). It has NO tools and can't act; it sees an order STATE, never phone/place/code; nothing
+  with their own bottom button (ride booking, cart, checkout, parcel, visit). It has NO tools and can't act (a draft is a button the customer taps); it sees an order STATE, never phone/place/code; nothing
   typed is stored; "Talk to a person" = the order chat. Self-hosting on the VPS CPU was tried
   (45–70 s per answer) and dropped — the owner chose a hosted model, not the VPS. This is the
   second bounded vendor exception after Twilio: it carries questions, never money or
@@ -607,7 +651,23 @@ Three photo types, stored in MinIO and indexed in `order_photos`:
 framework-free to respect the SRS data budget (initial load < 1.5MB). Each PWA has a Service
 Worker that cache-first serves its shell.
 
-- **User**: **Create account** or **Sign in** (landing buttons + a switch on the auth screen).
+- **User** (the stakeholder mockup, 2026-11-11 — `features.js` on top of `app.js`; classic
+  scripts share top-level names, so `app.js` calls `renderHome`, `renderSteps5`… defined there,
+  guarded where it runs before `features.js` loads): tabs **Home / Orders / Tracking / Wallet /
+  Profile** (Help and FAQ live under Profile, the AI widget everywhere). Home: city picker
+  (`shared/cities.js`, `gm_city`, never sent to the server — it only centres maps), the bell,
+  "Hello Mudane & Marwo", the banner, search (services + catalog, Enter asks AI), the eight
+  tiles (Bajaj, Taxi, Cunto, Raashin, Farmashiye, Farsamo, Biyo, Delivery), a live
+  "nearest bajaj N min" strip, the free-delivery strip, AI Caawiye card. Shops are picture
+  cards by tile; the ride screen has "Dooro Bajaaj" (choose your driver) and the payment row
+  (wallet or mobile money; wallet pays at once after booking when it covers the fare); tracking
+  has the five steps (La xaqiijiyay → Diyaarin → Socda → Isku dhow (<500 m) → La gaarsiiyay), a
+  live ETA, the driver card (photo, ★, vehicle, plate, chat), the offer countdown, extra work,
+  the rating, and Share (words only — tracking needs the account, so no link). The design
+  never shows a "1–2 minutes" promise: ETAs are the route's (owner's call). No call button to
+  the driver: customers don't get drivers' numbers (the strip and card show no phone).
+  Light theme by default, brand yellow `#ffc20e` (`--gold-ink` for yellow text on white).
+- **User (sign-in and lists)**: **Create account** or **Sign in** (landing buttons + a switch on the auth screen).
   Both are the same email code — the first verified code creates the account — the switch only
   changes the words, because people look for "sign up". Checkout asks for the phone the driver calls
   (filled with the last one used, `gm_contact`). Session token in `localStorage`
@@ -618,7 +678,11 @@ Worker that cache-first serves its shell.
   live map; Account has notifications and (when on) the wallet. Deep links `/?order=<id>` and
   `/?wallet=1` come from tapped notifications. Order lists cut long text with "…" inside the
   card (`.tile-sub` must be `display: block` for the ellipsis to apply).
-- **Driver**: PIN login → token in `sessionStorage` (`driverToken`); the socket authenticates
+- **Driver** (also technicians — `role` decides the words and the jobs): ride offers at the
+  top of the job list with a 30 s countdown (Accept / Decline, buzz); a parcel shows its
+  contents and a call link to the receiver; a visit shows the problem, "Start the job" (photo)
+  / "Job done" (code), and a form to quote extra work.
+  PIN login → token in `sessionStorage` (`driverToken`); the socket authenticates
   then joins `subscribe_driver` (its own feed, not the operator firehose). Queue shows **only
   orders the operator assigned to this driver** — there is no shared self-serve pool. An
   **online switch** (dispatch only picks online drivers; online = sharing position), a job map,
@@ -626,6 +690,10 @@ Worker that cache-first serves its shell.
   new-job buzz, `/driver/?job=<id>` deep link. Order detail can capture a delivery-proof photo.
 - **Operator**: password → token in `sessionStorage` (`opToken`). Confirms payments (while in
   operator mode), watches dispatch happen, checks flagged deliveries, chats. No driver picker.
+  `extras.js` adds **Suggestions** (review; admins price and publish), **Top-ups** (confirm a
+  USSD wallet top-up with the merchant phone's reference) and **Promo** (free delivery, admin).
+  Drivers: role/trades/plate/photo (admin) and ratings. Catalog: home tile per category, a
+  stock-picture picker or an upload per item, Farsamo trades and their fees.
   A Drivers panel lists the roster with live workload stats, online state and vehicle (admins
   set it); **Live map**; **Catalog & places** (admins edit, audited); wallet withdrawals sit in
   Refunds (admins). English only.
@@ -674,8 +742,11 @@ never cache `/api`, `/ws` or `/tiles` (range requests on a 500 MB file). This is
 
 ## Seeding
 
-Also: the starter catalog/places, three drivers (Amina bajaj, Bashir car — both OFFLINE so the
-waiting order stays waiting; Cali bajaj, online with a ride), two rides and one priced cart.
+Also: the starter catalog/places/trades, four staff on the driver app (Amina bajaj BAJ 123,
+Bashir car — both OFFLINE so the waiting order stays waiting; Cali bajaj, online with a ride;
+Daahir, a technician (plumber, electrician) on a visit with extra work quoted), rides (two
+finished and rated), a parcel, one priced cart, a $25.60 wallet, a USSD top-up waiting for the
+desk, and a customer suggestion waiting for review.
 
 
 `backend/src/db/seed.js` (`docker compose exec backend npm run seed`). `TRUNCATE … RESTART
@@ -697,13 +768,15 @@ Guards (`db/seedSafety.js`), because the seed truncates everything and its passw
 ## Testing
 
 ```bash
-cd backend && npm install && npm test   # 533 Jest unit tests, ESM via --experimental-vm-modules
+cd backend && npm install && npm test   # 574 Jest unit tests, ESM via --experimental-vm-modules
 ./scripts/verify/run-all.sh             # live suites over real HTTP + WebSocket
 ```
 
 Pure-domain suites need no DB; `payments` and `outbox` mock the pg transaction and event bus
 (`jest.unstable_mockModule`). `tests/setup/env.js` seeds the env vars `config.js` requires at
 import. Jest is a devDependency — the Docker image (`npm install --omit=dev`) doesn't ship it.
+
+**Full-app suite** `scripts/verify/10-full-app.mjs` (96 checks: choosing a driver — offer, accept, decline, expiry — parcels, visits and extra work, ratings, suggestions and pictures, free delivery, USSD top-ups, the inbox, AI drafts, who may see what). Run like 09.
 
 **Rides suite** `scripts/verify/09-rides.mjs` (82 checks over HTTP + WebSocket, against
 staging — rides, carts, WaafiPay, wallet ledger, permissions: it needs the WaafiPay simulator).
@@ -783,8 +856,13 @@ rider code), the generic catalog + cart, live maps with the self-hosted Somalia 
 turn-by-turn navigation on our own OSRM, OpenStreetMap place search, the help-chat widget on
 Groq, web push notifications, Help → Report a problem with desk triage, and recovery of a
 locked-out admin
-(`scripts/reset-staff-access.mjs`). Built and OFF: WaafiPay (no merchant keys yet), the
-customer wallet (`WALLET_ENABLED`, licence question), Android push (needs Firebase).
+(`scripts/reset-staff-access.mjs`). Built and OFF: WaafiPay (no merchant keys yet), Android
+push (needs Firebase). **Built 2026-11-11, branch `full-app` (the stakeholder mockup):** the
+new customer app, choosing your driver, parcels, Farsamo, ratings, catalog pictures and
+suggestions, free delivery, the inbox, AI drafts, and the wallet switched ON (licence held;
+top-ups over USSD confirmed by the desk until WaafiPay has keys). Production needs migrations
+`20261111090000`/`20261111091000` (run on boot) and, if its `.env` says
+`WALLET_ENABLED=false`, that line removed.
 The Android app builds and installs (`0.3.0`, versionCode 7, signed; upload key
 `~/gurikaabe-release.jks`); build 7 predates the chat widget, push and navigation — the next
 upload is build 8.

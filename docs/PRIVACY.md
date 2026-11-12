@@ -1,6 +1,6 @@
 # GuriKaabe — Privacy Policy
 
-**Last updated: 21 October 2026**
+**Last updated: 11 November 2026**
 
 > **You must publish this at a public URL before submitting to Google Play** — the Play
 > Console requires a link, and the Data Safety form's answers must match what this says.
@@ -28,7 +28,12 @@ we do not share it with advertisers, and we never see or hold your money.
 | **Order contents and chat messages** | To fulfil the order and resolve disputes. | With the order |
 | **Photos you attach** | A reference photo helps the driver find the right item; a delivery-proof photo protects both you and the driver in a dispute. | With the order |
 | **Payment details** (amount, and the transaction number from your mobile-money message, and which wallet you used, if you or our operator enter it) | So our operator can confirm your payment arrived, and so one payment can't be counted for two orders. | With the order |
+| **A rating** (1–5 stars, optional comment) after a finished job | So riders can choose good drivers and we can spot bad service. Riders see only a driver's average. | While your account exists |
+| **Item suggestions** (a name, a note, a photo you take) | So we can add things you want to the shop. A suggestion we reject loses its photo at once; one we accept becomes a public shop picture. | Until decided (rejected photos), or as long as the item is sold |
+| **Your wallet** (balance, top-ups, payments, refunds, withdrawals) | GuriKaabe is licensed to hold a customer balance. Every movement is a ledger line, kept to settle any question about your money. | While your account exists, then as accounting law requires |
+| **A first name you choose** (optional) | To greet you in the app. | Until you change or remove it |
 | **Name and phone number**, and an email if the admin uses one — *drivers and operators only* | To create your staff account. We send you a one-time setup code, by text or email, so you can choose your own PIN or password. | While your account exists |
+| **A driver's photo, plate and vehicle** — *drivers only* | Riders choose a driver, and recognise them at the kerb, by photo, first name, plate and rating. Shown only to signed-in customers. | While the driver works with us |
 | **Photos of an ID, front and back** — *only if you apply to be a driver or operator* | Drivers carry other people's money and goods, so we confirm who they are before issuing an account. | **Both images are deleted the moment the application is decided.** Never collected from customers. |
 
 We do **not** collect: your contacts, your location in the background or when the app is
@@ -41,10 +46,13 @@ copy after the decision, so a future breach cannot expose the ID of someone who 
 
 ## Money
 
-**We never take custody of your money.** Payment goes directly from you to the merchant's
-mobile-money account using your own phone's dialer. We do not process the payment, hold a
-balance, or store card or bank details. Our operator checks that your payment reached the
-merchant, then marks your order paid. Refunds are arranged directly and off-platform.
+You pay GuriKaabe's merchant mobile-money account with your own phone's dialer (or approve a
+prompt on your phone), or from your **GuriKaabe Wallet**. We never store card or bank details or
+your mobile-money PIN. Our operator checks that a payment reached the merchant before an order
+— or a wallet top-up — counts as paid, using the transaction number from the telecom, which can
+only ever be used once. Money in your wallet is yours: it is spent only on orders you place,
+refunds of wallet-paid orders go back to it at once, and you can ask to withdraw it to your
+own number.
 
 ## How your data is used and shared
 
@@ -58,6 +66,16 @@ Your order is visible to:
 if you chose it, by email through Twilio SendGrid. It receives your phone number or email and
 the text of the message (which contains the code) only to deliver it, and nothing else about
 you or your orders.
+
+**Riders and drivers.** When you book a ride you see a few nearby drivers' first names,
+photos, plates, ratings and how many minutes away they are — never where they are, and never
+their phone number. A driver sees your pickup only after accepting.
+
+**Help chat.** Questions you type in the help chat that our built-in answers can't cover are
+sent to a hosted AI model (Groq) to word an answer, with the status of the order you are asking
+about — never your name, phone, address or delivery code. Nothing you type there is stored by
+us. The assistant can suggest a cart or a ride for you to check; it cannot place, pay for or
+change anything.
 
 **Maps.** Map data © OpenStreetMap contributors, available under the Open Database License
 (openstreetmap.org/copyright). The street map is drawn with Protomaps from a copy kept on our

@@ -1,12 +1,12 @@
 // Report a problem (Help) -> Bug reports (desk). The team bug tracker's three outcomes:
 // inline field errors, "filed as #N", and a network failure that keeps what was typed.
 import { test, expect } from '@playwright/test';
-import { openApp, signInCustomer, signInOperator, somaliNumber, SEED, goSection } from './helpers.js';
+import { openApp, signInCustomer, signInOperator, somaliNumber, SEED, goSection, openHelp } from './helpers.js';
 
 test('a signed-out visitor reports a bug: inline errors, then "filed as #N"; the desk triages it', async ({ browser }, testInfo) => {
   const page = await openApp(browser, testInfo);
   await page.goto('/');
-  await page.click('.tabbar [data-tab="help"]');
+  await openHelp(page);
   await page.locator('#bugBox summary').click();
   await expect(page.locator('#bugEmailWrap')).toBeVisible(); // signed out: optional email offered
 
@@ -55,7 +55,7 @@ test('a signed-out visitor reports a bug: inline errors, then "filed as #N"; the
 test('a signed-in customer reports: account attached from the session, no email asked', async ({ browser }, testInfo) => {
   const page = await openApp(browser, testInfo);
   await signInCustomer(page, somaliNumber());
-  await page.click('.tabbar [data-tab="help"]');
+  await openHelp(page);
   await page.locator('#bugBox summary').click();
   await expect(page.locator('#bugEmailWrap')).toBeHidden();
   await page.fill('#bugTitle', 'Somali text cut off');

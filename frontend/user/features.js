@@ -855,7 +855,9 @@ async function loadProfile() {
   const res = await api('/me');
   myName = res.name || '';
   $('profileName').textContent = myName || t('home.sir');
-  $('profileAvatar').textContent = (myName || myPhone || '?').trim()[0]?.toUpperCase() || '👤';
+  // A letter of their name (or email); a phone number has none worth showing.
+  const letter = (myName || myPhone || '').trim().match(/\p{L}/u);
+  $('profileAvatar').textContent = letter ? letter[0].toUpperCase() : '👤';
   $('nameInput').value = myName;
 }
 $('nameSave').addEventListener('click', async () => {

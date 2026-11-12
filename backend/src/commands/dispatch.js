@@ -60,8 +60,10 @@ export async function dispatchOrder(tx, orderId) {
   `;
   const order = rows[0];
   if (order?.status !== STATUS.PAID_UNASSIGNED) return null;
-  // Someone is deciding: let them. The sweep (expireOffers) moves on when time is up.
-  if (offerLive(order)) return null;
+  // Someone is deciding: let them. And an offer whose time is up but which the sweep hasn't
+  // closed yet is the sweep's to close (it records it and moves on) — dispatching it here would
+  // offer the same driver a fresh 30 s and keep the rider waiting.
+  if (order.offer_driver_id != null) return null;
   const released = new Set((order.released_by || []).map(String));
   const candidates = await dispatchCandidates(tx);
   const pool = candidates.filter((d) => !released.has(String(d.id)));

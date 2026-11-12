@@ -1,6 +1,6 @@
 // Email codes: a sign-in of its own (new customers too), or an extra way into a phone account.
 import { test, expect } from '@playwright/test';
-import { openApp, signInCustomer, codeIn, usNumber, somaliNumber } from './helpers.js';
+import { openApp, signInCustomer, codeIn, usNumber, somaliNumber, expectSignedInAs } from './helpers.js';
 
 test('link an email, then sign in by email', async ({ browser }, testInfo) => {
   // Signing in consumes the code (and with it the 60s resend cooldown), so the email request
@@ -52,7 +52,7 @@ test('link an email, then sign in by email', async ({ browser }, testInfo) => {
   await page.click('#verifyBtn');
   await expect(page.locator('#homeView')).toBeVisible();
   // Same account as the phone sign-in: the email only found it.
-  await expect(page.locator('#signedInAs')).toContainText(number.replace(/\D/g, '').slice(-4));
+  await expectSignedInAs(page, number.replace(/\D/g, '').slice(-4), { exact: false });
 });
 
 test('the Phone | Email switch swaps the box, both ways', async ({ browser }, testInfo) => {
@@ -82,13 +82,14 @@ test('a new customer signs up with only an email, then orders with a phone for t
   await page.click('#sendCodeBtn');
   await page.fill('#codeInput', await codeIn(page.locator('#otpStatus')));
   await page.click('#verifyBtn');
-  await expect(page.locator('#signedInAs')).toHaveText(email);
+  await expectSignedInAs(page, email);
   // Its only way in is this email: nothing to add or remove.
   await expect(page.locator('#emailBox')).toBeHidden();
+  await page.click('.tabbar [data-tab="home"]');
 
   // No phone on the account, so the order asks for one. No GPS on this "phone" either: the
   // door is chosen from the places list instead.
-  await page.click('#goShop');
+  await page.click('#svcGrid [data-svc="grocery"]');
   await page.locator('#catItems .step-add').first().click();
   await page.click('#cartOpen');
   await page.fill('#dropSearch', 'Bakaa');
