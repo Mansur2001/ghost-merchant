@@ -25,7 +25,7 @@ test('driver: start navigation on a job -> next turn, distance and arrival time 
 test('customer: search OpenStreetMap for a destination; the road route is drawn', async ({ browser }, testInfo) => {
   const rider = await openApp(browser, testInfo, { permissions: ['geolocation'], geolocation: { latitude: 2.0478, longitude: 45.3291 } });
   await signInCustomer(rider, somaliNumber());
-  await rider.click('#svcGrid [data-svc="bajaj"]');
+  await rider.click('#goRide');
   await expect(rider.locator('#pickupText')).toContainText('My location');
   await rider.fill('#placeSearch', 'Banadir Hospital');
   await rider.press('#placeSearch', 'Enter');

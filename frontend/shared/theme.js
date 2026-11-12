@@ -5,7 +5,7 @@
   var KEY = 'gm_theme';
   var root = document.documentElement;
 
-  function current() { return root.getAttribute('data-theme') || 'light'; }
+  function current() { return root.getAttribute('data-theme') || 'dark'; }
   function updateBtn() {
     var b = document.getElementById('themeToggle');
     if (!b) return;
@@ -20,10 +20,11 @@
   }
   function toggle() { apply(current() === 'light' ? 'dark' : 'light'); }
 
-  // Resolve initial theme immediately (saved > light, the brand's look in the stakeholder design).
+  // Resolve initial theme immediately (saved > OS preference > dark default).
   var saved;
   try { saved = localStorage.getItem(KEY); } catch (e) { saved = null; }
-  root.setAttribute('data-theme', saved || 'light');
+  var prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+  root.setAttribute('data-theme', saved || (prefersLight ? 'light' : 'dark'));
 
   window.GmTheme = { toggle: toggle, apply: apply };
   document.addEventListener('DOMContentLoaded', function () {

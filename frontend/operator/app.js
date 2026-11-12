@@ -115,15 +115,11 @@ const ICON = {
   account: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/>',
   map: '<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>',
   catalog: '<path d="M4 7h16l-1.5 12a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2z"/><path d="M9 7a3 3 0 0 1 6 0"/>',
-  suggestions: '<path d="M9 18h6M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/>',
-  topups: '<path d="M3 7a2 2 0 0 1 2-2h13v4"/><path d="M3 7v11a2 2 0 0 0 2 2h15V9H5a2 2 0 0 1-2-2z"/><path d="M15 14h3"/>',
-  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   bugs: '<path d="M9 9V7a3 3 0 0 1 6 0v2"/><rect x="7" y="9" width="10" height="11" rx="5"/><path d="M3 13h4M17 13h4M4 7l3 3M20 7l-3 3M4 20l3-3M20 20l-3-3"/>',
 };
 const SECTIONS = [
   ['orders', 'Orders'], ['map', 'Live map'], ['deliveries', 'Deliveries'], ['refunds', 'Refunds'],
-  ['drivers', 'Drivers'], ['catalog', 'Catalog'], ['suggestions', 'Suggestions'], ['topups', 'Top-ups'], ['bugs', 'Bug reports'],
-  ['settings', 'Promo', 'admin'], ['team', 'Team', 'admin'], ['audit', 'Audit log', 'admin'], ['account', 'Account'],
+  ['drivers', 'Drivers'], ['catalog', 'Catalog'], ['bugs', 'Bug reports'], ['team', 'Team', 'admin'], ['audit', 'Audit log', 'admin'], ['account', 'Account'],
 ];
 let panel = 'orders';
 const counts = {};
@@ -146,9 +142,6 @@ function setPanel(id) {
   if (id === 'map') loadMap();
   if (id === 'catalog') loadCatalogAdmin();
   if (id === 'bugs') loadBugs();
-  if (id === 'suggestions') loadSuggestions();
-  if (id === 'topups') loadTopups();
-  if (id === 'settings') loadSettings();
 }
 function setCount(id, n) {
   if ((counts[id] || 0) === n) return;
@@ -372,7 +365,7 @@ function orderRow(o) {
   const sub = isClaimed(o)
     ? `💰 Customer says they paid${o.claim_wallet ? ` with ${escapeHtml(o.claim_wallet.name)}` : ''} · ${timeAgo(o.payment_claimed_at)}`
     : `${o.driver_name ? `${o.kind === 'RIDE' ? VEHICLE_ICON[o.vehicle] || '🚗' : '🛵'} ${escapeHtml(o.driver_name)} · ` : ''}${timeAgo(o.created_at)}`;
-  const what = o.kind === 'RIDE' ? `${VEHICLE_ICON[o.vehicle] || '🚗'} → ` : { PARCEL: '📦 ', SERVICE: '🛠️ ' }[o.kind] || '🛍️ ';
+  const what = o.kind === 'RIDE' ? `${VEHICLE_ICON[o.vehicle] || '🚗'} → ` : '🛍️ ';
   return `<button class="lrow" type="button" data-open="${o.id}">
       <span class="l1"><span class="mono">#${GMIds.shortId(o.id)}</span><span class="t">${what}${escapeHtml(o.landmark_text || '—')}</span></span>
       <span class="l2">${sub}</span>
@@ -394,18 +387,11 @@ function renderOrderDetail(o) {
   const [chip, tone] = STATUS_CHIP[o.status] || [o.status, ''];
   const items = (o.items || []).map((it) => escapeHtml(it.text || '')).filter(Boolean).join(', ') || '—';
   const ride = o.kind === 'RIDE';
-  const job = o.kind === 'PARCEL'
-    ? `<dt>Job</dt><dd>📦 Parcel${o.distance_m ? ` · ${(o.distance_m / 1000).toFixed(1)} km` : ''}</dd>
-       <dt>Contents</dt><dd>${escapeHtml(o.details || '—')}</dd><dt>Collect</dt><dd>${escapeHtml(o.pickup_text || '—')}</dd>
-       <dt>Deliver</dt><dd>${escapeHtml(o.landmark_text || '—')}</dd><dt>Receiver</dt><dd>${o.recipient_phone ? `<a href="tel:${escapeHtml(o.recipient_phone)}">${escapeHtml(o.recipient_phone)}</a>` : '—'}</dd>`
-    : o.kind === 'SERVICE'
-      ? `<dt>Job</dt><dd>🛠️ ${o.parent_order_id ? 'Extra work' : 'Visit'} · ${escapeHtml(o.trade || '')}</dd><dt>Problem</dt><dd>${escapeHtml(o.details || '—')}</dd>
-         ${o.parent_order_id ? `<dt>For visit</dt><dd class="mono">#${GMIds.shortId(o.parent_order_id)}</dd>` : ''}`
-    : ride
+  const job = ride
     ? `<dt>Job</dt><dd>${VEHICLE_ICON[o.vehicle] || '🚗'} Ride (${escapeHtml(o.vehicle || '')})${o.distance_m ? ` · ${(o.distance_m / 1000).toFixed(1)} km` : ''}</dd>
        <dt>Pickup</dt><dd>${escapeHtml(o.pickup_text || '—')}</dd><dt>Destination</dt><dd>${escapeHtml(o.landmark_text || '—')}</dd>`
     : `<dt>Job</dt><dd>🛍️ Delivery${o.pickup_text ? ` from ${escapeHtml(o.pickup_text)}` : ''}${o.distance_m ? ` · ${(o.distance_m / 1000).toFixed(1)} km` : ''}</dd>
-       ${o.fee != null ? `<dt>Price</dt><dd>${money(o.subtotal)} goods + ${money(o.fee)} delivery${o.promo ? ' <span class="badge ok">free delivery promo</span>' : ''}</dd>` : ''}`;
+       ${o.fee != null ? `<dt>Price</dt><dd>${money(o.subtotal)} goods + ${money(o.fee)} delivery</dd>` : ''}`;
   const map = o.lat != null && o.lng != null
     ? `<a href="https://www.openstreetmap.org/?mlat=${o.lat}&mlon=${o.lng}#map=18/${o.lat}/${o.lng}" target="_blank" rel="noopener">Open map ↗</a>`
     : '<span class="muted">No GPS pin — landmark only</span>';
@@ -423,11 +409,6 @@ function renderOrderDetail(o) {
       <input id="payref-${o.id}" data-payref="${o.id}" value="${escapeHtml(o.payment_claim_ref || '')}" autocapitalize="characters" spellcheck="false" />
       <button data-confirm="${o.id}">Confirm ${money(o.total_amount)} received</button>
       <p class="muted" style="margin:8px 0 0;">The number is checked against every other payment, and your name is recorded with it.</p></div>`;
-  } else if (o.status === 'PAID_UNASSIGNED' && o.offer_driver_id) {
-    const who = drivers.find((d) => String(d.id) === String(o.offer_driver_id));
-    action = `<div class="dsec"><h4>Driver</h4><p class="muted" style="margin:0;">The rider chose <strong>${escapeHtml(who?.name || 'a driver')}</strong>; they have until ${new Date(o.offer_expires_at).toLocaleTimeString()} to accept. Then the nearest free driver gets it automatically.</p></div>`;
-  } else if (o.status === 'PAID_UNASSIGNED' && o.kind === 'SERVICE') {
-    action = `<div class="dsec"><h4>Technician</h4><p class="muted" style="margin:0;">Paid. The nearest free online technician for this trade gets it automatically. Nobody picks.</p></div>`;
   } else if (o.status === 'PAID_UNASSIGNED') {
     action = o.kind === 'RIDE'
       ? `<div class="dsec"><h4>Driver</h4><p class="muted" style="margin:0;">Paid. The system gives it to the nearest free online ${escapeHtml(o.vehicle || '')} driver within 8 km, as soon as there is one. Nobody picks.</p></div>`
@@ -757,7 +738,7 @@ async function loadDrivers() {
   $('drivers').innerHTML = drivers.length
     ? drivers.map((d) => `<button class="lrow" type="button" data-open="${d.id}">
         <span class="l1"><span>${VEHICLE_ICON[d.vehicle] || '🛵'}</span><span class="t">${escapeHtml(d.name)}</span></span>
-        <span class="l2">${d.role === 'technician' ? '🛠️ technician · ' : ''}${d.online ? 'online' : 'offline'} · ${escapeHtml(d.msisdn)} · ${d.active_orders} active · ${d.delivered_orders} done${d.rating ? ` · ★ ${d.rating} (${d.ratings})` : ''}</span>
+        <span class="l2">${d.online ? 'online' : 'offline'} · ${escapeHtml(d.msisdn)} · ${d.active_orders} active · ${d.delivered_orders} done</span>
         <span class="side">${d.setup_pending ? '<span class="badge pending">Waiting for setup</span>' : ''}
           <span class="badge ${d.active ? 'ok' : 'fail'}">${d.active ? 'Active' : 'Off'}</span></span>
       </button>`).join('')
@@ -782,21 +763,7 @@ function openDriver(id) {
         <dt>Online</dt><dd>${d.online ? 'Yes' : 'No'}${d.located_at ? ` · last position ${timeAgo(d.located_at)}` : ' · no position yet'}</dd>
         <dt>Now</dt><dd>${d.active_orders} active</dd>
         <dt>All time</dt><dd>${d.delivered_orders} delivered</dd>
-        <dt>Rating</dt><dd>${d.rating ? `★ ${d.rating} from ${d.ratings} customer(s)` : 'No ratings yet'}</dd>
-        <dt>Role</dt><dd>${d.role === 'technician' ? `Technician · ${escapeHtml((d.trades || []).join(', ') || 'no trades yet')}` : 'Driver'}</dd>
-        <dt>Plate</dt><dd>${escapeHtml(d.plate || '—')}</dd>
-      </dl>
-      <div class="avatar-op" id="drvPhotoBox">${d.has_photo ? '' : '<span class="muted">No photo yet</span>'}</div></div>
-      ${me?.is_admin ? `<div class="dsec"><h4>What customers see, and which jobs</h4>
-        <p class="muted" style="margin:0 0 8px;">Riders choose a driver by photo, name, plate and rating. A technician gets only visits in their trades.</p>
-        <label for="drvRole">Role</label>
-        <select id="drvRole"><option value="driver" ${d.role !== 'technician' ? 'selected' : ''}>Driver (rides, deliveries, parcels)</option>
-          <option value="technician" ${d.role === 'technician' ? 'selected' : ''}>Technician (Farsamo visits)</option></select>
-        <label>Trades (technicians)</label><div id="drvTrades" class="chips" style="flex-wrap:wrap;"></div>
-        <label for="drvPlate">Plate</label><input id="drvPlate" value="${escapeHtml(d.plate || '')}" maxlength="16" placeholder="BAJ 123" />
-        <button class="secondary" id="drvProfileSave" type="button">Save</button>
-        <label for="drvPhoto">Photo (JPEG, PNG or WebP — a clear face)</label><input id="drvPhoto" type="file" accept="image/jpeg,image/png,image/webp" />
-      </div>` : ''}
+      </dl></div>
       ${me?.is_admin ? `<div class="dsec"><h4>Vehicle</h4>
         <p class="muted" style="margin:0 0 8px;">Rides go to a driver with the vehicle the rider chose. Motorbikes get deliveries only.</p>
         <select id="drvVehicle">${['bajaj', 'car', 'moto'].map((v) => `<option value="${v}" ${d.vehicle === v ? 'selected' : ''}>${VEHICLE_ICON[v]} ${v}</option>`).join('')}</select>
@@ -818,41 +785,6 @@ function openDriver(id) {
     await loadDrivers();
     openDriver(id);
   });
-  if (d.has_photo) {
-    fetch(GMConfig.api(`/drivers/${d.id}/photo`), { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => (r.ok ? r.blob() : null)).then((b) => {
-        if (!b || !$('drvPhotoBox')) return;
-        const img = document.createElement('img');
-        img.src = URL.createObjectURL(b);
-        img.alt = d.name;
-        $('drvPhotoBox').replaceChildren(img);
-      }).catch(() => {});
-  }
-  if ($('drvTrades')) {
-    api('/operator/trades').then((r) => {
-      const on = new Set(d.trades || []);
-      $('drvTrades').innerHTML = (r.trades || []).map((tr) => `<button class="chip" type="button" data-trade="${escapeHtml(tr.slug)}" aria-pressed="${on.has(tr.slug)}">${escapeHtml(tr.icon)} ${escapeHtml(tr.name_en)}</button>`).join('');
-      $('drvTrades').querySelectorAll('[data-trade]').forEach((b) => b.addEventListener('click', () => b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true'))));
-    });
-    $('drvProfileSave').addEventListener('click', async () => {
-      const trades = [...$('drvTrades').querySelectorAll('[aria-pressed="true"]')].map((b) => b.dataset.trade);
-      const out = await api(`/operator/drivers/${d.id}/profile`, { method: 'POST', body: JSON.stringify({ role: $('drvRole').value, trades, plate: $('drvPlate').value }) });
-      if (out.error) return toast(out.error);
-      toast('Saved ✓ — recorded in the audit log');
-      await loadDrivers();
-      openDriver(id);
-      return null;
-    });
-    $('drvPhoto').addEventListener('change', async () => {
-      const file = $('drvPhoto').files[0];
-      if (!file) return;
-      const out = await api(`/operator/drivers/${d.id}/photo`, { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
-      if (out.error) return toast(out.error);
-      toast('Photo saved ✓');
-      await loadDrivers();
-      openDriver(id);
-    });
-  }
   const veh = $('drvVehicleSave');
   if (veh) veh.addEventListener('click', async () => {
     const out = await api(`/operator/drivers/${d.id}/vehicle`, { method: 'POST', body: JSON.stringify({ vehicle: $('drvVehicle').value }) });
@@ -961,31 +893,22 @@ async function loadCatalogAdmin() {
   const res = await api('/operator/catalog');
   if (res.error) return toast(res.error);
   catalogData = res;
-  const [tr, st] = await Promise.all([api('/operator/trades'), stockImages ? null : api('/operator/stock-images')]);
-  catalogData.trades = tr.trades || [];
-  if (st) stockImages = st.images || [];
   renderCatalogList();
 }
 function renderCatalogList() {
   const off = (x) => (x.active === false ? ' <span class="badge">hidden</span>' : '');
   const cats = catalogData.categories.map((c) => `
-    <div class="group-head">${escapeHtml(c.icon || '')} ${escapeHtml(c.name_en)} · ${c.items.length} · <span class="muted">${escapeHtml(SERVICE_NAME[c.service] || c.service)} tile</span></div>
+    <div class="group-head">${escapeHtml(c.icon || '')} ${escapeHtml(c.name_en)} · ${c.items.length}</div>
     <button class="lrow" type="button" data-cat="${c.id}"><span class="l1"><span class="t">Category: ${escapeHtml(c.name_en)} / ${escapeHtml(c.name_so)}</span>${off(c)}</span></button>
     ${c.items.map((i) => `<button class="lrow" type="button" data-item="${i.id}">
-      <span class="l1">${i.image_url ? `<img class="op-thumb" src="${escapeHtml(i.image_url)}" alt="" loading="lazy" />` : '<span class="op-thumb">·</span>'}<span class="t">${escapeHtml(i.name_en)}</span>${off(i)}</span>
+      <span class="l1"><span class="t">${escapeHtml(i.name_en)}</span>${off(i)}</span>
       <span class="l2">${escapeHtml(i.name_so)} · ${escapeHtml(i.unit_en || '')}</span>
       <span class="side"><span class="amt">${money(i.price)}</span></span></button>`).join('')}`).join('');
   const places = `<div class="group-head">Places · ${catalogData.places.length}</div>${catalogData.places.map((p) => `
     <button class="lrow" type="button" data-place="${p.id}">
       <span class="l1"><span class="t">${escapeHtml(p.name_en)}</span>${off(p)}</span>
       <span class="l2">${escapeHtml(p.kind)} · ${escapeHtml(p.city)} · ${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}</span></button>`).join('')}`;
-  const trades = `<div class="group-head">Farsamo trades · ${(catalogData.trades || []).length}</div>${(catalogData.trades || []).map((tr) => `
-    <button class="lrow" type="button" data-trade="${tr.id}">
-      <span class="l1"><span>${escapeHtml(tr.icon)}</span><span class="t">${escapeHtml(tr.name_en)}</span>${off(tr)}</span>
-      <span class="l2">${escapeHtml(tr.name_so)} · ${escapeHtml(tr.slug)}</span>
-      <span class="side"><span class="amt">${money(tr.visit_fee)}</span></span></button>`).join('')}`;
-  $('catalogList').innerHTML = cats + trades + places;
-  $('catalogList').querySelectorAll('[data-trade]').forEach((b) => b.addEventListener('click', () => editTrade(Number(b.dataset.trade))));
+  $('catalogList').innerHTML = cats + places;
   $('catalogList').querySelectorAll('[data-item]').forEach((b) => b.addEventListener('click', () => editItem(Number(b.dataset.item))));
   $('catalogList').querySelectorAll('[data-cat]').forEach((b) => b.addEventListener('click', () => editCategory(Number(b.dataset.cat))));
   $('catalogList').querySelectorAll('[data-place]').forEach((b) => b.addEventListener('click', () => editPlace(Number(b.dataset.place))));
@@ -1022,60 +945,16 @@ function editItem(id) {
     ${field('cNameEn', 'Name (English)', i?.name_en)}${field('cNameSo', 'Name (Somali — plain words)', i?.name_so)}
     ${field('cUnitEn', 'Unit (English, e.g. 5 kg)', i?.unit_en)}${field('cUnitSo', 'Unit (Somali)', i?.unit_so)}
     ${field('cPrice', 'Price (USD) — what the customer pays for one', i ? Number(i.price).toFixed(2) : '', 'type="number" step="0.01" min="0.01"')}
-    ${field('cDescEn', 'One line about it (English, optional)', i?.description_en)}${field('cDescSo', 'One line (Somali, optional)', i?.description_so)}
     ${field('cSort', 'Order in the list', i?.sort ?? 0, 'type="number" min="0"')}
     ${activeBox(i?.active)}
-    <label>Picture</label>
-    <div class="op-pic">${i?.image_url ? `<img src="${escapeHtml(i.image_url)}" alt="" />` : '<span class="muted">No picture — the app shows the category icon.</span>'}</div>
-    ${me?.is_admin ? `<details class="bare"><summary class="muted">Choose a stock picture (licence-free)</summary>
-      <div class="stock-grid" id="stockGrid">${(stockImages || []).map((st) => `<button type="button" class="stock" data-img="${escapeHtml(st.image)}" aria-pressed="${i?.image === st.image}"><img src="${escapeHtml(st.url)}" alt="" loading="lazy" /></button>`).join('')}</div></details>
-      ${i ? '<label for="cUpload">…or upload this item\'s own photo</label><input id="cUpload" type="file" accept="image/jpeg,image/png,image/webp" />' : ''}
-      ${i?.image ? '<button class="linkbtn" id="cNoPic" type="button">Remove the picture</button>' : ''}` : ''}
     <p class="muted" style="margin:8px 0 0;">A price change applies to new carts only; placed orders keep the price they were bought at.</p>`,
   () => {
     const body = {
       category_id: Number($('cCat').value), name_en: val('cNameEn'), name_so: val('cNameSo'),
       unit_en: val('cUnitEn'), unit_so: val('cUnitSo'), price: Number($('cPrice').value), sort: Number($('cSort').value || 0),
-      description_en: val('cDescEn'), description_so: val('cDescSo'), active: $('cActive').checked,
+      active: $('cActive').checked,
     };
-    if (pickedImage !== undefined) body.image = pickedImage;
     return i ? send('PATCH', `/operator/catalog/items/${i.id}`, body) : send('POST', '/operator/catalog/items', body);
-  });
-  pickedImage = undefined;
-  document.querySelectorAll('#stockGrid [data-img]').forEach((b) => b.addEventListener('click', () => {
-    document.querySelectorAll('#stockGrid [data-img]').forEach((x) => x.setAttribute('aria-pressed', 'false'));
-    b.setAttribute('aria-pressed', 'true');
-    pickedImage = b.dataset.img;
-  }));
-  const noPic = $('cNoPic');
-  if (noPic) noPic.addEventListener('click', () => { pickedImage = null; toast('Save to remove the picture.'); });
-  const up = $('cUpload');
-  if (up) up.addEventListener('change', async () => {
-    const file = up.files[0];
-    if (!file) return;
-    const out = await api(`/operator/catalog/items/${i.id}/image`, { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
-    if (out.error) return toast(out.error);
-    toast('Picture saved ✓ — recorded in the audit log');
-    await loadCatalogAdmin();
-    editItem(i.id);
-  });
-}
-let pickedImage;
-let stockImages = null;
-const SERVICE_NAME = { food: 'Food', grocery: 'Groceries', pharmacy: 'Pharmacy', water: 'Water', shop: 'Household' };
-function editTrade(id) {
-  const tr = id ? (catalogData.trades || []).find((x) => x.id === id) : null;
-  catalogPane(tr ? escapeHtml(tr.name_en) : 'New trade', `
-    ${tr ? '' : field('cSlug', 'Code (lowercase, e.g. plumber — never changes)', '')}
-    ${field('cNameEn', 'Name (English)', tr?.name_en)}${field('cNameSo', 'Name (Somali)', tr?.name_so)}
-    ${field('cIcon', 'Icon (one emoji)', tr?.icon, 'maxlength="8"')}
-    ${field('cFee', 'Visit fee (USD) — paid upfront; more work is quoted in the app', tr ? Number(tr.visit_fee).toFixed(2) : '', 'type="number" step="0.01" min="0.01"')}
-    ${field('cSort', 'Order', tr?.sort ?? 0, 'type="number" min="0"')}
-    ${activeBox(tr?.active)}`,
-  () => {
-    const body = { name_en: val('cNameEn'), name_so: val('cNameSo'), icon: val('cIcon'), visit_fee: Number($('cFee').value), sort: Number($('cSort').value || 0), active: $('cActive').checked };
-    if (!tr) body.slug = val('cSlug');
-    return tr ? send('PATCH', `/operator/trades/${tr.id}`, body) : send('POST', '/operator/trades', body);
   });
 }
 function editCategory(id) {
@@ -1083,10 +962,9 @@ function editCategory(id) {
   catalogPane(c ? escapeHtml(c.name_en) : 'New category', `
     ${field('cNameEn', 'Name (English)', c?.name_en)}${field('cNameSo', 'Name (Somali)', c?.name_so)}
     ${field('cIcon', 'Icon (one emoji)', c?.icon, 'maxlength="8"')}${field('cSort', 'Order', c?.sort ?? 0, 'type="number" min="0"')}
-    <label for="cService">Home tile</label><select id="cService" ${me?.is_admin ? '' : 'disabled'}>${Object.entries(SERVICE_NAME).map(([k, n]) => `<option value="${k}" ${(c?.service || 'shop') === k ? 'selected' : ''}>${n}</option>`).join('')}</select>
     ${activeBox(c?.active)}`,
   () => {
-    const body = { name_en: val('cNameEn'), name_so: val('cNameSo'), icon: val('cIcon'), service: $('cService').value, sort: Number($('cSort').value || 0), active: $('cActive').checked };
+    const body = { name_en: val('cNameEn'), name_so: val('cNameSo'), icon: val('cIcon'), sort: Number($('cSort').value || 0), active: $('cActive').checked };
     return c ? send('PATCH', `/operator/catalog/categories/${c.id}`, body) : send('POST', '/operator/catalog/categories', body);
   });
 }
@@ -1122,7 +1000,6 @@ function editPlace(id) {
 $('newItemBtn').addEventListener('click', () => editItem(null));
 $('newCatBtn').addEventListener('click', () => editCategory(null));
 $('newPlaceBtn').addEventListener('click', () => editPlace(null));
-$('newTradeBtn').addEventListener('click', () => editTrade(null));
 
 // ═══════════════ Bug reports ═══════════════
 // From Help -> Report a problem (the team bug tracker, adapted). Every status change and note is

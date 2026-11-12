@@ -96,7 +96,7 @@ async function customerSignsInByCode(page, email) {
 // From the catalog: two items, plus a custom line with a budget and a photo. The server prices it.
 async function placeOrder(page, { what, amount, landmark, phoneNo }) {
   await page.click('.tabbar [data-tab="home"]');
-  await page.click('#svcGrid [data-svc="grocery"]');
+  await page.click('#goShop');
   await page.locator('#catItems .step-add').first().click();
   await page.locator('#catItems .step-add').first().click();
   await page.click('#cartOpen');
@@ -197,21 +197,21 @@ const rider = await device('phone', { permissions: ['geolocation'], geolocation:
 await emailOnly(rider.page);
 await customerSignsUp(rider.page, `sim-ride-${stamp}@example.com`);
 await step(rider.page, 'Rider', 'Opens the app', 'Home: “Ride” first, then “Food & shopping”', async () => {
-  must(await rider.page.isVisible('#svcGrid [data-svc="bajaj"]') && await rider.page.isVisible('#svcGrid [data-svc="grocery"]'), 'services missing');
+  must(await rider.page.isVisible('#goRide') && await rider.page.isVisible('#goShop'), 'services missing');
 });
-await rider.page.click('#svcGrid [data-svc="taxi"]');
+await rider.page.click('#goRide');
 await step(rider.page, 'Rider', 'Taps Ride', 'The map finds them: pickup “My location (±… m)”', async () => {
   await waitText(rider.page.locator('#pickupText'), /My location/);
 });
 await step(rider.page, 'Rider', 'Searches “Airport” and picks it', 'Fares for bajaj and car, with time, distance and drivers nearby', async () => {
   await rider.page.fill('#placeSearch', 'Airport');
   await rider.page.locator('#placeResults .place-result').first().click();
-  await waitText(rider.page.locator('#rideOptions'), /Taxi/);
-  await waitText(rider.page.locator('#rideOptions .ride-option', { hasText: 'Taxi' }), /1 nearby/);
+  await waitText(rider.page.locator('#rideOptions'), /Car/);
+  await waitText(rider.page.locator('#rideOptions .ride-option', { hasText: 'Car' }), /1 nearby/);
 });
 let R;
 await step(rider.page, 'Rider', 'Chooses Car and books', 'Tracking screen “Awaiting payment”, with the route on the map', async () => {
-  await rider.page.locator('#rideOptions .ride-option', { hasText: 'Taxi' }).click();
+  await rider.page.locator('#rideOptions .ride-option', { hasText: 'Car' }).click();
   await rider.page.fill('#ridePhone', '612345678');
   await rider.page.click('#rideBook');
   await rider.page.waitForSelector('#orderView', { state: 'visible' });
@@ -275,9 +275,7 @@ await step(cust.page, 'Customer', 'Taps “Create account” (email-only server)
 const email = `sim-${stamp}@example.com`;
 await customerSignsUp(cust.page, email);
 await step(cust.page, 'Customer', `Creates an account with ${email} and a password`, 'Lands on Home, signed in — no email had to arrive', async () => {
-  await cust.page.click('.tabbar [data-tab="account"]');
-  await waitText(cust.page.locator('#acctLogin'), new RegExp(email));
-  await cust.page.click('.tabbar [data-tab="home"]');
+  await waitText(cust.page.locator('#signedInAs'), new RegExp(email));
 });
 let A;
 await step(cust.page, 'Customer', 'Writes the list, sets GPS location, adds a photo and landmark, places the order', 'Tracking screen: “Awaiting payment”, a pay card', async () => {

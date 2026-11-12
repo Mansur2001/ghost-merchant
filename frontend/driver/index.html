@@ -98,8 +98,6 @@
             <button class="small secondary" id="pushToggle" type="button" data-i18n="push.jobs">Notify me of new jobs</button>
           </div>
         </div>
-        <!-- A rider chose this driver: take it within 30 s, or it goes to the nearest. -->
-        <div id="offers"></div>
         <div class="kpis" style="grid-template-columns:1fr 1fr;">
           <div class="kpi gold"><div class="k-label" data-i18n="drv.toPick">To pick up</div><div class="k-value" id="countPick">0</div></div>
           <div class="kpi"><div class="k-label" data-i18n="drv.toDeliver">To deliver</div><div class="k-value" id="countDeliver">0</div></div>
@@ -117,9 +115,9 @@
           <h2><span data-i18n="order.num">Order #</span><span class="mono" id="dOrderId"></span></h2>
         </div>
         <div class="stepper" id="stepper">
-          <div class="st" id="stepPick"><i>1</i><span id="stepPickLabel" data-i18n="drv.step.pickup">Pick up</span></div>
+          <div class="st" id="stepPick"><i>1</i><span data-i18n="drv.step.pickup">Pick up</span></div>
           <div class="bar"></div>
-          <div class="st" id="stepDeliver"><i>2</i><span id="stepDeliverLabel" data-i18n="drv.step.deliver">Deliver</span></div>
+          <div class="st" id="stepDeliver"><i>2</i><span data-i18n="drv.step.deliver">Deliver</span></div>
         </div>
 
         <div class="map-card">
@@ -146,30 +144,6 @@
             <span class="muted" data-i18n="drv.ride.fare">Fare (paid)</span>
             <strong class="mono">$<span id="dFare"></span></strong>
           </div>
-        </div>
-
-        <!-- A parcel's contents and receiver, or the problem a technician is called for. -->
-        <div class="card hidden" id="jobCard">
-          <div class="section-title" id="jobTitle"></div>
-          <div style="font-weight:600;" id="jobDetails"></div>
-          <div class="between hidden" id="recipientRow" style="margin-top:10px;">
-            <span class="muted" data-i18n="drv.parcel.receiver">Receiver</span>
-            <a class="btn secondary small" id="recipientCall" href="#"><span data-i18n="drv.callShort">Call</span></a>
-          </div>
-          <div class="between" style="margin-top:12px;">
-            <span class="muted" data-i18n="drv.paid">Customer paid</span>
-            <strong class="mono">$<span id="jobPaid"></span></strong>
-          </div>
-          <div class="photos" id="jobPhotos" style="margin-top:12px;"></div>
-        </div>
-
-        <!-- A technician on site: quote extra work. The customer pays it in the app. -->
-        <div class="card hidden" id="extraCard">
-          <div class="section-title" data-i18n="drv.extra.title">More work needed?</div>
-          <p class="muted" style="margin:0 0 8px;" data-i18n="drv.extra.help">Send a price. The customer pays it in the app before you do it. Never take cash.</p>
-          <input id="extraDesc" type="text" maxlength="500" data-i18n-ph="drv.extra.desc" placeholder="New tap and fitting" />
-          <input id="extraAmount" type="number" inputmode="decimal" step="0.5" min="0.5" max="500" style="margin-top:8px;" data-i18n-ph="drv.extra.amount" placeholder="Price in USD" />
-          <button class="secondary" id="extraSend" type="button" data-i18n="drv.extra.send">Send price to customer</button>
         </div>
 
         <div class="card" id="shopCard">

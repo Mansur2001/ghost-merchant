@@ -1,7 +1,7 @@
 // The help chat answers from the FAQ (and a hosted model when a key is set — not on staging),
 // in the customer's language, and "Talk to a person" goes to the order chat.
 import { test, expect } from '@playwright/test';
-import { openApp, signInCustomer, somaliNumber, CUSTOMER_PHONE, placeDelivery, openHelp } from './helpers.js';
+import { openApp, signInCustomer, somaliNumber, CUSTOMER_PHONE, placeDelivery } from './helpers.js';
 
 test('help chat answers from the FAQ, in Somali too, and hands an order to a person', async ({ browser }, testInfo) => {
   const page = await openApp(browser, testInfo, CUSTOMER_PHONE);
@@ -32,7 +32,7 @@ test('help chat answers from the FAQ, in Somali too, and hands an order to a per
   await expect(page.locator('#chatLauncher')).toHaveAttribute('aria-expanded', 'false');
 
   // The Help tab keeps the FAQ and opens the same chat; the conversation is still there.
-  await openHelp(page);
+  await page.click('.tabbar [data-tab="help"]');
   await page.click('#openChat');
   await expect(page.locator('#helpThread')).toContainText('tap your wallet');
   await page.click('#langToggle');
@@ -46,7 +46,7 @@ test('help chat answers from the FAQ, in Somali too, and hands an order to a per
   // From an order: the chat knows which one, and a person means the order's own chat.
   await page.click('.tabbar [data-tab="home"]');
   // Screens with their own bottom button don't get the launcher over it.
-  await page.click('#svcGrid [data-svc="bajaj"]');
+  await page.click('#goRide');
   await expect(page.locator('#chatLauncher')).toBeHidden();
   await page.click('#rideBack');
   const { orderId } = await placeDelivery(page, { n: 1 });

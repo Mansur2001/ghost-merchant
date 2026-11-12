@@ -6,10 +6,9 @@ import { openApp, signInCustomer, somaliNumber, CUSTOMER_PHONE, placeDelivery } 
 test('top up the wallet, then pay an order from it', async ({ browser }, testInfo) => {
   const page = await openApp(browser, testInfo, CUSTOMER_PHONE);
   await signInCustomer(page, somaliNumber());
-  await page.click('.tabbar [data-tab="wallet"]');
-  await expect(page.locator('#walletView')).toBeVisible();
+  await page.click('.tabbar [data-tab="account"]');
+  await expect(page.locator('#walletCard')).toBeVisible();
   await expect(page.locator('#walletBalance')).toHaveText('0.00');
-  await page.click('#walletTopupBtn');
   await page.fill('#topupAmount', '25');
   await page.fill('#topupPhone', '901234567');
   await page.locator('#topupButtons button', { hasText: 'Sahal' }).click();
@@ -22,7 +21,7 @@ test('top up the wallet, then pay an order from it', async ({ browser }, testInf
   await expect(page.locator('#walletPayBtn')).toContainText(`Pay $${total} from wallet`);
   await page.click('#walletPayBtn');
   await expect(page.locator('#statusBadge')).not.toHaveText('Awaiting payment');
-  await page.click('.tabbar [data-tab="wallet"]');
+  await page.click('.tabbar [data-tab="account"]');
   await expect(page.locator('#walletBalance')).toHaveText((25 - Number(total)).toFixed(2));
   await expect(page.locator('#walletHistory')).toContainText('Paid an order');
 });

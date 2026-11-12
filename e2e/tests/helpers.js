@@ -38,7 +38,7 @@ export const CUSTOMER_PHONE = { permissions: ['geolocation'], geolocation: { lat
 // Shop: add the first `n` items of the first category, open the cart, set the door by GPS,
 // and place the order. Returns { orderId, total }.
 export async function placeDelivery(page, { n = 2, custom = null, landmark = 'Staging landmark — green gate', photo = null, phone = null } = {}) {
-  await page.click('#svcGrid [data-svc="grocery"]');
+  await page.click('#goShop');
   for (let i = 0; i < n; i += 1) {
     // eslint-disable-next-line no-await-in-loop
     await page.locator('#catItems .step-add').first().click();
@@ -101,21 +101,6 @@ export async function signInCustomer(page, national, country = 'SO') {
   await page.fill('#codeInput', code);
   await page.click('#verifyBtn');
   await expect(page.locator('#homeView')).toBeVisible();
-}
-
-// Help and FAQ live under Profile in the new layout.
-export async function openHelp(page) {
-  await page.click('.tabbar [data-tab="home"]');
-  if (await page.locator('#landingHelp').isVisible()) await page.click('#landingHelp');
-  else { await page.click('.tabbar [data-tab="account"]'); await page.click('#menuHelp'); }
-  await expect(page.locator('#faqView')).toBeVisible();
-}
-
-// Who is signed in: shown on the Profile tab.
-export async function expectSignedInAs(page, text, { exact = true } = {}) {
-  await page.click('.tabbar [data-tab="account"]');
-  const el = page.locator('#acctLogin');
-  if (exact) await expect(el).toHaveText(text); else await expect(el).toContainText(text);
 }
 
 export async function signInOperator(page, { username, password }) {

@@ -210,7 +210,7 @@ customer wallet exists but is OFF by default (invariant 6).
 - **Maps**: Leaflet + protomaps-leaflet (vendored in `frontend/shared/vendor/`), street data
   from ONE self-hosted file `tiles/somalia.pmtiles` (`scripts/fetch-map-tiles.sh`), served by
   Caddy with range requests. No tile vendor, no key. Without the file: a plain grid with pins.
-  **Street level only** (`map.js` `MIN_ZOOM` = 13, owner's call 2026-11-11): no map zooms out
+  **Street level only** (`map.js` `minZoom: 13`, owner's call 2026-11-11): no map zooms out
   to the country's outline; a long trip's fit stops at that zoom.
   Customer location = GPS watched for the best fix, shown with its accuracy, then a draggable
   pin or a place search. **A fix outside Somalia is never used for a booking point**
@@ -285,7 +285,7 @@ customer wallet exists but is OFF by default (invariant 6).
   live answer and, on a bad model name, the models the key can use. Open to everyone, signed
   in or not (`POST /assistant` is public, 30 per 10 min per account or per IP; an `orderId`
   needs that order's owner signed in). UI: the standard support
-  widget — a corner launcher that is just the AI Caawiye robot logo (no bubble, owner's call 2026-11-12), a collapsible panel (bottom sheet on a phone), hidden on screens
+  widget — a corner launcher, a collapsible panel (bottom sheet on a phone), hidden on screens
   with their own bottom button (ride booking, cart, checkout, parcel, visit). It has NO tools and can't act (a draft is a button the customer taps); it sees an order STATE, never phone/place/code; nothing
   typed is stored; "Talk to a person" = the order chat. Self-hosting on the VPS CPU was tried
   (45–70 s per answer) and dropped — the owner chose a hosted model, not the VPS. This is the
@@ -653,28 +653,15 @@ Three photo types, stored in MinIO and indexed in `order_photos`:
 framework-free to respect the SRS data budget (initial load < 1.5MB). Each PWA has a Service
 Worker that cache-first serves its shell.
 
-- **User** (the stakeholder mockup, 2026-11-11 — `features.js` on top of `app.js`; classic
-  scripts share top-level names, so `app.js` calls `renderHome`, `renderSteps5`… defined there,
-  guarded where it runs before `features.js` loads): tabs **Home / Orders / Tracking / Wallet /
-  Profile** (Help and FAQ live under Profile, the AI widget everywhere). Home: city picker
-  (`shared/cities.js`, `gm_city`, never sent to the server — it only centres maps), the bell,
-  "Hello Mudane & Marwo", the banner, search (services + catalog, Enter asks AI), the eight
-  tiles (Bajaj, Taxi, Cunto, Raashin, Farmashiye, Farsamo, Biyo, Delivery), a live
-  "nearest bajaj N min" strip, the free-delivery strip, AI Caawiye card. Shops are picture
-  cards by tile; the ride screen has "Dooro Bajaaj" (choose your driver) and the payment row
-  (wallet or mobile money; wallet pays at once after booking when it covers the fare); tracking
-  has the five steps (La xaqiijiyay → Diyaarin → Socda → Isku dhow (<500 m) → La gaarsiiyay), a
-  live ETA, the driver card (photo, ★, vehicle, plate, chat), the offer countdown, extra work,
-  the rating, and Share (words only — tracking needs the account, so no link). The design
-  never shows a "1–2 minutes" promise: ETAs are the route's (owner's call). **Call button**
-  (owner's call, 2026-11-12): the driver card's phone comes from `GET /orders/:id/driver` only
-  while the job is DISPATCHED/IN_TRANSIT — never during the offer, after it ends, or in the
-  list of drivers to choose from.
-  Light theme by default, brand yellow `#ffc20e` (`--gold-ink` for yellow text on white).
-  One icon per vehicle everywhere (🛺 bajaj, 🚕 car): tracking's moving step shows the ride's
-  vehicle, or the assigned driver's (🛵 before one has the job). No drawn driver illustration
-  (owner removed it).
-- **User (sign-in and lists)**: **Create account** or **Sign in** (landing buttons + a switch on the auth screen).
+- **UI rolled back (owner, 2026-11-12).** The mockup redesign of all three apps (2026-11-11)
+  was reverted to the 2026-11-10 look; it lives in git (`25d6176`..`27119ae`, e.g.
+  `features.js`, `operator/extras.js`). The SERVER keeps everything it built (choose-driver
+  offers, parcels, Farsamo, ratings, suggestions, free delivery, inbox, AI drafts, top-up
+  claims) — those have no screens until a new design is agreed. Kept on the old look:
+  maps street level only (`map.js` `minZoom: 13`), the **call button** in the tracking strip
+  (`loadDriverCall`: `GET /orders/:id/driver` sends `phone` only while DISPATCHED/IN_TRANSIT),
+  and place search nearest-first from the map in use (places exist in 8 cities now).
+- **User**: **Create account** or **Sign in** (landing buttons + a switch on the auth screen).
   Both are the same email code — the first verified code creates the account — the switch only
   changes the words, because people look for "sign up". Checkout asks for the phone the driver calls
   (filled with the last one used, `gm_contact`). Session token in `localStorage`
@@ -685,11 +672,7 @@ Worker that cache-first serves its shell.
   live map; Account has notifications and (when on) the wallet. Deep links `/?order=<id>` and
   `/?wallet=1` come from tapped notifications. Order lists cut long text with "…" inside the
   card (`.tile-sub` must be `display: block` for the ellipsis to apply).
-- **Driver** (also technicians — `role` decides the words and the jobs): ride offers at the
-  top of the job list with a 30 s countdown (Accept / Decline, buzz); a parcel shows its
-  contents and a call link to the receiver; a visit shows the problem, "Start the job" (photo)
-  / "Job done" (code), and a form to quote extra work.
-  PIN login → token in `sessionStorage` (`driverToken`); the socket authenticates
+- **Driver**: PIN login → token in `sessionStorage` (`driverToken`); the socket authenticates
   then joins `subscribe_driver` (its own feed, not the operator firehose). Queue shows **only
   orders the operator assigned to this driver** — there is no shared self-serve pool. An
   **online switch** (dispatch only picks online drivers; online = sharing position), a job map,
@@ -697,10 +680,6 @@ Worker that cache-first serves its shell.
   new-job buzz, `/driver/?job=<id>` deep link. Order detail can capture a delivery-proof photo.
 - **Operator**: password → token in `sessionStorage` (`opToken`). Confirms payments (while in
   operator mode), watches dispatch happen, checks flagged deliveries, chats. No driver picker.
-  `extras.js` adds **Suggestions** (review; admins price and publish), **Top-ups** (confirm a
-  USSD wallet top-up with the merchant phone's reference) and **Promo** (free delivery, admin).
-  Drivers: role/trades/plate/photo (admin) and ratings. Catalog: home tile per category, a
-  stock-picture picker or an upload per item, Farsamo trades and their fees.
   A Drivers panel lists the roster with live workload stats, online state and vehicle (admins
   set it); **Live map**; **Catalog & places** (admins edit, audited); wallet withdrawals sit in
   Refunds (admins). English only.
@@ -870,6 +849,8 @@ suggestions, free delivery, the inbox, AI drafts, and the wallet switched ON (li
 top-ups over USSD confirmed by the desk until WaafiPay has keys). **Deployed to production
 2026-11-12** (`33e50eb`; rollback: image `gurikaabe-backend:pre-full-app-ffd32ce` +
 `/root/backups/db-2026-11-12-0418-pre-full-app.sql.gz`).
+The redesigned UI was **rolled back** the same day (owner): the server features stay, the
+apps are the 2026-11-10 look (see *Frontend*).
 The Android app builds and installs (`0.3.0`, versionCode 7, signed; upload key
 `~/gurikaabe-release.jks`); build 7 predates the chat widget, push and navigation — the next
 upload is build 8.
