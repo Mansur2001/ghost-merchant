@@ -550,7 +550,7 @@
       'err.wdOpen': 'You already have a withdrawal waiting.',
       'help.open': 'Chat with us',
       'help.minimize': 'Minimize',
-      'help.launcher': 'Help chat',
+      'help.launcher': "AI Caawiye",
       'loc.outside': 'Your phone is not in Somalia right now. Tap the map or search a place to set it.',
       'drv.loc.outside': 'Sharing your location. You are outside Somalia, so no rides come to you from here.',
       // Navigation and OpenStreetMap search.
@@ -1409,7 +1409,7 @@
       'err.wdOpen': 'Waxaad haysataa codsi lacag bixis ah oo sugaya.',
       'help.open': 'Nala sheekeyso',
       'help.minimize': 'Yaree',
-      'help.launcher': 'Caawimaad',
+      'help.launcher': "AI Caawiye",
       'loc.outside': 'Taleefankaagu hadda Soomaaliya kuma jiro. Khariidadda riix ama raadi meel si aad u doorato.',
       'drv.loc.outside': 'Goobtaada waa la wadaagayaa. Soomaaliya kuma jirtid, markaa halkan safar kuuma imanayo.',
       // Navigation and OpenStreetMap search.

@@ -285,7 +285,7 @@ customer wallet exists but is OFF by default (invariant 6).
   live answer and, on a bad model name, the models the key can use. Open to everyone, signed
   in or not (`POST /assistant` is public, 30 per 10 min per account or per IP; an `orderId`
   needs that order's owner signed in). UI: the standard support
-  widget — a corner launcher, a collapsible panel (bottom sheet on a phone), hidden on screens
+  widget — a corner launcher that is just the AI Caawiye robot logo (no bubble, owner's call 2026-11-12), a collapsible panel (bottom sheet on a phone), hidden on screens
   with their own bottom button (ride booking, cart, checkout, parcel, visit). It has NO tools and can't act (a draft is a button the customer taps); it sees an order STATE, never phone/place/code; nothing
   typed is stored; "Talk to a person" = the order chat. Self-hosting on the VPS CPU was tried
   (45–70 s per answer) and dropped — the owner chose a hosted model, not the VPS. This is the
