@@ -756,11 +756,10 @@ body.op { height: 100vh; height: 100dvh; overflow: hidden; }
 .greet p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
 .greet .bot { width: 58px; height: 58px; flex: 0 0 auto; margin-left: auto; }
 .banner { position: relative; overflow: hidden; border-radius: 22px; padding: 18px 18px 16px; margin-bottom: 14px;
-  background: linear-gradient(135deg, #ffd23f, #ffc20e 60%, #f5a800); color: #1a1400; min-height: 150px; }
-.banner h3 { font-size: 22px; line-height: 1.15; margin: 0 0 6px; max-width: 58%; }
-.banner p { font-size: 13px; margin: 0 0 12px; max-width: 56%; opacity: .85; }
+  background: linear-gradient(135deg, #ffd23f, #ffc20e 60%, #f5a800); color: #1a1400; }
+.banner h3 { font-size: 22px; line-height: 1.15; margin: 0 0 6px; }
+.banner p { font-size: 13px; margin: 0 0 12px; opacity: .85; }
 .banner button { width: auto; min-height: 40px; margin: 0; padding: 8px 16px; background: #141414; color: #fff; border-radius: 12px; font-size: 14px; }
-.banner .art { position: absolute; right: -6px; bottom: -4px; width: 46%; max-width: 190px; pointer-events: none; }
 .home-search { position: relative; margin-bottom: 14px; }
 .home-search input { padding-left: 42px; padding-right: 46px; border-radius: 16px; background: var(--panel); }
 .home-search .s-ic { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--muted); width: 18px; height: 18px; }
@@ -850,7 +849,6 @@ body.op { height: 100vh; height: 100dvh; overflow: hidden; }
 /* Tracking: the hero, the five steps, the driver. */
 .track-hero { text-align: left; }
 .track-hero .eta { color: var(--gold-ink); font-weight: 800; font-size: 18px; }
-.track-hero .art { display: block; width: 62%; max-width: 230px; margin: 4px auto 0; }
 .steps5 { display: flex; align-items: flex-start; margin: 16px 0 4px; }
 .steps5 .s { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; position: relative; font-size: 11px; color: var(--muted); text-align: center; font-weight: 600; }
 .steps5 .s i { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 15px;

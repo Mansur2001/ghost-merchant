@@ -519,7 +519,8 @@ const pointText = (p) => (p.placeId || p.label ? p.label
 const UNSURE_M = 120;
 
 function vehicleName(v) { return t(`veh.${v}`); }
-const VEHICLE_ICON = { bajaj: '🛺', car: '🚗', moto: '🏍️' };
+// One icon per vehicle everywhere (the Taxi tile is 🚕 too).
+const VEHICLE_ICON = { bajaj: '🛺', car: '🚕', moto: '🏍️' };
 
 // ── Ride booking ──
 const ride = { pickup: null, dropoff: null, picking: 'pickup', vehicle: null, quote: null, map: null, seq: 0 };
@@ -667,7 +668,7 @@ function renderRideOptions() {
     b.type = 'button';
     b.className = 'ride-option';
     b.setAttribute('aria-pressed', o.vehicle === ride.vehicle ? 'true' : 'false');
-    b.innerHTML = `<span class="ro-icon">${VEHICLE_ICON[o.vehicle] || '🚗'}</span>
+    b.innerHTML = `<span class="ro-icon">${VEHICLE_ICON[o.vehicle] || '🚕'}</span>
       <span class="ro-body"><strong></strong><span class="muted ro-sub"></span></span>
       <strong class="mono ro-price">$${Number(o.total).toFixed(2)}</strong>`;
     b.querySelector('strong').textContent = vehicleName(o.vehicle);
@@ -2184,7 +2185,7 @@ function showResumeList(orders) {
   $('resumeList').innerHTML = orders.length
     ? orders.map((o) => `
         <button class="tile" type="button" data-id="${o.id}">
-          <span class="tile-icon">${isRide(o) ? (VEHICLE_ICON[o.vehicle] || '🚗') : ORDER_ICON[o.status] || '•'}</span>
+          <span class="tile-icon">${isRide(o) ? (VEHICLE_ICON[o.vehicle] || '🚕') : ORDER_ICON[o.status] || '•'}</span>
           <span class="tile-body">
             <span class="tile-title">$${Number(o.total_amount).toFixed(2)}
               <span class="badge ${badgeClass(o.status)}">${label(o.status, o)}</span></span>

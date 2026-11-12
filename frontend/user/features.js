@@ -105,7 +105,7 @@ async function renderActiveOrderTile() {
   tile.onclick = () => (live.length === 1 ? resumeOrder(o.id) : openTracking());
   tile.classList.remove('hidden');
 }
-const kindIcon = (o) => (o.kind === 'RIDE' ? (VEHICLE_ICON[o.vehicle] || '🚗') : { PARCEL: '📦', SERVICE: '🛠️' }[o.kind] || '🛍️');
+const kindIcon = (o) => (o.kind === 'RIDE' ? (VEHICLE_ICON[o.vehicle] || '🚕') : { PARCEL: '📦', SERVICE: '🛠️' }[o.kind] || '🛍️');
 
 $('cityBtn').addEventListener('click', () => {
   const list = el('div', 'city-list');
@@ -296,8 +296,16 @@ function renderCartPromo() {
 }
 
 // ══ Tracking: five steps, the ETA, the driver ══
-const STEP_ICON = ['✓', '🛍️', '🛵', '📍', '🏠'];
-const STEP_ICON_KIND = { RIDE: ['✓', '🛺', '🚗', '📍', '🏁'], PARCEL: ['✓', '📦', '🛵', '📍', '🏠'], SERVICE: ['✓', '🛠️', '🔧', '🔧', '✓'] };
+// The moving step shows the vehicle actually coming: the ride's own, or the driver's once one
+// has the job (a bajaj driver used to show as a car on a food order, and the reverse).
+let trackVehicle = null;
+function stepIcons(o) {
+  const veh = VEHICLE_ICON[o.kind === 'RIDE' ? o.vehicle : trackVehicle] || '🛵';
+  if (o.kind === 'RIDE') return ['✓', veh, veh, '📍', '🏁'];
+  if (o.kind === 'PARCEL') return ['✓', '📦', veh, '📍', '🏠'];
+  if (o.kind === 'SERVICE') return ['✓', '🛠️', '🔧', '🔧', '✓'];
+  return ['✓', '🛍️', veh, '📍', '🏠'];
+}
 let trackEta = null; // { minutes, distance, at }
 function stepIndex(status) {
   if (status === 'DELIVERED') return 5;
@@ -307,7 +315,7 @@ function stepIndex(status) {
 function renderSteps5(status) {
   if (!order) return;
   const kind = KIND_KEY[order.kind] || 'delivery';
-  const icons = STEP_ICON_KIND[order.kind] || STEP_ICON;
+  const icons = stepIcons(order);
   const cur = stepIndex(status);
   const fail = status === 'FAILED_REFUND';
   const steps = [0, 1, 2, 3, 4].filter((i) => !(order.kind === 'SERVICE' && i === 3));
@@ -316,8 +324,6 @@ function renderSteps5(status) {
     const cls = fail ? '' : i < cur ? 'done' : i === cur ? 'now' : '';
     return `<div class="s ${cls}"><i>${i < cur && !fail ? '✓' : icons[i]}</i><span>${esc(t(`step.${kind}.${i}`))}</span></div>`;
   }).join('');
-  // The picture fits a delivery; a ride, a parcel and a visit have their own icon instead.
-  $('trackArt').classList.toggle('hidden', !['DELIVERY', 'PARCEL'].includes(order.kind) || ['DELIVERED', 'FAILED_REFUND'].includes(status));
   renderEta(status);
 }
 // Live minutes from the driver's road (app.js showDriver). Before a driver: an estimate from
@@ -367,6 +373,8 @@ function renderDriverCard(d) {
   const offer = d && d.offer && order.status === 'PAID_UNASSIGNED';
   $('offerCard').classList.toggle('hidden', !offer);
   $('driverCard').classList.toggle('hidden', !d || offer || order.status === 'DELIVERED');
+  const veh = d && d.role !== 'technician' ? d.vehicle : null;
+  if (veh !== trackVehicle) { trackVehicle = veh; renderSteps5(order.status); }
   if (!d) return;
   const who = order.kind === 'SERVICE' ? t('drv.technician') : vehicleName(d.vehicle);
   if (offer) {

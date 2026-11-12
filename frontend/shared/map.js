@@ -247,6 +247,8 @@
     if (e) e.classList.toggle('gm-stale', Boolean(stale));
   }
 
+  var MIN_ZOOM = 13;
+
   function create(el, opts) {
     opts = opts || {};
     // The customer's city (shared/cities.js) when one is chosen; Mogadishu otherwise.
@@ -254,7 +256,9 @@
     var map = L.map(el, {
       zoomControl: true,
       attributionControl: false,
-      minZoom: 3,
+      // Street level only (owner's call, 2026-11-11): zoomed out no further than a district,
+      // never the whole country's outline. A wide fit (a long ride) stops here too.
+      minZoom: MIN_ZOOM,
       maxZoom: 19,
       tap: true,
     // Street level, like any maps app: businesses and landmarks are on screen without zooming.

@@ -210,6 +210,8 @@ customer wallet exists but is OFF by default (invariant 6).
 - **Maps**: Leaflet + protomaps-leaflet (vendored in `frontend/shared/vendor/`), street data
   from ONE self-hosted file `tiles/somalia.pmtiles` (`scripts/fetch-map-tiles.sh`), served by
   Caddy with range requests. No tile vendor, no key. Without the file: a plain grid with pins.
+  **Street level only** (`map.js` `MIN_ZOOM` = 13, owner's call 2026-11-11): no map zooms out
+  to the country's outline; a long trip's fit stops at that zoom.
   Customer location = GPS watched for the best fix, shown with its accuracy, then a draggable
   pin or a place search. **A fix outside Somalia is never used for a booking point**
   (`GMMap.inArea`): the map stays on Mogadishu and asks for the point — testers abroad (Seattle)
@@ -667,6 +669,9 @@ Worker that cache-first serves its shell.
   never shows a "1–2 minutes" promise: ETAs are the route's (owner's call). No call button to
   the driver: customers don't get drivers' numbers (the strip and card show no phone).
   Light theme by default, brand yellow `#ffc20e` (`--gold-ink` for yellow text on white).
+  One icon per vehicle everywhere (🛺 bajaj, 🚕 car): tracking's moving step shows the ride's
+  vehicle, or the assigned driver's (🛵 before one has the job). No drawn driver illustration
+  (owner removed it).
 - **User (sign-in and lists)**: **Create account** or **Sign in** (landing buttons + a switch on the auth screen).
   Both are the same email code — the first verified code creates the account — the switch only
   changes the words, because people look for "sign up". Checkout asks for the phone the driver calls

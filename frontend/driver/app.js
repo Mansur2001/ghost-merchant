@@ -19,7 +19,8 @@ const label = (s, o = current) => {
   const key = `drv.st.${k}.${s}`;
   return k && t(key) !== key ? t(key) : t(`drv.st.${s}`);
 };
-const JOB_ICON = { RIDE: '🛺', PARCEL: '📦', SERVICE: '🛠️' };
+const JOB_ICON = { PARCEL: '📦', SERVICE: '🛠️' };
+const RIDE_ICON = { bajaj: '🛺', car: '🚕', moto: '🏍️' };
 const STATUS_KIND = {
   PAID_UNASSIGNED: 'ok', DISPATCHED: 'info', IN_TRANSIT: 'info',
   DELIVERED: 'ok', FAILED_REFUND: 'down',
@@ -244,7 +245,7 @@ async function loadQueue() {
   $('queue').innerHTML = orders.length
     ? orders.map((o) => `
       <button class="tile" type="button" data-id="${o.id}">
-        <span class="tile-icon">${JOB_ICON[o.kind] || (o.status === 'IN_TRANSIT' ? '🛵' : '🛍️')}</span>
+        <span class="tile-icon">${o.kind === 'RIDE' ? RIDE_ICON[o.vehicle] || '🚕' : JOB_ICON[o.kind] || (o.status === 'IN_TRANSIT' ? '🛵' : '🛍️')}</span>
         <span class="tile-body">
           <span class="tile-title"><span class="t-text">${esc(o.landmark_text || t('drv.noLandmark'))}</span></span>
           <span class="tile-sub">${esc(o.kind === 'RIDE' ? t('drv.ride.tile', { p: o.pickup_text || '' }) : o.details || (o.items || []).map((i) => i.text).filter(Boolean).join(', '))}</span>
